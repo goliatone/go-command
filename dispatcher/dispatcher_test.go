@@ -17,17 +17,17 @@ import (
 )
 
 // Test Events
-type CreateUserEvent struct {
+type CreateUserMessage struct {
 	Email string
 }
 
-func (e CreateUserEvent) Type() string { return "user.create" }
+func (e CreateUserMessage) Type() string { return "user.create" }
 
-type GetUserEvent struct {
+type GetUserMessage struct {
 	ID string
 }
 
-func (e GetUserEvent) Type() string { return "user.get" }
+func (e GetUserMessage) Type() string { return "user.get" }
 
 type User struct {
 	ID    string
@@ -54,7 +54,7 @@ type CreateUserHandler struct {
 	generateID func() string
 }
 
-func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserEvent) error {
+func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserMessage) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -76,7 +76,7 @@ type GetUserHandler struct {
 	db *mockDB
 }
 
-func (h *GetUserHandler) Query(ctx context.Context, event GetUserEvent) (*User, error) {
+func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -99,7 +99,7 @@ func TestCommandDispatcher(t *testing.T) {
 
 		SubscribeCommand(handler)
 
-		err := Dispatch(context.Background(), CreateUserEvent{
+		err := Dispatch(context.Background(), CreateUserMessage{
 			Email: "test@example.com",
 		})
 
@@ -115,7 +115,7 @@ func TestCommandDispatcher(t *testing.T) {
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
-		handler := command.CommandFunc[CreateUserEvent](func(ctx context.Context, e CreateUserEvent) error {
+		handler := command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
 			time.Sleep(100 * time.Millisecond)
 			return nil
 		})
@@ -125,7 +125,7 @@ func TestCommandDispatcher(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
-		err := Dispatch(ctx, CreateUserEvent{Email: "test@example.com"})
+		err := Dispatch(ctx, CreateUserMessage{Email: "test@example.com"})
 
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("expected deadline exceeded error, got %v", err)
@@ -137,16 +137,16 @@ func TestCommandDispatcher(t *testing.T) {
 
 		var secondHandlerCalled bool
 
-		SubscribeCommand(command.CommandFunc[CreateUserEvent](func(ctx context.Context, e CreateUserEvent) error {
+		SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
 			return firstError
 		}))
 
-		SubscribeCommand(command.CommandFunc[CreateUserEvent](func(ctx context.Context, e CreateUserEvent) error {
+		SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
 			secondHandlerCalled = true
 			return nil
 		}))
 
-		err := Dispatch(context.Background(), CreateUserEvent{Email: "test@example.com"})
+		err := Dispatch(context.Background(), CreateUserMessage{Email: "test@example.com"})
 
 		var msgErr *command.MessageError
 		if !errors.As(err, &msgErr) {
@@ -166,9 +166,9 @@ func TestQueryDispatcher(t *testing.T) {
 
 		handler := &GetUserHandler{db: db}
 
-		SubscribeQuery[GetUserEvent, *User](handler)
+		SubscribeQuery[GetUserMessage, *User](handler)
 
-		user, err := Query[GetUserEvent, *User](context.Background(), GetUserEvent{
+		user, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 			ID: "user-123",
 		})
 
@@ -187,9 +187,9 @@ func TestQueryDispatcher(t *testing.T) {
 		db := newMockDB()
 		handler := &GetUserHandler{db: db}
 
-		SubscribeQuery[GetUserEvent, *User](handler)
+		SubscribeQuery[GetUserMessage, *User](handler)
 
-		_, err := Query[GetUserEvent, *User](context.Background(), GetUserEvent{
+		_, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 			ID: "non-existent",
 		})
 
@@ -210,10 +210,10 @@ func Example() {
 
 	// Register query handler
 	getHandler := &GetUserHandler{db: db}
-	SubscribeQuery[GetUserEvent, *User](getHandler)
+	SubscribeQuery[GetUserMessage, *User](getHandler)
 
 	// Create a user
-	err := Dispatch(context.Background(), CreateUserEvent{
+	err := Dispatch(context.Background(), CreateUserMessage{
 		Email: "john@example.com",
 	})
 	if err != nil {
@@ -221,7 +221,7 @@ func Example() {
 	}
 
 	// Query the user
-	user, err := Query[GetUserEvent, *User](context.Background(), GetUserEvent{
+	user, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 		ID: "user-123",
 	})
 	if err != nil {
@@ -236,23 +236,23 @@ func Example() {
 func ExampleCommandFunc() {
 
 	// Command handler using CommandFunc
-	SubscribeCommand(command.CommandFunc[CreateUserEvent](func(ctx context.Context, e CreateUserEvent) error {
+	SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
 		fmt.Printf("Creating user: %s\n", e.Email)
 		return nil
 	}))
 
 	// Query handler using QueryFunc
-	SubscribeQuery[GetUserEvent, *User](command.QueryFunc[GetUserEvent, *User](
-		func(ctx context.Context, e GetUserEvent) (*User, error) {
+	SubscribeQuery[GetUserMessage, *User](command.QueryFunc[GetUserMessage, *User](
+		func(ctx context.Context, e GetUserMessage) (*User, error) {
 			return &User{ID: e.ID, Email: "john@example.com"}, nil
 		}))
 
 	// Use the handlers
-	_ = Dispatch(context.Background(), CreateUserEvent{
+	_ = Dispatch(context.Background(), CreateUserMessage{
 		Email: "john@example.com",
 	})
 
-	user, _ := Query[GetUserEvent, *User](context.Background(), GetUserEvent{
+	user, _ := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 		ID: "user-123",
 	})
 
@@ -280,7 +280,7 @@ func TestHTTPIntegration(t *testing.T) {
 	getHandler := &GetUserHandler{db: db}
 
 	SubscribeCommand(createHandler)
-	SubscribeQuery[GetUserEvent, *User](getHandler)
+	SubscribeQuery[GetUserMessage, *User](getHandler)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -300,7 +300,7 @@ func TestHTTPIntegration(t *testing.T) {
 			return
 		}
 
-		err := Dispatch(r.Context(), CreateUserEvent{
+		err := Dispatch(r.Context(), CreateUserMessage{
 			Email: input.Email,
 		})
 		if err != nil {
@@ -327,7 +327,7 @@ func TestHTTPIntegration(t *testing.T) {
 			return
 		}
 
-		user, err := Query[GetUserEvent, *User](r.Context(), GetUserEvent{
+		user, err := Query[GetUserMessage, *User](r.Context(), GetUserMessage{
 			ID: userID,
 		})
 		if err != nil {
@@ -476,7 +476,7 @@ func ExampleHTTPIntegration() {
 
 	// Register handlers
 	SubscribeCommand(&CreateUserHandler{db: db})
-	SubscribeQuery[GetUserEvent, *User](&GetUserHandler{db: db})
+	SubscribeQuery[GetUserMessage, *User](&GetUserHandler{db: db})
 
 	// HTTP handler for creating users
 	createUserHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -493,7 +493,7 @@ func ExampleHTTPIntegration() {
 			return
 		}
 
-		err := Dispatch(r.Context(), CreateUserEvent{
+		err := Dispatch(r.Context(), CreateUserMessage{
 			Email: input.Email,
 		})
 		if err != nil {
@@ -518,7 +518,7 @@ func ExampleHTTPIntegration() {
 			return
 		}
 
-		user, err := Query[GetUserEvent, *User](r.Context(), GetUserEvent{
+		user, err := Query[GetUserMessage, *User](r.Context(), GetUserMessage{
 			ID: userID,
 		})
 		if err != nil {
