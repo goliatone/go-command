@@ -148,7 +148,7 @@ func TestCommandDispatcher(t *testing.T) {
 
 		err := Dispatch(context.Background(), CreateUserMessage{Email: "test@example.com"})
 
-		var msgErr *command.MessageError
+		var msgErr *command.Error
 		if !errors.As(err, &msgErr) {
 			t.Errorf("expected EventError, got %v", err)
 		}
