@@ -99,21 +99,21 @@ func getCommandHandlers[T command.Message](id *Dispatcher) ([]command.Commander[
 func Dispatch[T command.Message](ctx context.Context, msg T) error {
 	handlers, err := getCommandHandlers[T](Default)
 	if err != nil {
-		return command.WrapMessageError("NoHandlers", err.Error(), err)
+		return command.WrapError("NoHandlers", err.Error(), err)
 	}
 
 	if ctx.Err() != nil {
-		return command.WrapMessageError("ContextError", "context canceled or deadline exceeded", ctx.Err())
+		return command.WrapError("ContextError", "context canceled or deadline exceeded", ctx.Err())
 	}
 
 	var errs error
 	for _, handler := range handlers {
 		select {
 		case <-ctx.Done():
-			return command.WrapMessageError("ContextError", "context canceled during execution", ctx.Err())
+			return command.WrapError("ContextError", "context canceled during execution", ctx.Err())
 		default:
 			if err := handler.Execute(ctx, msg); err != nil {
-				wrappedErr := command.WrapMessageError(
+				wrappedErr := command.WrapError(
 					"HandlerExecutionFailed",
 					fmt.Sprintf("handler failed for type %s", msg.Type()),
 					err,
@@ -133,9 +133,11 @@ func Dispatch[T command.Message](ctx context.Context, msg T) error {
 func getQueryHandler[T command.Message, R any](qb *Dispatcher) (command.Querier[T, R], error) {
 	var msg T
 	handlers := qb.GetHandlers(msg.Type())
+
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no query handlers for message type %s", msg.Type())
 	}
+
 	if len(handlers) > 1 {
 		return nil, errors.New("multiple query handlers found, ambiguous query")
 	}
@@ -152,16 +154,16 @@ func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
 	var zero R
 	handler, err := getQueryHandler[T, R](Default)
 	if err != nil {
-		return zero, command.WrapMessageError("NoHandlers", err.Error(), err)
+		return zero, command.WrapError("NoHandlers", err.Error(), err)
 	}
 
 	if ctx.Err() != nil {
-		return zero, command.WrapMessageError("ContextError", "context canceled or deadline exceeded", ctx.Err())
+		return zero, command.WrapError("ContextError", "context canceled or deadline exceeded", ctx.Err())
 	}
 
 	result, qerr := handler.Query(ctx, msg)
 	if qerr != nil {
-		return zero, command.WrapMessageError(
+		return zero, command.WrapError(
 			"HandlerExecutionFailed",
 			fmt.Sprintf("query handler failed for type %s", msg.Type()),
 			qerr,
