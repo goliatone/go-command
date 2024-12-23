@@ -56,7 +56,32 @@ func WithExitOnError() Option {
 
 var Default = NewDispatcher()
 
-////
+type Subscription interface {
+	Unsubscribe()
+}
+
+type subs struct {
+	dispatcher *Dispatcher
+	msgType    string
+	handler    any
+}
+
+func (s *subs) Unsubscribe() {
+	d := s.dispatcher
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	handlers := d.handlers[s.msgType]
+	newList := make([]any, 0, len(handlers))
+
+	for _, h := range handlers {
+		if h != s.handler {
+			newList = append(newList, h)
+		}
+	}
+
+	d.handlers[s.msgType] = newList
+}
 
 type commandWrapper[T command.Message] struct {
 	runner *runner.Handler
@@ -69,7 +94,7 @@ type queryWrapper[T command.Message, R any] struct {
 }
 
 // Subscribe a CommandHandler for a particular message type T.
-func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) {
+func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
 	var msg T
 	h := runner.NewHandler(runnerOpts...)
 	wrapper := &commandWrapper[T]{
@@ -78,14 +103,20 @@ func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ..
 	}
 
 	Default.RegisterHandler(msg.Type(), wrapper)
+
+	return &subs{
+		dispatcher: Default,
+		msgType:    msg.Type(),
+		handler:    wrapper,
+	}
 }
 
-func SubscribeCommandFunc[T command.Message](handler command.CommandFunc[T], runnerOpts ...runner.Option) {
-	SubscribeCommand(handler, runnerOpts...)
+func SubscribeCommandFunc[T command.Message](handler command.CommandFunc[T], runnerOpts ...runner.Option) Subscription {
+	return SubscribeCommand(handler, runnerOpts...)
 }
 
 // Subscribe a QueryHandler for a particular message type T, R.
-func SubscribeQuery[T command.Message, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) {
+func SubscribeQuery[T command.Message, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) Subscription {
 	var msg T
 	r := runner.NewHandler(runnerOpts...)
 	wrapper := &queryWrapper[T, R]{
@@ -93,10 +124,16 @@ func SubscribeQuery[T command.Message, R any](qry command.Querier[T, R], runnerO
 		qry:    qry,
 	}
 	Default.RegisterHandler(msg.Type(), wrapper)
+
+	return &subs{
+		dispatcher: Default,
+		msgType:    msg.Type(),
+		handler:    wrapper,
+	}
 }
 
-func SubscribeQueryFunc[T command.Message, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) {
-	SubscribeQuery(qry, runnerOpts...)
+func SubscribeQueryFunc[T command.Message, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) Subscription {
+	return SubscribeQuery(qry, runnerOpts...)
 }
 
 func getCommandHandlers[T command.Message](id *Dispatcher) ([]*commandWrapper[T], error) {
