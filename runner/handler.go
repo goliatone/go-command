@@ -10,6 +10,7 @@ import (
 	"github.com/goliatone/command"
 )
 
+// Logger interface shared across packages
 type Logger interface {
 	Info(msg string, args ...any)
 	Error(msg string, args ...any)
@@ -31,14 +32,14 @@ type Handler struct {
 	maxRetries int
 	timeout    time.Duration
 	deadline   time.Time
-	once       bool
+	runOnce    bool
 }
 
 // NewHandler constructs a Runner from various options, applying defaults if unset.
 func NewHandler(opts ...Option) *Handler {
 	r := &Handler{
 		errorHandler: func(err error) {
-			log.Printf("runner error: %v\n", err)
+			log.Printf("error: %v\n", err)
 		},
 		doneHandler: func(r *Handler) {
 			log.Printf("runner done: %d\n", r.EntryID)
@@ -56,7 +57,7 @@ func NewHandler(opts ...Option) *Handler {
 func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error {
 	h.mu.Lock()
 
-	if h.once && h.successfulRuns >= 1 {
+	if h.runOnce && h.successfulRuns >= 1 {
 		h.mu.Unlock()
 		return nil
 	}
