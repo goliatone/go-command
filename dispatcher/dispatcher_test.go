@@ -48,6 +48,11 @@ func newMockDB() *mockDB {
 	}
 }
 
+func (m *mockDB) AddUser(u *User) {
+	m.users[u.Email] = u
+	m.usersByID[u.ID] = u
+}
+
 // Test handlers
 type CreateUserHandler struct {
 	db         *mockDB
@@ -62,8 +67,13 @@ func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserMessage
 		h.db.mu.Lock()
 		defer h.db.mu.Unlock()
 
+		id := "user"
+		if h.generateID != nil {
+			id = h.generateID()
+		}
+
 		user := &User{
-			ID:    h.generateID(),
+			ID:    id,
 			Email: event.Email,
 		}
 		h.db.users[event.Email] = user
@@ -87,6 +97,7 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 		if user, ok := h.db.usersByID[event.ID]; ok {
 			return user, nil
 		}
+
 		return nil, errors.New("user not found")
 	}
 }
@@ -95,7 +106,9 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 func TestCommandDispatcher(t *testing.T) {
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
-		handler := &CreateUserHandler{db: db}
+		handler := &CreateUserHandler{db: db, generateID: func() string {
+			return "user"
+		}}
 
 		SubscribeCommand(handler)
 
@@ -116,8 +129,12 @@ func TestCommandDispatcher(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		handler := command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
-			time.Sleep(100 * time.Millisecond)
-			return nil
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+				return nil
+			}
 		})
 
 		SubscribeCommand(handler)
@@ -132,9 +149,34 @@ func TestCommandDispatcher(t *testing.T) {
 		}
 	})
 
-	t.Run("exit on error", func(t *testing.T) {
-		firstError := errors.New("handler error")
+	t.Run("context cancellation will abort commands that do not handle it internally", func(t *testing.T) {
+		handler := command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
+			time.Sleep(100 * time.Millisecond)
+			return nil
+		})
 
+		SubscribeCommand(handler)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		_ = Dispatch(ctx, CreateUserMessage{Email: "test@example.com"})
+
+		err := Dispatch(ctx, CreateUserMessage{Email: "test@example.com"})
+
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("expected deadline exceeded error, got %v", err)
+		}
+	})
+
+	t.Run("exit on error", func(t *testing.T) {
+		exitOneErr := Default.ExitOnErr
+		defer func(e bool) {
+			Default.ExitOnErr = e
+		}(exitOneErr)
+		Default.ExitOnErr = true
+
+		firstError := errors.New("handler error")
 		var secondHandlerCalled bool
 
 		SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
@@ -148,9 +190,9 @@ func TestCommandDispatcher(t *testing.T) {
 
 		err := Dispatch(context.Background(), CreateUserMessage{Email: "test@example.com"})
 
-		var msgErr *command.Error
-		if !errors.As(err, &msgErr) {
-			t.Errorf("expected EventError, got %v", err)
+		var msgErr command.Error
+		if errors.Is(err, &msgErr) {
+			t.Errorf("expected command.Error, got %v", err)
 		}
 
 		if secondHandlerCalled {
@@ -162,11 +204,11 @@ func TestCommandDispatcher(t *testing.T) {
 func TestQueryDispatcher(t *testing.T) {
 	t.Run("successful query execution", func(t *testing.T) {
 		db := newMockDB()
-		db.users["test@example.com"] = &User{ID: "user-123", Email: "test@example.com"}
+		db.AddUser(&User{ID: "user-123", Email: "test@example.com"})
 
 		handler := &GetUserHandler{db: db}
 
-		SubscribeQuery[GetUserMessage, *User](handler)
+		SubscribeQuery(handler)
 
 		user, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 			ID: "user-123",
@@ -187,7 +229,7 @@ func TestQueryDispatcher(t *testing.T) {
 		db := newMockDB()
 		handler := &GetUserHandler{db: db}
 
-		SubscribeQuery[GetUserMessage, *User](handler)
+		SubscribeQuery(handler)
 
 		_, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
 			ID: "non-existent",
@@ -206,6 +248,7 @@ func Example() {
 
 	// Register command handler
 	createHandler := &CreateUserHandler{db: db}
+
 	SubscribeCommand(createHandler)
 
 	// Register query handler
