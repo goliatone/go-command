@@ -16,14 +16,22 @@ import (
 	"github.com/goliatone/command"
 )
 
-// Test Events
+type TestMessage struct {
+	command.BaseMessage
+	ID int
+}
+
+func (t TestMessage) Type() string { return "test" }
+
 type CreateUserMessage struct {
+	command.BaseMessage
 	Email string
 }
 
 func (e CreateUserMessage) Type() string { return "user.create" }
 
 type GetUserMessage struct {
+	command.BaseMessage
 	ID string
 }
 
@@ -101,6 +109,8 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 }
 
 func TestCommandDispatcher(t *testing.T) {
+	Default = NewDispatcher()
+
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
 		handler := &CreateUserHandler{db: db, generateID: func() string {
@@ -199,6 +209,8 @@ func TestCommandDispatcher(t *testing.T) {
 }
 
 func TestQueryDispatcher(t *testing.T) {
+	Default = NewDispatcher()
+
 	t.Run("successful query execution", func(t *testing.T) {
 		db := newMockDB()
 		db.AddUser(&User{ID: "user-123", Email: "test@example.com"})
@@ -303,16 +315,16 @@ func ExampleCommandFunc() {
 }
 
 func TestHTTPIntegration(t *testing.T) {
-	// Initialize test environment
+	Default = NewDispatcher()
+
 	db := newMockDB()
 
-	// Track created user IDs for verification
 	var createdUserID string
 	createHandler := &CreateUserHandler{
 		db: db,
 		generateID: func() string {
 			id := fmt.Sprintf("user-%s", time.Now().Format("20060102150405.000"))
-			createdUserID = id // Save for verification
+			createdUserID = id
 			return id
 		},
 	}
@@ -322,10 +334,8 @@ func TestHTTPIntegration(t *testing.T) {
 	SubscribeCommand(createHandler)
 	SubscribeQuery[GetUserMessage, *User](getHandler)
 
-	// Create HTTP server
 	mux := http.NewServeMux()
 
-	// HTTP handler for creating users
 	mux.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -348,13 +358,11 @@ func TestHTTPIntegration(t *testing.T) {
 			return
 		}
 
-		// Return the created user ID
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"id": createdUserID})
 	})
 
-	// HTTP handler for getting users
 	mux.HandleFunc("/users/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -379,7 +387,6 @@ func TestHTTPIntegration(t *testing.T) {
 		json.NewEncoder(w).Encode(user)
 	})
 
-	// Create test server
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -512,6 +519,8 @@ func TestHTTPIntegration(t *testing.T) {
 }
 
 func ExampleHTTPIntegration() {
+	Default = NewDispatcher()
+
 	db := newMockDB()
 
 	// Register handlers
@@ -584,5 +593,124 @@ func ExampleHTTPIntegration() {
 	log.Printf("Server starting on :8080")
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+/////
+
+type TestPointerMessage struct {
+	command.BaseMessage
+	Value string
+}
+
+func (t *TestPointerMessage) Type() string {
+	return "test_pointer"
+}
+
+type TestValueMessage struct {
+	command.BaseMessage
+	Value string
+}
+
+func (t TestValueMessage) Type() string {
+	return "test_value"
+}
+
+type TestResponse struct {
+	Result string
+}
+
+func TestMessageValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     command.Message
+		wantErr bool
+	}{
+		{
+			name:    "valid pointer message",
+			msg:     &TestPointerMessage{Value: "test"},
+			wantErr: false,
+		},
+		{
+			name:    "nil pointer message",
+			msg:     (*TestPointerMessage)(nil),
+			wantErr: true,
+		},
+		{
+			name:    "valid value message",
+			msg:     TestValueMessage{Value: "test"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := &command.MessageHandler[command.Message]{}
+			err := handler.ValidateMessage(tt.msg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateMessage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDispatchWithPointers(t *testing.T) {
+	Default = NewDispatcher()
+
+	commandHandler := command.CommandFunc[*TestPointerMessage](func(ctx context.Context, msg *TestPointerMessage) error {
+		msg.Value = "handled"
+		return nil
+	})
+
+	sub := SubscribeCommand(commandHandler)
+	defer sub.Unsubscribe()
+
+	// Test with valid pointer
+	msg := &TestPointerMessage{Value: "test"}
+	err := Dispatch(context.Background(), msg)
+	if err != nil {
+		t.Errorf("Dispatch() error = %v", err)
+	}
+	if msg.Value != "handled" {
+		t.Errorf("Message not modified, value = %v", msg.Value)
+	}
+
+	// Test with nil pointer
+	var nilMsg *TestPointerMessage
+	err = Dispatch(context.Background(), nilMsg)
+	if err == nil {
+		t.Error("Dispatch() expected error for nil message")
+	}
+}
+
+func TestQueryWithPointers(t *testing.T) {
+	Default = NewDispatcher()
+
+	queryHandler := command.QueryFunc[*TestPointerMessage, TestResponse](func(ctx context.Context, msg *TestPointerMessage) (TestResponse, error) {
+		msg.Value = "queried"
+		return TestResponse{Result: "success"}, nil
+	})
+
+	sub := SubscribeQuery(queryHandler)
+	defer sub.Unsubscribe()
+
+	// Test with valid pointer
+	msg := &TestPointerMessage{Value: "test"}
+	resp, err := Query[*TestPointerMessage, TestResponse](context.Background(), msg)
+	if err != nil {
+		t.Errorf("Query() error = %v", err)
+	}
+	if msg.Value != "queried" {
+		t.Errorf("Message not modified, value = %v", msg.Value)
+	}
+	if resp.Result != "success" {
+		t.Errorf("Unexpected response = %v", resp)
+	}
+
+	// Test with nil pointer
+	var nilMsg *TestPointerMessage
+	_, err = Query[*TestPointerMessage, TestResponse](context.Background(), nilMsg)
+	if err == nil {
+		t.Error("Query() expected error for nil message")
 	}
 }
