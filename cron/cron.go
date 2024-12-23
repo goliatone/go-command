@@ -106,7 +106,7 @@ func (cs *Scheduler) build() []rcron.Option {
 }
 
 // AddCommand is a type-safe way to add command handlers
-func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (int, error) {
+func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (Subscription, error) {
 	runnerOpts := createRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
@@ -114,18 +114,22 @@ func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler co
 	return s.addJob(opts.Expression, job)
 }
 
-func (s *Scheduler) addJob(expr string, job rcron.Job) (int, error) {
+func (s *Scheduler) addJob(expr string, job rcron.Job) (Subscription, error) {
 	entryID, err := s.cron.AddJob(expr, job)
 	if err != nil {
-		return 0, fmt.Errorf("failed to add job: %w", err)
+		return nil, fmt.Errorf("failed to add job: %w", err)
 	}
-	return int(entryID), nil
+
+	return &cronSubscription{
+		scheduler: s,
+		entryID:   int(entryID),
+	}, nil
 }
 
 // AddHandler registers a handler for scheduled execution
 // It accepts any handler type that implements the Message interface and returns
 // an entryID that can be used to remove the job later
-func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (int, error) {
+func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, error) {
 	if opts.Expression == "" {
 		return 0, fmt.Errorf("cron expression cannot be empty")
 	}
