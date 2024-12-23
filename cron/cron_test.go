@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,8 +75,7 @@ func TestCronScheduler(t *testing.T) {
 		if count := handler.GetExecutionCount(); count == 0 {
 			t.Error("Command handler was not executed")
 		}
-
-		scheduler.RemoveHandler(entryID)
+		entryID.Unsubscribe()
 	})
 
 	t.Run("command handler execution", func(t *testing.T) {
@@ -99,14 +99,14 @@ func TestCronScheduler(t *testing.T) {
 			t.Error("Command handler was not executed")
 		}
 
-		scheduler.RemoveHandler(entryID)
+		entryID.Unsubscribe()
 	})
 
 	t.Run("function handler execution", func(t *testing.T) {
-		count := 0
+		var count atomic.Int32
 		scheduler := NewScheduler()
 		handler := func() {
-			count = count + 1
+			count.Add(1)
 		}
 
 		// Schedule job to run every second
@@ -123,11 +123,11 @@ func TestCronScheduler(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		scheduler.Stop()
 
-		if count == 0 {
+		if count.Load() == 0 {
 			t.Error("Query handler was not executed")
 		}
 
-		scheduler.RemoveHandler(entryID)
+		entryID.Unsubscribe()
 	})
 
 	t.Run("invalid cron expression", func(t *testing.T) {
