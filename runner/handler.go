@@ -54,6 +54,18 @@ func NewHandler(opts ...Option) *Handler {
 	return r
 }
 
+func (h *Handler) execute(ctx context.Context, fn func(context.Context) error) error {
+	err := func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("handler panic: %v", r)
+			}
+		}()
+		return fn(ctx)
+	}()
+	return err
+}
+
 func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error {
 	h.mu.Lock()
 
@@ -77,9 +89,10 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	var finalErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if ctx.Err() != nil {
-			return ctx.Err() // catch context.DeadlineExceeded
+			return ctx.Err()
 		}
-		err := fn(ctx)
+
+		err := h.execute(ctx, fn)
 		if err == nil {
 			finalErr = nil
 			break
