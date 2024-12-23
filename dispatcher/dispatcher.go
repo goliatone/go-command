@@ -10,7 +10,6 @@ import (
 	"github.com/goliatone/command/runner"
 )
 
-// // NEEDS REVIEW ////
 // Dispatcher is the core struct to handle dispatcher options
 type Dispatcher struct {
 	mu        sync.RWMutex
@@ -45,8 +44,6 @@ func (d *Dispatcher) GetHandlers(msgType string) []any {
 	return d.handlers[msgType]
 }
 
-func (d *Dispatcher) UnregisterHandler() {}
-
 // WithExitOnError sets exitOnErr to true.
 func WithExitOnError() Option {
 	return func(d *Dispatcher) {
@@ -55,43 +52,6 @@ func WithExitOnError() Option {
 }
 
 var Default = NewDispatcher()
-
-type Subscription interface {
-	Unsubscribe()
-}
-
-type subs struct {
-	dispatcher *Dispatcher
-	msgType    string
-	handler    any
-}
-
-func (s *subs) Unsubscribe() {
-	d := s.dispatcher
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	handlers := d.handlers[s.msgType]
-	newList := make([]any, 0, len(handlers))
-
-	for _, h := range handlers {
-		if h != s.handler {
-			newList = append(newList, h)
-		}
-	}
-
-	d.handlers[s.msgType] = newList
-}
-
-type commandWrapper[T command.Message] struct {
-	runner *runner.Handler
-	cmd    command.Commander[T]
-}
-
-type queryWrapper[T command.Message, R any] struct {
-	runner *runner.Handler
-	qry    command.Querier[T, R]
-}
 
 // Subscribe a CommandHandler for a particular message type T.
 func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
@@ -225,4 +185,14 @@ func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
 		)
 	}
 	return result, nil
+}
+
+type commandWrapper[T command.Message] struct {
+	runner *runner.Handler
+	cmd    command.Commander[T]
+}
+
+type queryWrapper[T command.Message, R any] struct {
+	runner *runner.Handler
+	qry    command.Querier[T, R]
 }
