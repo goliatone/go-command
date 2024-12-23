@@ -34,9 +34,3 @@ func (f QueryFunc[T, R]) Query(ctx context.Context, msg T) (R, error) {
 type Querier[T Message, R any] interface {
 	Query(ctx context.Context, msg T) (R, error)
 }
-
-// ////
-type Logger interface {
-	Info(msg string, args ...any)
-	Error(msg string, args ...any)
-}
