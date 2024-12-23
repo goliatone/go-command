@@ -34,26 +34,24 @@ type User struct {
 	Email string
 }
 
-// Mock implementations
 type mockDB struct {
-	users     map[string]*User // email -> user
-	usersByID map[string]*User // id -> user
-	mu        sync.RWMutex
+	mu           sync.RWMutex
+	usersByID    map[string]*User // id -> user
+	usersByEmail map[string]*User // email -> user
 }
 
 func newMockDB() *mockDB {
 	return &mockDB{
-		users:     make(map[string]*User),
-		usersByID: make(map[string]*User),
+		usersByID:    make(map[string]*User),
+		usersByEmail: make(map[string]*User),
 	}
 }
 
 func (m *mockDB) AddUser(u *User) {
-	m.users[u.Email] = u
 	m.usersByID[u.ID] = u
+	m.usersByEmail[u.Email] = u
 }
 
-// Test handlers
 type CreateUserHandler struct {
 	db         *mockDB
 	generateID func() string
@@ -76,8 +74,8 @@ func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserMessage
 			ID:    id,
 			Email: event.Email,
 		}
-		h.db.users[event.Email] = user
 		h.db.usersByID[user.ID] = user
+		h.db.usersByEmail[event.Email] = user
 		return nil
 	}
 }
@@ -102,7 +100,6 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 	}
 }
 
-// Tests
 func TestCommandDispatcher(t *testing.T) {
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
@@ -120,7 +117,7 @@ func TestCommandDispatcher(t *testing.T) {
 			t.Errorf("expected no error, got %v", err)
 		}
 
-		if user, exists := db.users["test@example.com"]; !exists {
+		if user, exists := db.usersByEmail["test@example.com"]; !exists {
 			t.Error("user was not created")
 		} else if user.Email != "test@example.com" {
 			t.Errorf("expected email %s, got %s", "test@example.com", user.Email)
@@ -285,7 +282,7 @@ func ExampleCommandFunc() {
 	}))
 
 	// Query handler using QueryFunc
-	SubscribeQuery[GetUserMessage, *User](command.QueryFunc[GetUserMessage, *User](
+	SubscribeQuery(command.QueryFunc[GetUserMessage, *User](
 		func(ctx context.Context, e GetUserMessage) (*User, error) {
 			return &User{ID: e.ID, Email: "john@example.com"}, nil
 		}))
