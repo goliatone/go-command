@@ -55,7 +55,7 @@ func (h *TestQueryHandler) GetQueryCount() int {
 
 func TestCronScheduler(t *testing.T) {
 	t.Run("command handler execution", func(t *testing.T) {
-		scheduler := NewCronScheduler()
+		scheduler := NewScheduler()
 		handler := &TestCommandHandler{}
 
 		// Schedule job to run every second
@@ -79,7 +79,7 @@ func TestCronScheduler(t *testing.T) {
 	})
 
 	t.Run("command handler execution", func(t *testing.T) {
-		scheduler := NewCronScheduler(WithParser(SecondsParser))
+		scheduler := NewScheduler(WithParser(SecondsParser))
 		handler := &TestCommandHandler{}
 
 		// Schedule job to run every second
@@ -104,7 +104,7 @@ func TestCronScheduler(t *testing.T) {
 
 	t.Run("function handler execution", func(t *testing.T) {
 		count := 0
-		scheduler := NewCronScheduler()
+		scheduler := NewScheduler()
 		handler := func() {
 			count = count + 1
 		}
@@ -131,7 +131,7 @@ func TestCronScheduler(t *testing.T) {
 	})
 
 	t.Run("invalid cron expression", func(t *testing.T) {
-		scheduler := NewCronScheduler()
+		scheduler := NewScheduler()
 		handler := &TestCommandHandler{}
 
 		_, err := scheduler.AddHandler(HandlerOptions{
@@ -144,7 +144,7 @@ func TestCronScheduler(t *testing.T) {
 	})
 
 	t.Run("empty cron expression", func(t *testing.T) {
-		scheduler := NewCronScheduler()
+		scheduler := NewScheduler()
 		handler := &TestCommandHandler{}
 
 		_, err := scheduler.AddHandler(HandlerOptions{
@@ -157,7 +157,7 @@ func TestCronScheduler(t *testing.T) {
 	})
 
 	t.Run("invalid handler type", func(t *testing.T) {
-		scheduler := NewCronScheduler()
+		scheduler := NewScheduler()
 		handler := struct{}{}
 
 		_, err := scheduler.AddHandler(HandlerOptions{
