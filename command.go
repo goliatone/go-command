@@ -4,11 +4,6 @@ import (
 	"context"
 )
 
-// Message is the interface command and queries messages must implement
-type Message interface {
-	Type() string
-}
-
 // CommandFunc is an adapter that lets you use a function as a CommandHandler[T]
 type CommandFunc[T Message] func(ctx context.Context, msg T) error
 
