@@ -14,31 +14,32 @@ import (
 	rcron "github.com/robfig/cron/v3"
 )
 
-// CronScheduler wraps cron functionality
-type CronScheduler struct {
+// Logger interface shared across packages
+type Logger interface {
+	Info(msg string, args ...any)
+	Error(msg string, args ...any)
+}
+
+// Scheduler wraps cron functionality
+type Scheduler struct {
 	cron         *rcron.Cron
 	location     *time.Location
 	errorHandler func(error)
-	logger       Logger
-	parser       Parser
-	logWriter    io.Writer
-	logLevel     LogLevel
+
+	logger    Logger
+	parser    Parser
+	logWriter io.Writer
+	logLevel  LogLevel
 }
 
-// Logger interface for the scheduler
-type Logger interface {
-	Info(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
-}
-
-// NewCronScheduler creates a new scheduler instance with the provided options
-func NewCronScheduler(opts ...Option) *CronScheduler {
-	cs := &CronScheduler{
+// NewScheduler creates a new scheduler instance with the provided options
+func NewScheduler(opts ...Option) *Scheduler {
+	cs := &Scheduler{
 		location: time.Local,
 		parser:   DefaultParser,
 		logLevel: LogLevelError,
 		errorHandler: func(err error) {
-			log.Printf("cron error: %v\n", err)
+			log.Printf("error: %v\n", err)
 		},
 	}
 
@@ -53,7 +54,7 @@ func NewCronScheduler(opts ...Option) *CronScheduler {
 }
 
 // build converts our implementation-agnostic options to rcron options
-func (cs *CronScheduler) build() []rcron.Option {
+func (cs *Scheduler) build() []rcron.Option {
 	opts := make([]rcron.Option, 0)
 
 	if cs.location != nil {
@@ -72,9 +73,8 @@ func (cs *CronScheduler) build() []rcron.Option {
 	}
 
 	if cs.errorHandler != nil {
-		errorLogger := &errorHandlerAdapter{handler: cs.errorHandler}
 		opts = append(opts, rcron.WithChain(
-			rcron.Recover(errorLogger),
+			rcron.Recover(&errorHandlerAdapter{handler: cs.errorHandler}),
 		))
 	}
 
@@ -84,18 +84,16 @@ func (cs *CronScheduler) build() []rcron.Option {
 		cronLogger = &loggerAdapter{logger: cs.logger, level: cs.logLevel}
 	case cs.logWriter != nil:
 		stdLogger := log.New(cs.logWriter, "cron: ", log.LstdFlags)
+		cronLogger = rcron.PrintfLogger(stdLogger)
 		if cs.logLevel >= LogLevelDebug {
 			cronLogger = rcron.VerbosePrintfLogger(stdLogger)
-		} else {
-			cronLogger = rcron.PrintfLogger(stdLogger)
 		}
 	default:
 		if cs.logLevel > LogLevelSilent {
 			stdLogger := log.New(os.Stdout, "cron: ", log.LstdFlags)
+			cronLogger = rcron.PrintfLogger(stdLogger)
 			if cs.logLevel >= LogLevelDebug {
 				cronLogger = rcron.VerbosePrintfLogger(stdLogger)
-			} else {
-				cronLogger = rcron.PrintfLogger(stdLogger)
 			}
 		}
 	}
@@ -107,93 +105,53 @@ func (cs *CronScheduler) build() []rcron.Option {
 	return opts
 }
 
-// AddCommandHandler is a type-safe way to add command handlers
-func AddCommandHandler[T command.Message](c *CronScheduler, opts HandlerOptions, handler command.CommandFunc[T]) (int, error) {
-	runnerOpts := []runner.Option{
-		runner.WithMaxRetries(opts.Retry),
-		runner.WithTimeout(opts.Timeout),
-		runner.WithDeadline(opts.Deadline),
-		runner.WithRunOnce(opts.Once),
-		runner.WithErrorHandler(c.errorHandler),
-	}
-	if c.logger != nil {
-		runnerOpts = append(runnerOpts, runner.WithLogger(c.logger))
-	}
-
+// AddCommand is a type-safe way to add command handlers
+func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (int, error) {
+	runnerOpts := createRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
-	job := rcron.FuncJob(func() {
-		ctx := context.Background()
-		var msg T
-		err := runner.RunCommand(ctx, h, handler, msg)
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
+	job := createCommandJob(context.Background(), s, h, handler)
+	return s.addJob(opts.Expression, job)
+}
 
-	entryID, err := c.cron.AddJob(opts.Expression, job)
+func (s *Scheduler) addJob(expr string, job rcron.Job) (int, error) {
+	entryID, err := s.cron.AddJob(expr, job)
 	if err != nil {
 		return 0, fmt.Errorf("failed to add job: %w", err)
 	}
-
 	return int(entryID), nil
 }
 
 // AddHandler registers a handler for scheduled execution
 // It accepts any handler type that implements the Message interface and returns
 // an entryID that can be used to remove the job later
-func (c *CronScheduler) AddHandler(opts HandlerOptions, handler any) (int, error) {
+func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (int, error) {
 	if opts.Expression == "" {
 		return 0, fmt.Errorf("cron expression cannot be empty")
 	}
 
+	runnerOpts := createRunnerOptions(s, opts)
+	h := runner.NewHandler(runnerOpts...)
+
 	var job rcron.Job
-	if j, ok := c.tryCreateGenericJob(handler, opts); ok {
-		job = j
-	} else {
+	switch r := handler.(type) {
+	case command.Commander[command.Message]:
+		job = createCommandJob(context.Background(), s, h, r.Execute)
+	case command.CommandFunc[command.Message]:
+		job = createCommandJob(context.Background(), s, h, r)
+	case func():
+		job = createSimpleJob(context.Background(), s, h, r)
+	case func() error:
+		job = createErrorJob(context.Background(), s, h, r)
+	default:
 		return 0, fmt.Errorf("unsupported handler type: %T", handler)
 	}
 
-	entryID, err := c.cron.AddJob(opts.Expression, job)
-	if err != nil {
-		return 0, fmt.Errorf("failed to add job: %w", err)
-	}
-
-	return int(entryID), nil
-}
-
-func (c *CronScheduler) tryCreateGenericJob(handler any, opts HandlerOptions) (rcron.Job, bool) {
-	// Create runner options
-	runnerOpts := []runner.Option{
-		runner.WithMaxRetries(opts.Retry),
-		runner.WithTimeout(opts.Timeout),
-		runner.WithDeadline(opts.Deadline),
-		runner.WithRunOnce(opts.Once),
-		runner.WithErrorHandler(c.errorHandler),
-	}
-	if c.logger != nil {
-		runnerOpts = append(runnerOpts, runner.WithLogger(c.logger))
-	}
-
-	// Create a new runner.Handler
-	r := runner.NewHandler(runnerOpts...)
-
-	switch h := handler.(type) {
-	case command.Commander[command.Message]:
-		return c.wrapCommandHandler(h, r), true
-	case command.CommandFunc[command.Message]:
-		return c.wrapCommandHandler(h, r), true
-	case func():
-		return c.wrapSimpleHandler(h, r), true
-	case func() error:
-		return c.wrapErrorHandler(h, r), true
-	}
-
-	return nil, false
+	return s.addJob(opts.Expression, job)
 }
 
 // wrapCommandHandler creates a cron.Job from a command handler
-func (c *CronScheduler) wrapCommandHandler(handler interface {
+func (c *Scheduler) wrapCommandHandler(handler interface {
 	Execute(context.Context, command.Message) error
 }, h *runner.Handler) rcron.Job {
 	return rcron.FuncJob(func() {
@@ -207,7 +165,7 @@ func (c *CronScheduler) wrapCommandHandler(handler interface {
 	})
 }
 
-func (c *CronScheduler) wrapSimpleHandler(handler func(), h *runner.Handler) rcron.Job {
+func (c *Scheduler) wrapSimpleHandler(handler func(), h *runner.Handler) rcron.Job {
 	return rcron.FuncJob(func() {
 		ctx := context.Background()
 		err := h.Run(ctx, func(ctx context.Context) error {
@@ -220,7 +178,7 @@ func (c *CronScheduler) wrapSimpleHandler(handler func(), h *runner.Handler) rcr
 	})
 }
 
-func (c *CronScheduler) wrapErrorHandler(handler func() error, h *runner.Handler) rcron.Job {
+func (c *Scheduler) wrapErrorHandler(handler func() error, h *runner.Handler) rcron.Job {
 	return rcron.FuncJob(func() {
 		ctx := context.Background()
 		err := h.Run(ctx, func(ctx context.Context) error {
@@ -233,18 +191,61 @@ func (c *CronScheduler) wrapErrorHandler(handler func() error, h *runner.Handler
 }
 
 // RemoveHandler removes a scheduled job by its entry ID
-func (c *CronScheduler) RemoveHandler(entryID int) {
+func (c *Scheduler) RemoveHandler(entryID int) {
 	c.cron.Remove(rcron.EntryID(entryID))
 }
 
 // Start begins executing scheduled jobs
-func (c *CronScheduler) Start() error {
+func (c *Scheduler) Start() error {
 	c.cron.Start()
 	return nil
 }
 
 // Stop stops executing scheduled jobs
-func (c *CronScheduler) Stop() error {
+func (c *Scheduler) Stop() error {
 	c.cron.Stop()
 	return nil
+}
+
+func createRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
+	return []runner.Option{
+		runner.WithMaxRetries(opts.MaxRetries),
+		runner.WithTimeout(opts.Timeout),
+		runner.WithDeadline(opts.Deadline),
+		runner.WithRunOnce(opts.RunOnce),
+		runner.WithErrorHandler(s.errorHandler),
+		runner.WithLogger(s.logger),
+	}
+}
+
+func createSimpleJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func()) rcron.Job {
+	return rcron.FuncJob(func() {
+		err := h.Run(ctx, func(ctx context.Context) error {
+			fn()
+			return nil
+		})
+		if err != nil {
+			s.errorHandler(err)
+		}
+	})
+}
+
+func createErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func() error) rcron.Job {
+	return rcron.FuncJob(func() {
+		err := h.Run(ctx, func(ctx context.Context) error {
+			return fn()
+		})
+		if err != nil {
+			s.errorHandler(err)
+		}
+	})
+}
+
+func createCommandJob[T command.Message](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
+	return rcron.FuncJob(func() {
+		var msg T
+		if err := runner.RunCommand(ctx, h, handler, msg); err != nil {
+			s.errorHandler(err)
+		}
+	})
 }
