@@ -18,7 +18,7 @@ func WithDeadline(d time.Time) Option {
 
 func WithRunOnce(once bool) Option {
 	return func(r *Handler) {
-		r.once = once
+		r.runOnce = once
 	}
 }
 
