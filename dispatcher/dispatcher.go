@@ -116,9 +116,13 @@ func getCommandHandlers[T command.Message](id *Dispatcher) ([]*commandWrapper[T]
 
 // Dispatch executes all registered CommandHandlers for T.
 func Dispatch[T command.Message](ctx context.Context, msg T) error {
+	if err := (&command.MessageHandler[T]{}).ValidateMessage(msg); err != nil {
+		return err
+	}
+
 	wrapers, err := getCommandHandlers[T](Default)
 	if err != nil {
-		return command.WrapError("NoHandlers", err.Error(), err)
+		return command.WrapError("DispatchHandlerError", err.Error(), err)
 	}
 
 	if ctx.Err() != nil {
@@ -166,10 +170,15 @@ func getQueryHandler[T command.Message, R any](qb *Dispatcher) (*queryWrapper[T,
 
 // Query executes the single registered QueryHandler for T, returning R.
 func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
+	if err := (&command.MessageHandler[T]{}).ValidateMessage(msg); err != nil {
+		var zero R
+		return zero, err
+	}
+
 	var zero R
 	qw, err := getQueryHandler[T, R](Default)
 	if err != nil {
-		return zero, command.WrapError("NoHandlers", err.Error(), err)
+		return zero, command.WrapError("QueryHandlerError", err.Error(), err)
 	}
 
 	if ctx.Err() != nil {
