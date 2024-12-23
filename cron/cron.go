@@ -83,18 +83,10 @@ func (cs *Scheduler) build() []rcron.Option {
 	case cs.logger != nil:
 		cronLogger = &loggerAdapter{logger: cs.logger, level: cs.logLevel}
 	case cs.logWriter != nil:
-		stdLogger := log.New(cs.logWriter, "cron: ", log.LstdFlags)
-		cronLogger = rcron.PrintfLogger(stdLogger)
-		if cs.logLevel >= LogLevelDebug {
-			cronLogger = rcron.VerbosePrintfLogger(stdLogger)
-		}
+		cronLogger = makeLogger(cs.logWriter, cs.logLevel)
 	default:
 		if cs.logLevel > LogLevelSilent {
-			stdLogger := log.New(os.Stdout, "cron: ", log.LstdFlags)
-			cronLogger = rcron.PrintfLogger(stdLogger)
-			if cs.logLevel >= LogLevelDebug {
-				cronLogger = rcron.VerbosePrintfLogger(stdLogger)
-			}
+			cronLogger = makeLogger(os.Stdout, cs.logLevel)
 		}
 	}
 
@@ -107,10 +99,10 @@ func (cs *Scheduler) build() []rcron.Option {
 
 // AddCommand is a type-safe way to add command handlers
 func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (Subscription, error) {
-	runnerOpts := createRunnerOptions(s, opts)
+	runnerOpts := makeRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
-	job := createCommandJob(context.Background(), s, h, handler)
+	job := makeCommandJob(context.Background(), s, h, handler)
 	return s.addJob(opts.Expression, job)
 }
 
@@ -131,30 +123,29 @@ func (s *Scheduler) addJob(expr string, job rcron.Job) (Subscription, error) {
 // an entryID that can be used to remove the job later
 func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, error) {
 	if opts.Expression == "" {
-		return 0, fmt.Errorf("cron expression cannot be empty")
+		return nil, fmt.Errorf("cron expression cannot be empty")
 	}
 
-	runnerOpts := createRunnerOptions(s, opts)
+	runnerOpts := makeRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
 	var job rcron.Job
 	switch r := handler.(type) {
 	case command.Commander[command.Message]:
-		job = createCommandJob(context.Background(), s, h, r.Execute)
+		job = makeCommandJob(context.Background(), s, h, r.Execute)
 	case command.CommandFunc[command.Message]:
-		job = createCommandJob(context.Background(), s, h, r)
+		job = makeCommandJob(context.Background(), s, h, r)
 	case func():
-		job = createSimpleJob(context.Background(), s, h, r)
+		job = makeSimpleJob(context.Background(), s, h, r)
 	case func() error:
-		job = createErrorJob(context.Background(), s, h, r)
+		job = makeErrorJob(context.Background(), s, h, r)
 	default:
-		return 0, fmt.Errorf("unsupported handler type: %T", handler)
+		return nil, fmt.Errorf("unsupported handler type: %T", handler)
 	}
 
 	return s.addJob(opts.Expression, job)
 }
 
-// wrapCommandHandler creates a cron.Job from a command handler
 func (c *Scheduler) wrapCommandHandler(handler interface {
 	Execute(context.Context, command.Message) error
 }, h *runner.Handler) rcron.Job {
@@ -211,7 +202,7 @@ func (c *Scheduler) Stop() error {
 	return nil
 }
 
-func createRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
+func makeRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
 	return []runner.Option{
 		runner.WithMaxRetries(opts.MaxRetries),
 		runner.WithTimeout(opts.Timeout),
@@ -222,7 +213,7 @@ func createRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
 	}
 }
 
-func createSimpleJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func()) rcron.Job {
+func makeSimpleJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func()) rcron.Job {
 	return rcron.FuncJob(func() {
 		err := h.Run(ctx, func(ctx context.Context) error {
 			fn()
@@ -234,7 +225,7 @@ func createSimpleJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn fu
 	})
 }
 
-func createErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func() error) rcron.Job {
+func makeErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func() error) rcron.Job {
 	return rcron.FuncJob(func() {
 		err := h.Run(ctx, func(ctx context.Context) error {
 			return fn()
@@ -245,11 +236,20 @@ func createErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn fun
 	})
 }
 
-func createCommandJob[T command.Message](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
+func makeCommandJob[T command.Message](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
 	return rcron.FuncJob(func() {
 		var msg T
 		if err := runner.RunCommand(ctx, h, handler, msg); err != nil {
 			s.errorHandler(err)
 		}
 	})
+}
+
+func makeLogger(out io.Writer, level LogLevel) rcron.Logger {
+	stdLogger := log.New(out, "cron: ", log.LstdFlags)
+	cronLogger := rcron.PrintfLogger(stdLogger)
+	if level >= LogLevelDebug {
+		cronLogger = rcron.VerbosePrintfLogger(stdLogger)
+	}
+	return cronLogger
 }
