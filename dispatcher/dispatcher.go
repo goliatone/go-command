@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/goliatone/command"
+	"github.com/goliatone/command/runner"
 )
 
 // // NEEDS REVIEW ////
@@ -44,6 +45,8 @@ func (d *Dispatcher) GetHandlers(msgType string) []any {
 	return d.handlers[msgType]
 }
 
+func (d *Dispatcher) UnregisterHandler() {}
+
 // WithExitOnError sets exitOnErr to true.
 func WithExitOnError() Option {
 	return func(d *Dispatcher) {
@@ -55,38 +58,57 @@ var Default = NewDispatcher()
 
 ////
 
-// Subscribe a CommandHandler for a particular message type T.
-func SubscribeCommand[T command.Message](handler command.Commander[T]) {
-	var msg T
-	Default.RegisterHandler(msg.Type(), handler)
+type commandWrapper[T command.Message] struct {
+	runner *runner.Handler
+	cmd    command.Commander[T]
 }
 
-func SubscribeCommandFunc[T command.Message](handler command.CommandFunc[T]) {
+type queryWrapper[T command.Message, R any] struct {
+	runner *runner.Handler
+	qry    command.Querier[T, R]
+}
+
+// Subscribe a CommandHandler for a particular message type T.
+func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) {
 	var msg T
-	Default.RegisterHandler(msg.Type(), handler)
+	h := runner.NewHandler(runnerOpts...)
+	wrapper := &commandWrapper[T]{
+		runner: h,
+		cmd:    cmd,
+	}
+
+	Default.RegisterHandler(msg.Type(), wrapper)
+}
+
+func SubscribeCommandFunc[T command.Message](handler command.CommandFunc[T], runnerOpts ...runner.Option) {
+	SubscribeCommand(handler, runnerOpts...)
 }
 
 // Subscribe a QueryHandler for a particular message type T, R.
-func SubscribeQuery[T command.Message, R any](handler command.Querier[T, R]) {
+func SubscribeQuery[T command.Message, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) {
 	var msg T
-	Default.RegisterHandler(msg.Type(), handler)
+	r := runner.NewHandler(runnerOpts...)
+	wrapper := &queryWrapper[T, R]{
+		runner: r,
+		qry:    qry,
+	}
+	Default.RegisterHandler(msg.Type(), wrapper)
 }
 
-func SubscribeQueryFunc[T command.Message, R any](handler command.QueryFunc[T, R]) {
-	var msg T
-	Default.RegisterHandler(msg.Type(), handler)
+func SubscribeQueryFunc[T command.Message, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) {
+	SubscribeQuery(qry, runnerOpts...)
 }
 
-func getCommandHandlers[T command.Message](id *Dispatcher) ([]command.Commander[T], error) {
+func getCommandHandlers[T command.Message](id *Dispatcher) ([]*commandWrapper[T], error) {
 	var msg T
 	handlers := id.GetHandlers(msg.Type())
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no command handlers for message type %s", msg.Type())
 	}
 
-	var typedHandlers []command.Commander[T]
+	var typedHandlers []*commandWrapper[T]
 	for _, h := range handlers {
-		cmdHandler, ok := h.(command.Commander[T])
+		cmdHandler, ok := h.(*commandWrapper[T])
 		if !ok {
 			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", msg.Type())
 		}
@@ -97,7 +119,7 @@ func getCommandHandlers[T command.Message](id *Dispatcher) ([]command.Commander[
 
 // Dispatch executes all registered CommandHandlers for T.
 func Dispatch[T command.Message](ctx context.Context, msg T) error {
-	handlers, err := getCommandHandlers[T](Default)
+	wrapers, err := getCommandHandlers[T](Default)
 	if err != nil {
 		return command.WrapError("NoHandlers", err.Error(), err)
 	}
@@ -107,30 +129,26 @@ func Dispatch[T command.Message](ctx context.Context, msg T) error {
 	}
 
 	var errs error
-	for _, handler := range handlers {
-		select {
-		case <-ctx.Done():
-			return command.WrapError("ContextError", "context canceled during execution", ctx.Err())
-		default:
-			if err := handler.Execute(ctx, msg); err != nil {
-				wrappedErr := command.WrapError(
-					"HandlerExecutionFailed",
-					fmt.Sprintf("handler failed for type %s", msg.Type()),
-					err,
-				)
+	for _, cw := range wrapers {
+		if err := runner.RunCommand(ctx, cw.runner, cw.cmd, msg); err != nil {
+			wrappedErr := command.WrapError(
+				"HandlerExecutionFailed",
+				fmt.Sprintf("handler failed for type %s", msg.Type()),
+				err,
+			)
 
-				if Default.ExitOnErr {
-					return wrappedErr
-				}
-				errors.Join(errs)
+			if Default.ExitOnErr {
+				return wrappedErr
 			}
+
+			errs = errors.Join(errs, err)
 		}
 	}
 
 	return errs
 }
 
-func getQueryHandler[T command.Message, R any](qb *Dispatcher) (command.Querier[T, R], error) {
+func getQueryHandler[T command.Message, R any](qb *Dispatcher) (*queryWrapper[T, R], error) {
 	var msg T
 	handlers := qb.GetHandlers(msg.Type())
 
@@ -142,7 +160,7 @@ func getQueryHandler[T command.Message, R any](qb *Dispatcher) (command.Querier[
 		return nil, errors.New("multiple query handlers found, ambiguous query")
 	}
 
-	qh, ok := handlers[0].(command.Querier[T, R])
+	qh, ok := handlers[0].(*queryWrapper[T, R])
 	if !ok {
 		return nil, fmt.Errorf("handler does not implement QueryHandler for type %s", msg.Type())
 	}
@@ -152,7 +170,7 @@ func getQueryHandler[T command.Message, R any](qb *Dispatcher) (command.Querier[
 // Query executes the single registered QueryHandler for T, returning R.
 func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
 	var zero R
-	handler, err := getQueryHandler[T, R](Default)
+	qw, err := getQueryHandler[T, R](Default)
 	if err != nil {
 		return zero, command.WrapError("NoHandlers", err.Error(), err)
 	}
@@ -161,7 +179,7 @@ func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
 		return zero, command.WrapError("ContextError", "context canceled or deadline exceeded", ctx.Err())
 	}
 
-	result, qerr := handler.Query(ctx, msg)
+	result, qerr := runner.RunQuery(ctx, qw.runner, qw.qry, msg)
 	if qerr != nil {
 		return zero, command.WrapError(
 			"HandlerExecutionFailed",
