@@ -15,69 +15,6 @@ type Logger interface {
 	Error(msg string, args ...any)
 }
 
-type Option func(*Handler)
-
-func WithTimeout(t time.Duration) Option {
-	return func(r *Handler) {
-		r.timeout = t
-	}
-}
-
-func WithDeadline(d time.Time) Option {
-	return func(r *Handler) {
-		r.deadline = d
-	}
-}
-
-func WithRunOnce(once bool) Option {
-	return func(r *Handler) {
-		r.once = once
-	}
-}
-
-func WithMaxRetries(max int) Option {
-	return func(r *Handler) {
-		r.maxRetries = max
-	}
-}
-
-func WithMaxRuns(max int) Option {
-	return func(r *Handler) {
-		r.maxRuns = max
-	}
-}
-
-func WithErrorHandler(h func(error)) Option {
-	return func(r *Handler) {
-		if h == nil {
-			h = func(err error) {}
-		}
-		r.errorHandler = h
-	}
-}
-
-func WithLogger(l Logger) Option {
-	return func(r *Handler) {
-		r.logger = l
-	}
-}
-
-func WithDoneHandler(d func(*Handler)) Option {
-	return func(r *Handler) {
-		if d == nil {
-			d = func(r *Handler) {}
-		}
-		r.doneHandler = d
-	}
-}
-
-// WithRetryStrategy lets you define a custom retry/backoff approach.
-func WithRetryStrategy(s RetryStrategy) Option {
-	return func(r *Handler) {
-		r.retryStrategy = s
-	}
-}
-
 type Handler struct {
 	mu sync.Mutex
 
@@ -116,17 +53,17 @@ func NewHandler(opts ...Option) *Handler {
 	return r
 }
 
-func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) {
+func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error {
 	h.mu.Lock()
 
 	if h.once && h.successfulRuns >= 1 {
 		h.mu.Unlock()
-		return
+		return nil
 	}
 
 	if h.successfulRuns >= h.maxRuns && h.maxRuns > 0 {
 		h.mu.Unlock()
-		return
+		return nil
 	}
 
 	maxRetries := h.maxRetries
@@ -136,12 +73,18 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) {
 	ctx, cancel := h.contextWithSettings(ctx)
 	defer cancel()
 
-	var err error
+	var finalErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		err = fn(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err() // catch context.DeadlineExceeded
+		}
+		err := fn(ctx)
 		if err == nil {
+			finalErr = nil
 			break
 		}
+
+		finalErr = err
 
 		if attempt < maxRetries {
 			h.handleError(command.WrapError(
@@ -167,21 +110,21 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) {
 
 	h.runs++
 
-	if err == nil {
+	if finalErr == nil {
 		h.successfulRuns++
 	} else {
 		h.handleError(command.WrapError(
 			"Run Failed",
-			fmt.Sprintf("Runner failed after %d attempts",
-				h.maxRetries+1,
-			),
-			err,
+			fmt.Sprintf("Runner failed after %d attempts", h.maxRetries+1),
+			finalErr,
 		))
 	}
 
 	if h.maxRuns > 0 && h.successfulRuns >= h.maxRuns {
 		h.done()
 	}
+
+	return finalErr
 }
 
 func (h *Handler) handleError(err error) {
@@ -216,20 +159,23 @@ func (h *Handler) contextWithSettings(parent context.Context) (context.Context, 
 	}
 }
 
-func RunCommand[T command.Message](ctx context.Context, h *Handler, c command.Commander[T], msg T) {
-	h.Run(ctx, func(ctx context.Context) error {
+func RunCommand[T command.Message](ctx context.Context, h *Handler, c command.Commander[T], msg T) error {
+	return h.Run(ctx, func(ctx context.Context) error {
 		return c.Execute(ctx, msg)
 	})
 }
 
 func RunQuery[T command.Message, R any](ctx context.Context, h *Handler, q command.Querier[T, R], msg T) (R, error) {
 	var result R
-	var runErr error
-	h.Run(ctx, func(ctx context.Context) error {
-		var err error
-		result, err = q.Query(ctx, msg)
-		runErr = err
-		return err
+	err := h.Run(ctx, func(ctx context.Context) error {
+		var queryErr error
+		result, queryErr = q.Query(ctx, msg)
+		return queryErr
 	})
-	return result, runErr
+
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
