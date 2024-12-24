@@ -1,4 +1,4 @@
-module github.com/goliatone/command
+module github.com/goliatone/go-command
 
 go 1.23.4
 
