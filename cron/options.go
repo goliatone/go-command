@@ -1,4 +1,4 @@
-//go:generate go run ../tools/gen-setters/main.go -input ./options.go -output ./options_setters.go -package cron
+//go:generate options-setters -input ./options.go -output ./options_setters.go -package cron
 package cron
 
 import (
