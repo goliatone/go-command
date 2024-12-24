@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/goliatone/command"
-	"github.com/goliatone/command/runner"
+	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/runner"
 
 	rcron "github.com/robfig/cron/v3"
 )
