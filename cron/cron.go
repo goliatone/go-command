@@ -191,13 +191,13 @@ func (c *Scheduler) RemoveHandler(entryID int) {
 }
 
 // Start begins executing scheduled jobs
-func (c *Scheduler) Start() error {
+func (c *Scheduler) Start(_ context.Context) error {
 	c.cron.Start()
 	return nil
 }
 
 // Stop stops executing scheduled jobs
-func (c *Scheduler) Stop() error {
+func (c *Scheduler) Stop(_ context.Context) error {
 	c.cron.Stop()
 	return nil
 }
