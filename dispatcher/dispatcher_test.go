@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goliatone/command"
+	"github.com/goliatone/go-command"
 )
 
 type TestMessage struct {
