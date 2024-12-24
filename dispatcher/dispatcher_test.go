@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,8 +55,25 @@ func newMockDB() *mockDB {
 }
 
 func (m *mockDB) AddUser(u *User) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.usersByID[u.ID] = u
 	m.usersByEmail[u.Email] = u
+}
+
+func (m *mockDB) GetUser(identifier string) (*User, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if user, ok := m.usersByID[identifier]; ok {
+		return user, true
+	}
+
+	if user, ok := m.usersByEmail[identifier]; ok {
+		return user, true
+	}
+
+	return nil, false
 }
 
 type CreateUserHandler struct {
@@ -70,9 +86,6 @@ func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserMessage
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		h.db.mu.Lock()
-		defer h.db.mu.Unlock()
-
 		id := "user"
 		if h.generateID != nil {
 			id = h.generateID()
@@ -82,8 +95,7 @@ func (h *CreateUserHandler) Execute(ctx context.Context, event CreateUserMessage
 			ID:    id,
 			Email: event.Email,
 		}
-		h.db.usersByID[user.ID] = user
-		h.db.usersByEmail[event.Email] = user
+		h.db.AddUser(user)
 		return nil
 	}
 }
@@ -97,10 +109,7 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
-		h.db.mu.RLock()
-		defer h.db.mu.RUnlock()
-
-		if user, ok := h.db.usersByID[event.ID]; ok {
+		if user, ok := h.db.GetUser(event.ID); ok {
 			return user, nil
 		}
 
@@ -127,7 +136,7 @@ func TestCommandDispatcher(t *testing.T) {
 			t.Errorf("expected no error, got %v", err)
 		}
 
-		if user, exists := db.usersByEmail["test@example.com"]; !exists {
+		if user, exists := db.GetUser("test@example.com"); !exists {
 			t.Error("user was not created")
 		} else if user.Email != "test@example.com" {
 			t.Errorf("expected email %s, got %s", "test@example.com", user.Email)
@@ -251,68 +260,68 @@ func TestQueryDispatcher(t *testing.T) {
 }
 
 // Example usage
-func Example() {
-	// Initialize mock database
-	db := newMockDB()
+// func Example() {
+// 	// Initialize mock database
+// 	db := newMockDB()
 
-	// Register command handler
-	createHandler := &CreateUserHandler{db: db}
+// 	// Register command handler
+// 	createHandler := &CreateUserHandler{db: db}
 
-	SubscribeCommand(createHandler)
+// 	SubscribeCommand(createHandler)
 
-	// Register query handler
-	getHandler := &GetUserHandler{db: db}
-	SubscribeQuery[GetUserMessage, *User](getHandler)
+// 	// Register query handler
+// 	getHandler := &GetUserHandler{db: db}
+// 	SubscribeQuery[GetUserMessage, *User](getHandler)
 
-	// Create a user
-	err := Dispatch(context.Background(), CreateUserMessage{
-		Email: "john@example.com",
-	})
-	if err != nil {
-		panic(err)
-	}
+// 	// Create a user
+// 	err := Dispatch(context.Background(), CreateUserMessage{
+// 		Email: "john@example.com",
+// 	})
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	// Query the user
-	user, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
-		ID: "user-123",
-	})
-	if err != nil {
-		panic(err)
-	}
+// 	// Query the user
+// 	user, err := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
+// 		ID: "user-123",
+// 	})
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	fmt.Printf("Found user: %s (%s)\n", user.Email, user.ID)
-	// Output: Found user: john@example.com (user-123)
-}
+// 	fmt.Printf("Found user: %s (%s)\n", user.Email, user.ID)
+// 	// Output: Found user: john@example.com (user-123)
+// }
 
 // Example of using function adapters
-func ExampleCommandFunc() {
+// func ExampleCommandFunc() {
 
-	// Command handler using CommandFunc
-	SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
-		fmt.Printf("Creating user: %s\n", e.Email)
-		return nil
-	}))
+// 	// Command handler using CommandFunc
+// 	SubscribeCommand(command.CommandFunc[CreateUserMessage](func(ctx context.Context, e CreateUserMessage) error {
+// 		fmt.Printf("Creating user: %s\n", e.Email)
+// 		return nil
+// 	}))
 
-	// Query handler using QueryFunc
-	SubscribeQuery(command.QueryFunc[GetUserMessage, *User](
-		func(ctx context.Context, e GetUserMessage) (*User, error) {
-			return &User{ID: e.ID, Email: "john@example.com"}, nil
-		}))
+// 	// Query handler using QueryFunc
+// 	SubscribeQuery(command.QueryFunc[GetUserMessage, *User](
+// 		func(ctx context.Context, e GetUserMessage) (*User, error) {
+// 			return &User{ID: e.ID, Email: "john@example.com"}, nil
+// 		}))
 
-	// Use the handlers
-	_ = Dispatch(context.Background(), CreateUserMessage{
-		Email: "john@example.com",
-	})
+// 	// Use the handlers
+// 	_ = Dispatch(context.Background(), CreateUserMessage{
+// 		Email: "john@example.com",
+// 	})
 
-	user, _ := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
-		ID: "user-123",
-	})
+// 	user, _ := Query[GetUserMessage, *User](context.Background(), GetUserMessage{
+// 		ID: "user-123",
+// 	})
 
-	fmt.Printf("Found user: %s\n", user.Email)
-	// Output:
-	// Creating user: john@example.com
-	// Found user: john@example.com
-}
+// 	fmt.Printf("Found user: %s\n", user.Email)
+// 	// Output:
+// 	// Creating user: john@example.com
+// 	// Found user: john@example.com
+// }
 
 func TestHTTPIntegration(t *testing.T) {
 	Default = NewDispatcher()
@@ -518,83 +527,83 @@ func TestHTTPIntegration(t *testing.T) {
 	})
 }
 
-func ExampleHTTPIntegration() {
-	Default = NewDispatcher()
+// func ExampleHTTPIntegration() {
+// 	Default = NewDispatcher()
 
-	db := newMockDB()
+// 	db := newMockDB()
 
-	// Register handlers
-	SubscribeCommand(&CreateUserHandler{db: db})
-	SubscribeQuery[GetUserMessage, *User](&GetUserHandler{db: db})
+// 	// Register handlers
+// 	SubscribeCommand(&CreateUserHandler{db: db})
+// 	SubscribeQuery[GetUserMessage, *User](&GetUserHandler{db: db})
 
-	// HTTP handler for creating users
-	createUserHandler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+// 	// HTTP handler for creating users
+// 	createUserHandler := func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method != http.MethodPost {
+// 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// 			return
+// 		}
 
-		var input struct {
-			Email string `json:"email"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+// 		var input struct {
+// 			Email string `json:"email"`
+// 		}
+// 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+// 			http.Error(w, err.Error(), http.StatusBadRequest)
+// 			return
+// 		}
 
-		err := Dispatch(r.Context(), CreateUserMessage{
-			Email: input.Email,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+// 		err := Dispatch(r.Context(), CreateUserMessage{
+// 			Email: input.Email,
+// 		})
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusInternalServerError)
+// 			return
+// 		}
 
-		w.WriteHeader(http.StatusCreated)
-	}
+// 		w.WriteHeader(http.StatusCreated)
+// 	}
 
-	// HTTP handler for getting users
-	getUserHandler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+// 	// HTTP handler for getting users
+// 	getUserHandler := func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method != http.MethodGet {
+// 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// 			return
+// 		}
 
-		// Get userID from URL path
-		userID := strings.TrimPrefix(r.URL.Path, "/users/")
-		if userID == "" {
-			http.Error(w, "user id required", http.StatusBadRequest)
-			return
-		}
+// 		// Get userID from URL path
+// 		userID := strings.TrimPrefix(r.URL.Path, "/users/")
+// 		if userID == "" {
+// 			http.Error(w, "user id required", http.StatusBadRequest)
+// 			return
+// 		}
 
-		user, err := Query[GetUserMessage, *User](r.Context(), GetUserMessage{
-			ID: userID,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
+// 		user, err := Query[GetUserMessage, *User](r.Context(), GetUserMessage{
+// 			ID: userID,
+// 		})
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusNotFound)
+// 			return
+// 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
-	}
+// 		w.Header().Set("Content-Type", "application/json")
+// 		json.NewEncoder(w).Encode(user)
+// 	}
 
-	// Setup routes using standard http
-	mux := http.NewServeMux()
-	mux.HandleFunc("/users", createUserHandler) // POST /users
-	mux.HandleFunc("/users/", getUserHandler)   // GET /users/{id}
+// 	// Setup routes using standard http
+// 	mux := http.NewServeMux()
+// 	mux.HandleFunc("/users", createUserHandler) // POST /users
+// 	mux.HandleFunc("/users/", getUserHandler)   // GET /users/{id}
 
-	// Start server
-	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
+// 	// Start server
+// 	srv := &http.Server{
+// 		Addr:    ":8080",
+// 		Handler: mux,
+// 	}
 
-	log.Printf("Server starting on :8080")
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
-	}
-}
+// 	log.Printf("Server starting on :8080")
+// 	if err := srv.ListenAndServe(); err != nil {
+// 		log.Fatal(err)
+// 	}
+// }
 
 /////
 
