@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/goliatone/command"
-	"github.com/goliatone/command/runner"
+	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/runner"
 )
 
 // Dispatcher is the core struct to handle dispatcher options
