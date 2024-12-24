@@ -1,5 +1,29 @@
 # Changelog
 
+# [0.0.2](https://github.com/goliatone/go-commands/compare/v0.0.1...v0.0.2) - (2024-12-24)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Release task check for version before checkout ([3162359](https://github.com/goliatone/go-commands/commit/3162359b4534d96e48997515e58084e3fa1390ee))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.0.2 ([e99c019](https://github.com/goliatone/go-commands/commit/e99c019c54d98cca8a6b3bc7b0db57003ecc7b58))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Rename package ([5718d2e](https://github.com/goliatone/go-commands/commit/5718d2e6c9976d5168e9dc5f7d6785d3970db6db))  - (goliatone)
+- Rename package ([ec9d8fc](https://github.com/goliatone/go-commands/commit/ec9d8fce964217e9fef01d6856c656e909208cdb))  - (goliatone)
+- Rename package ([a2b3c7f](https://github.com/goliatone/go-commands/commit/a2b3c7fa3ccb7756d0af4ed2ed3b20095e168c1a))  - (goliatone)
+- Rename package ([6ecff9c](https://github.com/goliatone/go-commands/commit/6ecff9c39e03dd98834ccd6c83a53684ac064d42))  - (goliatone)
+- Rename package ([92ffd24](https://github.com/goliatone/go-commands/commit/92ffd24aaf924fd563cf646b28cfd1b4e83af12c))  - (goliatone)
+- Rename package ([ccb43be](https://github.com/goliatone/go-commands/commit/ccb43bed65b5709258b0a0d0c3d933d3c7b80ee8))  - (goliatone)
+- Rename package ([462a8ea](https://github.com/goliatone/go-commands/commit/462a8ea3deec397e5dc565ba6da935f9a2bcd393))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.0.1 ([5789a63](https://github.com/goliatone/go-commands/commit/5789a63840bb5e37dabc0eba698591c79119182a))  - (goliatone)
+
 # [0.0.1](https://github.com/goliatone/go-commands/tree/v0.0.1) - (2024-12-24)
 
 ## <!-- 1 -->🐛 Bug Fixes
