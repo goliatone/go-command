@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goliatone/command"
+	"github.com/goliatone/go-command"
 )
 
 // Test message type
