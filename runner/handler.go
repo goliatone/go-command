@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goliatone/command"
+	"github.com/goliatone/go-command"
 )
 
 // Logger interface shared across packages
