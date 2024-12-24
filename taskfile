@@ -269,8 +269,13 @@ function release {
 
     # Fetch all changes from origin
     git fetch --all
-    # Make sure we have the latest version file
-    git checkout origin/main -- ".version"
+
+    if [ -f ".version" ]; then
+        # Make sure we have the latest version file
+        git checkout origin/main -- ".version"
+    else
+        lgr I "File .version does not exist. Skipping."
+    fi
 
     # Pull tags to make sure we have
     git pull --tags -f
