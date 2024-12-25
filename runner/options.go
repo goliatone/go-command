@@ -1,3 +1,4 @@
+//go:generate options-setters -input ./options.go -output ./options_setters.go -package runner
 package runner
 
 import "time"
