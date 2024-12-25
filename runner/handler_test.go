@@ -295,6 +295,10 @@ func (t testMessage) Type() string {
 	return t.name
 }
 
+func (t testMessage) Validate() error {
+	return nil
+}
+
 type mockCommander struct {
 	callCount int
 	failMax   int // number of times to fail before succeeding
