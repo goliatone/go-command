@@ -68,9 +68,10 @@ func TestCronScheduler(t *testing.T) {
 			t.Fatalf("Failed to add handler: %v", err)
 		}
 
-		scheduler.Start()
+		ctx := context.Background()
+		scheduler.Start(ctx)
 		time.Sleep(1500 * time.Millisecond)
-		scheduler.Stop()
+		scheduler.Stop(ctx)
 
 		if count := handler.GetExecutionCount(); count == 0 {
 			t.Error("Command handler was not executed")
@@ -91,9 +92,10 @@ func TestCronScheduler(t *testing.T) {
 			t.Fatalf("Failed to add handler: %v", err)
 		}
 
-		scheduler.Start()
+		ctx := context.Background()
+		scheduler.Start(ctx)
 		time.Sleep(1500 * time.Millisecond)
-		scheduler.Stop()
+		scheduler.Stop(ctx)
 
 		if count := handler.GetExecutionCount(); count == 0 {
 			t.Error("Command handler was not executed")
@@ -118,10 +120,11 @@ func TestCronScheduler(t *testing.T) {
 			t.Fatalf("Failed to add handler: %v", err)
 		}
 
-		scheduler.Start()
+		ctx := context.Background()
+		scheduler.Start(ctx)
 		// Wait for at least one execution
 		time.Sleep(2 * time.Second)
-		scheduler.Stop()
+		scheduler.Stop(ctx)
 
 		if count.Load() == 0 {
 			t.Error("Query handler was not executed")
