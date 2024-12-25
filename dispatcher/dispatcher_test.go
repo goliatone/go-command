@@ -186,11 +186,11 @@ func TestCommandDispatcher(t *testing.T) {
 	})
 
 	t.Run("exit on error", func(t *testing.T) {
-		exitOneErr := Default.ExitOnErr
+		exitOneErr := ExitOnErr
 		defer func(e bool) {
-			Default.ExitOnErr = e
+			ExitOnErr = e
 		}(exitOneErr)
-		Default.ExitOnErr = true
+		ExitOnErr = true
 
 		firstError := errors.New("handler error")
 		var secondHandlerCalled bool
