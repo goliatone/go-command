@@ -12,9 +12,8 @@ import (
 
 // Dispatcher is the core struct to handle dispatcher options
 type Dispatcher struct {
-	mu        sync.RWMutex
-	handlers  map[string][]any
-	ExitOnErr bool
+	mu       sync.RWMutex
+	handlers map[string][]any
 }
 
 // Option defines the functional option signature.
@@ -23,8 +22,7 @@ type Option func(*Dispatcher)
 // NewDispatcher applies the given options to a new instance of the dispatcher.
 func NewDispatcher(opts ...Option) *Dispatcher {
 	d := &Dispatcher{
-		handlers:  make(map[string][]any),
-		ExitOnErr: false,
+		handlers: make(map[string][]any),
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -47,11 +45,12 @@ func (d *Dispatcher) GetHandlers(msgType string) []any {
 // WithExitOnError sets exitOnErr to true.
 func WithExitOnError() Option {
 	return func(d *Dispatcher) {
-		d.ExitOnErr = true
+		ExitOnErr = true
 	}
 }
 
 var Default = NewDispatcher()
+var ExitOnErr = false
 
 // Subscribe a CommandHandler for a particular message type T.
 func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
@@ -111,6 +110,11 @@ func getCommandHandlers[T command.Message](id *Dispatcher) ([]*commandWrapper[T]
 		}
 		typedHandlers = append(typedHandlers, cmdHandler)
 	}
+
+	if len(typedHandlers) == 0 {
+		return nil, fmt.Errorf("no command handlers for message type %s", msg.Type())
+	}
+
 	return typedHandlers, nil
 }
 
@@ -137,12 +141,10 @@ func Dispatch[T command.Message](ctx context.Context, msg T) error {
 				fmt.Sprintf("handler failed for type %s", msg.Type()),
 				err,
 			)
-
-			if Default.ExitOnErr {
+			if ExitOnErr {
 				return wrappedErr
 			}
-
-			errs = errors.Join(errs, err)
+			errs = errors.Join(errs, wrappedErr)
 		}
 	}
 
