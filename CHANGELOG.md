@@ -1,5 +1,60 @@
 # Changelog
 
+# [0.1.0](https://github.com/goliatone/go-commands/compare/v0.0.2...v0.1.0) - (2024-12-26)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Add missing commit ([113328c](https://github.com/goliatone/go-commands/commit/113328cbe3cbbc4b44065684ce78657d5d875ac9))  - (goliatone)
+- Add missing commit ([50fbaf1](https://github.com/goliatone/go-commands/commit/50fbaf1be01a4d3db1cd26b40eba5c55cc1554f1))  - (goliatone)
+- Add missing commit ([cade43b](https://github.com/goliatone/go-commands/commit/cade43b4046d87896fb3ca42a6a06c97903eff42))  - (goliatone)
+- Test for conc ([bf76804](https://github.com/goliatone/go-commands/commit/bf7680482d016e937db4966bef8341e2f4abb427))  - (goliatone)
+- Log errors on handleError ([10e8a71](https://github.com/goliatone/go-commands/commit/10e8a716c8943a513c4f3cb68471953a2b1d3872))  - (goliatone)
+- Implement interface ([c41412b](https://github.com/goliatone/go-commands/commit/c41412b6b4fa30fd1758f944a7e50df1d2938cfb))  - (goliatone)
+- Update context ([e97f156](https://github.com/goliatone/go-commands/commit/e97f1564c99b8b339d4f1540a378b1d751ac163f))  - (goliatone)
+- Use options-setters ([3399096](https://github.com/goliatone/go-commands/commit/3399096854b422eed1141be00560a57f90070171))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.1.0 ([72ae69d](https://github.com/goliatone/go-commands/commit/72ae69da444a074c0b9ce149ded6246d0509650c))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Mux base router ([0a7e3de](https://github.com/goliatone/go-commands/commit/0a7e3de51547eb7f077d823fa1da09d301309708))  - (goliatone)
+- Mux base router ([13f307f](https://github.com/goliatone/go-commands/commit/13f307fac491635ba06b4a06ea9bab384b1c25dc))  - (goliatone)
+- Mux base router ([9f3169d](https://github.com/goliatone/go-commands/commit/9f3169d3ae3adab096e4b999140c3dc22309e491))  - (goliatone)
+- Mux base router ([339b0c4](https://github.com/goliatone/go-commands/commit/339b0c48af7aa01d67565dff03a268e7c52f8b89))  - (goliatone)
+- Generate options setters ([9ca8c4d](https://github.com/goliatone/go-commands/commit/9ca8c4d0bb81b0245258677ed3755b0a3dda106f))  - (goliatone)
+- Generate options setters ([c4a1529](https://github.com/goliatone/go-commands/commit/c4a1529081400de43904ebdf7546ee26c5816753))  - (goliatone)
+- Options setters ([30c1123](https://github.com/goliatone/go-commands/commit/30c11230d4fc00505197a0711a2fd54f6bdf40cf))  - (goliatone)
+- Code generator for setters ([30d0a0c](https://github.com/goliatone/go-commands/commit/30d0a0cb1a586ec5c346c58e7d0b556fcc042afc))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Remove subscription implementaiton ([55656fa](https://github.com/goliatone/go-commands/commit/55656fa9893f6b006528b5f9ffc0493231bc629d))  - (goliatone)
+- Move ExitOnErr to top level ([782ee5b](https://github.com/goliatone/go-commands/commit/782ee5b9548dfc0a9e587e08006ca6bad5de5234))  - (goliatone)
+- Move ExitOnErr to top level ([df5a5dd](https://github.com/goliatone/go-commands/commit/df5a5ddfb63381743d3b15be2ff6208df7e9f591))  - (goliatone)
+- Use package generators ([c3c9bdf](https://github.com/goliatone/go-commands/commit/c3c9bdf574481324f7cc27caba6bf21f8b767d7e))  - (goliatone)
+
+## <!-- 22 -->🚧 WIP
+
+- Make cron scheduler follow service interface ([ff39c7e](https://github.com/goliatone/go-commands/commit/ff39c7e9d2d98b9b0dbbf9154d14593710180417))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.0.2 ([795dd9d](https://github.com/goliatone/go-commands/commit/795dd9db59d4106f71da6dba583fbd292b92b323))  - (goliatone)
+
+## <!-- 30 -->📝 Other
+
+- PR [#2](https://github.com/goliatone/go-commands/pull/2): router mux ([bc8a0d1](https://github.com/goliatone/go-commands/commit/bc8a0d117e686f335c26c377d0bdda9f7539329c))  - (goliatone)
+- Merge fix ([d6b76b8](https://github.com/goliatone/go-commands/commit/d6b76b8ad510a39031f94f964f8980c5adc17d86))  - (goliatone)
+- PR [#1](https://github.com/goliatone/go-commands/pull/1): generators ([412b13f](https://github.com/goliatone/go-commands/commit/412b13f5eabba6270bc5a5c8439453acd7c6ab55))  - (goliatone)
+- Clean up ([68a5e38](https://github.com/goliatone/go-commands/commit/68a5e38b9dc852bd10dbc1d9dd3cc928ed4ee4a6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Clean up ([5949ac5](https://github.com/goliatone/go-commands/commit/5949ac5c67a46108295080784532f61f9a4714be))  - (goliatone)
+- Readme content ([60bfdaa](https://github.com/goliatone/go-commands/commit/60bfdaaa48b0dff0b676d4b61cc8ea711785d88b))  - (goliatone)
+
 # [0.0.2](https://github.com/goliatone/go-commands/compare/v0.0.1...v0.0.2) - (2024-12-24)
 
 ## <!-- 1 -->🐛 Bug Fixes
