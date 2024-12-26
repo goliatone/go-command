@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ type Mux struct {
 	sorted     []string
 	handlers   map[string][]Entry
 	routeMatch func(etype, pattern string) bool
+	entryComp  func(a, b any) bool
 }
 
 type Entry struct {
@@ -28,29 +30,23 @@ func (i *Entry) Unsubscribe() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	hs := h.handlers[i.pattern]
-	ns := make([]Entry, 0, len(hs))
+	old := h.handlers[i.pattern]
+	new := make([]Entry, 0, len(old))
 
-	for _, x := range hs {
-		if x != i.Handler {
-			ns = append(ns, x)
+	for _, x := range old {
+		if !i.hmap.entryComp(x.Handler, i.Handler) {
+			fmt.Printf("other '%s' remove '%s'\n", x.Handler, i.Handler)
+			new = append(new, x)
 		}
 	}
-	h.handlers[i.pattern] = hs
-}
-
-type Option func(m *Mux)
-
-func WithRouteMatcher(matcher func(t, p string) bool) Option {
-	return func(m *Mux) {
-		m.routeMatch = matcher
-	}
+	h.handlers[i.pattern] = new
 }
 
 func NewMux(opts ...Option) *Mux {
 	m := &Mux{
 		handlers:   make(map[string][]Entry),
 		routeMatch: strings.HasPrefix,
+		entryComp:  compareHandlers,
 	}
 
 	return m
@@ -100,4 +96,16 @@ func (m *Mux) match(pattern string) []Entry {
 	}
 
 	return nil
+}
+
+func compareHandlers(a, b any) bool {
+	if a == nil && b == nil {
+		return true
+	}
+
+	if a == nil || b == nil {
+		return false
+	}
+	// could use reflect.DeepEqual
+	return a == b
 }
