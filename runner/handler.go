@@ -142,6 +142,7 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 }
 
 func (h *Handler) handleError(err error) {
+	h.logError("handler error: %s", err)
 	h.errorHandler(err)
 }
 

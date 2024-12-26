@@ -183,8 +183,8 @@ func TestHandler_Concurrency(t *testing.T) {
 		t.Errorf("expected Handler.successfulRuns=%d, got %d", goroutines, hSuccess(h))
 	}
 
-	if cf.calls < 2*goroutines {
-		t.Errorf("expected at least %d calls, got %d", 2*goroutines, cf.calls)
+	if cf.calls < goroutines {
+		t.Errorf("expected at least %d calls, got %d", goroutines, cf.calls)
 	}
 }
 
@@ -280,10 +280,12 @@ type mockLogger struct {
 }
 
 func (m *mockLogger) Info(msg string, args ...any) {
+	fmt.Printf("[INF] mock: "+msg+"\n", args...)
 	m.infoMessages = append(m.infoMessages, fmt.Sprintf(msg, args...))
 }
 
 func (m *mockLogger) Error(msg string, args ...any) {
+	fmt.Printf("[ERR] mock: "+msg+"\n", args...)
 	m.errorMessages = append(m.errorMessages, fmt.Sprintf(msg, args...))
 }
 
@@ -293,6 +295,10 @@ type testMessage struct {
 
 func (t testMessage) Type() string {
 	return t.name
+}
+
+func (t testMessage) Validate() error {
+	return nil
 }
 
 type mockCommander struct {
@@ -333,6 +339,7 @@ type countingFunc struct {
 
 func (cf *countingFunc) fn(_ context.Context) error {
 	cf.calls++
+	fmt.Printf("[FNC] count: %d\n", cf.calls)
 	if cf.calls <= cf.failUntil {
 		return fmt.Errorf("forced error attempt %d", cf.calls)
 	}

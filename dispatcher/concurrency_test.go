@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/router"
 )
 
 func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
-	// Default = NewDispatcher()
+	mux = router.NewMux()
 
 	var wg sync.WaitGroup
 	numGoroutines := 100
@@ -36,7 +37,7 @@ func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestConcurrentDispatch(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	var counter atomic.Int32
 	numHandlers := 10
@@ -75,7 +76,7 @@ func TestConcurrentDispatch(t *testing.T) {
 }
 
 func TestConcurrentSubscribeDispatch(t *testing.T) {
-	// Default = NewDispatcher()
+	mux = router.NewMux()
 
 	var counter atomic.Int32
 	var wg sync.WaitGroup
@@ -111,7 +112,7 @@ func TestConcurrentSubscribeDispatch(t *testing.T) {
 }
 
 func TestRaceSubscribeUnsubscribe(t *testing.T) {
-	// Default = NewDispatcher()
+	mux = router.NewMux()
 
 	done := make(chan struct{})
 
@@ -150,7 +151,7 @@ func TestRaceSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestHandlerPanic(t *testing.T) {
-	// Default = NewDispatcher()
+	mux = router.NewMux()
 
 	panicMsg := "intentional panic"
 
