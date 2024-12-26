@@ -4,53 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/router"
 	"github.com/goliatone/go-command/runner"
 )
 
-// Dispatcher is the core struct to handle dispatcher options
-type Dispatcher struct {
-	mu       sync.RWMutex
-	handlers map[string][]any
+type Subscription interface {
+	Unsubscribe()
 }
 
-// Option defines the functional option signature.
-type Option func(*Dispatcher)
-
-// NewDispatcher applies the given options to a new instance of the dispatcher.
-func NewDispatcher(opts ...Option) *Dispatcher {
-	d := &Dispatcher{
-		handlers: make(map[string][]any),
-	}
-	for _, opt := range opts {
-		opt(d)
-	}
-	return d
-}
-
-func (d *Dispatcher) RegisterHandler(msgType string, handler any) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.handlers[msgType] = append(d.handlers[msgType], handler)
-}
-
-func (d *Dispatcher) GetHandlers(msgType string) []any {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.handlers[msgType]
-}
-
-// WithExitOnError sets exitOnErr to true.
-func WithExitOnError() Option {
-	return func(d *Dispatcher) {
-		ExitOnErr = true
-	}
-}
-
-var Default = NewDispatcher()
 var ExitOnErr = false
+var mux = router.NewMux()
 
 // Subscribe a CommandHandler for a particular message type T.
 func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
@@ -60,14 +25,7 @@ func SubscribeCommand[T command.Message](cmd command.Commander[T], runnerOpts ..
 		runner: h,
 		cmd:    cmd,
 	}
-
-	Default.RegisterHandler(msg.Type(), wrapper)
-
-	return &subs{
-		dispatcher: Default,
-		msgType:    msg.Type(),
-		handler:    wrapper,
-	}
+	return mux.Add(msg.Type(), wrapper)
 }
 
 func SubscribeCommandFunc[T command.Message](handler command.CommandFunc[T], runnerOpts ...runner.Option) Subscription {
@@ -82,29 +40,23 @@ func SubscribeQuery[T command.Message, R any](qry command.Querier[T, R], runnerO
 		runner: r,
 		qry:    qry,
 	}
-	Default.RegisterHandler(msg.Type(), wrapper)
-
-	return &subs{
-		dispatcher: Default,
-		msgType:    msg.Type(),
-		handler:    wrapper,
-	}
+	return mux.Add(msg.Type(), wrapper)
 }
 
 func SubscribeQueryFunc[T command.Message, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) Subscription {
 	return SubscribeQuery(qry, runnerOpts...)
 }
 
-func getCommandHandlers[T command.Message](id *Dispatcher) ([]*commandWrapper[T], error) {
+func getCommandHandlers[T command.Message](mx *router.Mux) ([]*commandWrapper[T], error) {
 	var msg T
-	handlers := id.GetHandlers(msg.Type())
+	handlers := mx.Get(msg.Type())
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no command handlers for message type %s", msg.Type())
 	}
 
 	var typedHandlers []*commandWrapper[T]
 	for _, h := range handlers {
-		cmdHandler, ok := h.(*commandWrapper[T])
+		cmdHandler, ok := h.Handler.(*commandWrapper[T])
 		if !ok {
 			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", msg.Type())
 		}
@@ -124,7 +76,7 @@ func Dispatch[T command.Message](ctx context.Context, msg T) error {
 		return err
 	}
 
-	wrapers, err := getCommandHandlers[T](Default)
+	wrapers, err := getCommandHandlers[T](mux)
 	if err != nil {
 		return command.WrapError("DispatchHandlerError", err.Error(), err)
 	}
@@ -151,9 +103,9 @@ func Dispatch[T command.Message](ctx context.Context, msg T) error {
 	return errs
 }
 
-func getQueryHandler[T command.Message, R any](qb *Dispatcher) (*queryWrapper[T, R], error) {
+func getQueryHandler[T command.Message, R any](mx *router.Mux) (*queryWrapper[T, R], error) {
 	var msg T
-	handlers := qb.GetHandlers(msg.Type())
+	handlers := mx.Get(msg.Type())
 
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no query handlers for message type %s", msg.Type())
@@ -163,7 +115,7 @@ func getQueryHandler[T command.Message, R any](qb *Dispatcher) (*queryWrapper[T,
 		return nil, errors.New("multiple query handlers found, ambiguous query")
 	}
 
-	qh, ok := handlers[0].(*queryWrapper[T, R])
+	qh, ok := handlers[0].Handler.(*queryWrapper[T, R])
 	if !ok {
 		return nil, fmt.Errorf("handler does not implement QueryHandler for type %s", msg.Type())
 	}
@@ -178,7 +130,7 @@ func Query[T command.Message, R any](ctx context.Context, msg T) (R, error) {
 	}
 
 	var zero R
-	qw, err := getQueryHandler[T, R](Default)
+	qw, err := getQueryHandler[T, R](mux)
 	if err != nil {
 		return zero, command.WrapError("QueryHandlerError", err.Error(), err)
 	}
