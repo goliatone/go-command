@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -35,7 +34,6 @@ func (i *Entry) Unsubscribe() {
 
 	for _, x := range old {
 		if !i.hmap.entryComp(x.Handler, i.Handler) {
-			fmt.Printf("other '%s' remove '%s'\n", x.Handler, i.Handler)
 			new = append(new, x)
 		}
 	}
