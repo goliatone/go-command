@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/router"
 )
 
 type TestMessage struct {
@@ -118,7 +119,7 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 }
 
 func TestCommandDispatcher(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
@@ -218,7 +219,7 @@ func TestCommandDispatcher(t *testing.T) {
 }
 
 func TestQueryDispatcher(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	t.Run("successful query execution", func(t *testing.T) {
 		db := newMockDB()
@@ -324,7 +325,7 @@ func TestQueryDispatcher(t *testing.T) {
 // }
 
 func TestHTTPIntegration(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	db := newMockDB()
 
@@ -664,7 +665,7 @@ func TestMessageValidation(t *testing.T) {
 }
 
 func TestDispatchWithPointers(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	commandHandler := command.CommandFunc[*TestPointerMessage](func(ctx context.Context, msg *TestPointerMessage) error {
 		msg.Value = "handled"
@@ -693,7 +694,7 @@ func TestDispatchWithPointers(t *testing.T) {
 }
 
 func TestQueryWithPointers(t *testing.T) {
-	Default = NewDispatcher()
+	mux = router.NewMux()
 
 	queryHandler := command.QueryFunc[*TestPointerMessage, TestResponse](func(ctx context.Context, msg *TestPointerMessage) (TestResponse, error) {
 		msg.Value = "queried"
