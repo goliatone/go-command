@@ -28,11 +28,13 @@ type Handler struct {
 	runs           int
 	successfulRuns int
 
-	maxRuns    int
-	maxRetries int
-	timeout    time.Duration
-	deadline   time.Time
-	runOnce    bool
+	maxRuns             int
+	maxRetries          int
+	timeout             time.Duration
+	deadline            time.Time
+	runOnce             bool
+	panicHandler        func(funcName string, fields ...map[string]any)
+	panicContextBuilder func(ctx context.Context, reqCtx map[string]any)
 }
 
 // NewHandler constructs a Runner from various options, applying defaults if unset.
@@ -45,7 +47,14 @@ func NewHandler(opts ...Option) *Handler {
 			log.Printf("runner done: %d\n", r.EntryID)
 		},
 		retryStrategy: NoDelayStrategy{},
+		panicHandler:  command.MakePanicHandler(command.DefaultPanicLogger),
+		panicContextBuilder: func(ctx context.Context, m map[string]any) {
+			if requestID, ok := ctx.Value("request_id").(string); ok {
+				m["request_id"] = requestID
+			}
+		},
 	}
+
 	for _, o := range opts {
 		if o != nil {
 			o(r)
@@ -56,11 +65,16 @@ func NewHandler(opts ...Option) *Handler {
 
 func (h *Handler) execute(ctx context.Context, fn func(context.Context) error) error {
 	err := func() (err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("handler panic: %v", r)
-			}
-		}()
+		contextInfo := map[string]any{
+			"goroutine_id": command.GetGoroutineID(),
+			"timestamp":    time.Now().Format(time.RFC3339),
+		}
+
+		if h.panicContextBuilder != nil {
+			h.panicContextBuilder(ctx, contextInfo)
+		}
+
+		defer h.panicHandler("Execute", contextInfo)
 		return fn(ctx)
 	}()
 	return err
