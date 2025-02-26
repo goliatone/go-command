@@ -1,5 +1,24 @@
 # Changelog
 
+# [0.2.0](https://github.com/goliatone/go-commands/compare/v0.1.0...v0.2.0) - (2025-02-26)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.2.0 ([cb1a0c0](https://github.com/goliatone/go-commands/commit/cb1a0c0273613a9fb9656fbb10ea1867f1305977))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- PanicLogger to handel panics ([594c42f](https://github.com/goliatone/go-commands/commit/594c42f6ab5bc6810a18a16013aa95a6a3be76bc))  - (goliatone)
+- PanicHandler to runner ([f939696](https://github.com/goliatone/go-commands/commit/f939696e11f0085f2838939be4a110d9ad86a745))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.1.0 ([b1d1cda](https://github.com/goliatone/go-commands/commit/b1d1cdae302ead28ceac26f76ebc07747695acb5))  - (goliatone)
+
+## <!-- 30 -->📝 Other
+
+- PR [#3](https://github.com/goliatone/go-commands/pull/3): panic handler ([12778fa](https://github.com/goliatone/go-commands/commit/12778fa037de3d9efa21bc05270a90dc84f96a24))  - (goliatone)
+
 # [0.1.0](https://github.com/goliatone/go-commands/compare/v0.0.2...v0.1.0) - (2024-12-26)
 
 ## <!-- 1 -->🐛 Bug Fixes
