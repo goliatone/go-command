@@ -112,6 +112,18 @@ func WithRetryStrategySetter(s RetryStrategyGetter) Option {
 	}
 }
 
+type ExitOnErrorGetter interface {
+	GetExitOnError() bool
+}
+
+func WithExitOnErrorSetter(s ExitOnErrorGetter) Option {
+	return func(cs *Handler) {
+		if s != nil {
+			cs.exitOnError = s.GetExitOnError()
+		}
+	}
+}
+
 // WithConfigurator sets multiple options from
 // a single configuration struct that implements
 // one or more Getter interfaces
@@ -152,6 +164,10 @@ func WithConfigurator(i interface{}) Option {
 
 		if s, ok := i.(RetryStrategyGetter); ok {
 			cs.retryStrategy = s.GetRetryStrategy()
+		}
+
+		if s, ok := i.(ExitOnErrorGetter); ok {
+			cs.exitOnError = s.GetExitOnError()
 		}
 
 	}
