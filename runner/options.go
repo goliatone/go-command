@@ -1,4 +1,4 @@
-//go:generate options-setters -input ./options.go -output ./options_setters.go -package runner
+//go:generate options-setters -input ./options.go -output ./options_setters.go
 package runner
 
 import "time"
@@ -59,9 +59,16 @@ func WithDoneHandler(d func(*Handler)) Option {
 	}
 }
 
-// WithRetryStrategy lets you define a custom retry/backoff approach.
+// WithRetryStrategy lets you define a custom retry/backoff approach
 func WithRetryStrategy(s RetryStrategy) Option {
 	return func(r *Handler) {
 		r.retryStrategy = s
+	}
+}
+
+// WithExitOnError configures a runner to stop on first error
+func WithExitOnError(exit bool) Option {
+	return func(h *Handler) {
+		h.exitOnError = exit
 	}
 }
