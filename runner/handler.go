@@ -33,6 +33,7 @@ type Handler struct {
 	timeout             time.Duration
 	deadline            time.Time
 	runOnce             bool
+	exitOnError         bool
 	panicHandler        func(funcName string, fields ...map[string]any)
 	panicContextBuilder func(ctx context.Context, reqCtx map[string]any)
 }
@@ -61,6 +62,13 @@ func NewHandler(opts ...Option) *Handler {
 		}
 	}
 	return r
+}
+
+// ShouldStopOnError returns whether execution should stop on first error
+func (h *Handler) ShouldStopOnErr() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.exitOnError
 }
 
 func (h *Handler) execute(ctx context.Context, fn func(context.Context) error) error {
