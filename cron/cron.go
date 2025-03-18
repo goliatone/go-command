@@ -98,7 +98,7 @@ func (cs *Scheduler) build() []rcron.Option {
 }
 
 // AddCommand is a type-safe way to add command handlers
-func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (Subscription, error) {
+func AddCommand[T command.Message](s *Scheduler, opts command.HandlerConfig, handler command.CommandFunc[T]) (Subscription, error) {
 	runnerOpts := makeRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
@@ -121,7 +121,7 @@ func (s *Scheduler) addJob(expr string, job rcron.Job) (Subscription, error) {
 // AddHandler registers a handler for scheduled execution
 // It accepts any handler type that implements the Message interface and returns
 // an entryID that can be used to remove the job later
-func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, error) {
+func (s *Scheduler) AddHandler(opts command.HandlerConfig, handler any) (Subscription, error) {
 	if opts.Expression == "" {
 		return nil, fmt.Errorf("cron expression cannot be empty")
 	}
@@ -146,45 +146,6 @@ func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, 
 	return s.addJob(opts.Expression, job)
 }
 
-func (c *Scheduler) wrapCommandHandler(handler interface {
-	Execute(context.Context, command.Message) error
-}, h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			return handler.Execute(ctx, nil)
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
-}
-
-func (c *Scheduler) wrapSimpleHandler(handler func(), h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			handler()
-			return nil
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
-}
-
-func (c *Scheduler) wrapErrorHandler(handler func() error, h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			return handler()
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
-}
-
 // RemoveHandler removes a scheduled job by its entry ID
 func (c *Scheduler) RemoveHandler(entryID int) {
 	c.cron.Remove(rcron.EntryID(entryID))
@@ -202,7 +163,7 @@ func (c *Scheduler) Stop(_ context.Context) error {
 	return nil
 }
 
-func makeRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
+func makeRunnerOptions(s *Scheduler, opts command.HandlerConfig) []runner.Option {
 	return []runner.Option{
 		runner.WithMaxRetries(opts.MaxRetries),
 		runner.WithTimeout(opts.Timeout),
