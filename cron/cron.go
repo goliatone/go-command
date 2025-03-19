@@ -197,6 +197,7 @@ func makeErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func(
 	})
 }
 
+// TODO: Is there a way we can actually make this so that the message is not an empty message?!
 func makeCommandJob[T command.Message](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
 	return rcron.FuncJob(func() {
 		var msg T
