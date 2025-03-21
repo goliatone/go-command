@@ -11,6 +11,12 @@ func WithTimeout(t time.Duration) Option {
 	}
 }
 
+func WithNoTimeout() Option {
+	return func(r *Handler) {
+		r.noTimeout = true
+	}
+}
+
 func WithDeadline(d time.Time) Option {
 	return func(r *Handler) {
 		r.deadline = d
