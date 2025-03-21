@@ -93,7 +93,7 @@ func (m *Mux) match(pattern string) []Entry {
 		}
 	}
 
-	return []Entry{}
+	return nil
 }
 
 func compareHandlers(a, b any) bool {

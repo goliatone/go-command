@@ -31,6 +31,7 @@ type Handler struct {
 	maxRuns             int
 	maxRetries          int
 	timeout             time.Duration
+	noTimeout           bool
 	deadline            time.Time
 	runOnce             bool
 	exitOnError         bool
@@ -196,13 +197,13 @@ func (h *Handler) contextWithSettings(parent context.Context) (context.Context, 
 	}
 }
 
-func RunCommand[T command.Message](ctx context.Context, h *Handler, c command.Commander[T], msg T) error {
+func RunCommand[T any](ctx context.Context, h *Handler, c command.Commander[T], msg T) error {
 	return h.Run(ctx, func(ctx context.Context) error {
 		return c.Execute(ctx, msg)
 	})
 }
 
-func RunQuery[T command.Message, R any](ctx context.Context, h *Handler, q command.Querier[T, R], msg T) (R, error) {
+func RunQuery[T any, R any](ctx context.Context, h *Handler, q command.Querier[T, R], msg T) (R, error) {
 	var result R
 	err := h.Run(ctx, func(ctx context.Context) error {
 		var queryErr error
