@@ -724,3 +724,162 @@ func TestQueryWithPointers(t *testing.T) {
 		t.Error("Query() expected error for nil message")
 	}
 }
+
+type messageTyper interface {
+	Type() string
+}
+
+// command.Message implementation
+type extMessage struct {
+	command.BaseMessage
+}
+
+func (m extMessage) Type() string {
+	return "ext_message"
+}
+
+// command.Message implementation
+type mockMessage struct {
+	typeName string
+}
+
+func (m mockMessage) Type() string {
+	return m.typeName
+}
+
+// pointer struct
+type ptrMockMessage struct {
+	typeName string
+}
+
+func (m *ptrMockMessage) Type() string {
+	return m.typeName
+}
+
+// struct that doesnt impelment Message
+type regularStruct struct {
+	Name string
+}
+
+func TestGetType(t *testing.T) {
+	var _ messageTyper = mockMessage{typeName: "test"}
+	var _ messageTyper = &ptrMockMessage{typeName: "test"}
+
+	tests := []struct {
+		name     string
+		input    any
+		expected string
+		setup    func(t *testing.T) any
+	}{
+		{
+			name:     "Nil value",
+			expected: "unknown_type",
+			setup: func(t *testing.T) any {
+				return nil
+			},
+		},
+		{
+			name:     "Struct implementing command.Message",
+			expected: "ext_message",
+			setup: func(t *testing.T) any {
+				return extMessage{}
+			},
+		},
+		{
+			name:     "Struct implementing command.Message",
+			expected: "mock_message_type",
+			setup: func(t *testing.T) any {
+				return mockMessage{typeName: "mock_message_type"}
+			},
+		},
+		{
+			name:     "Pointer to struct implementing command.Message",
+			expected: "ptr_mock_message_type",
+			setup: func(t *testing.T) any {
+				return &ptrMockMessage{typeName: "ptr_mock_message_type"}
+			},
+		},
+		{
+			name:     "Nil pointer to struct implementing command.Message",
+			expected: "unknown_type",
+			setup: func(t *testing.T) any {
+				return (*ptrMockMessage)(nil)
+			},
+		},
+		{
+			name:     "Regular struct",
+			expected: "dispatcher::dispatcher.regular_struct",
+			setup: func(t *testing.T) any {
+				return regularStruct{Name: "test"}
+			},
+		},
+		{
+			name:     "String",
+			expected: "string",
+			setup: func(t *testing.T) any {
+				return "test_string"
+			},
+		},
+		{
+			name:     "Integer",
+			expected: "int",
+			setup: func(t *testing.T) any {
+				return 42
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := tt.setup(t)
+			result := getType(input)
+			if result != tt.expected {
+				t.Errorf("getType(%v) = %s, expected %s", input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetTypeWithGenericTypes(t *testing.T) {
+	// generic with struct type
+	t.Run("Generic with struct", func(t *testing.T) {
+		var structMsg regularStruct
+		result := getType(structMsg)
+		expected := "dispatcher::dispatcher.regular_struct"
+		if result != expected {
+			t.Errorf("getType(regularStruct{}) = %s, expected %s", result, expected)
+		}
+	})
+
+	// generic with nil pointer
+	t.Run("Generic with nil pointer", func(t *testing.T) {
+		var ptrMsg *ptrMockMessage
+		result := getType(ptrMsg)
+		expected := "unknown_type"
+		if result != expected {
+			t.Errorf("getType(nil *ptrMockMessage) = %s, expected %s", result, expected)
+		}
+	})
+
+	// generic with zero value that implements messageTyper
+	t.Run("Generic with message implementation", func(t *testing.T) {
+		msg := mockMessage{typeName: ""}
+		result := getType(msg)
+		expected := "" // Type() method returns empty string
+		if result != expected {
+			t.Errorf("getType(mockMessage{typeName:\"\"}) = %s, expected %s", result, expected)
+		}
+	})
+}
+
+func TestSubscribeCommandSimulation(t *testing.T) {
+	// var msg T where T is the struct commands.InboxStartServiceMessage
+	var msg regularStruct
+
+	result := getType(msg)
+
+	expected := "dispatcher::dispatcher.regular_struct"
+	if result != expected {
+		t.Errorf("getType = %s, expected %s", result, expected)
+	}
+}
