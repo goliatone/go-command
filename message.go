@@ -14,24 +14,31 @@ func (b BaseMessage) Validate() error {
 	return nil
 }
 
-func IsNilMessage(msg Message) bool {
+func IsNilMessage(msg any) bool {
+	if msg == nil {
+		return true
+	}
+
 	v := reflect.ValueOf(msg)
 	if v.Kind() != reflect.Ptr {
 		return false
 	}
+
 	return v.IsNil()
 }
 
 // MessageHandler provides base validation for any message type
-type MessageHandler[T Message] struct{}
+type MessageHandler[T any] struct{}
 
 func (h *MessageHandler[T]) ValidateMessage(msg T) error {
 	if IsNilMessage(msg) {
 		return WrapError("InvalidMessage", "nil message pointer", nil)
 	}
 
-	if err := msg.Validate(); err != nil {
-		return WrapError("InvalidMessage", "message validation failed", err)
+	if m, ok := any(msg).(Message); ok {
+		if err := m.Validate(); err != nil {
+			return WrapError("InvalidMessage", "message validation failed", err)
+		}
 	}
 
 	return nil
