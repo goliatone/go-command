@@ -164,8 +164,17 @@ type queryWrapper[T any, R any] struct {
 }
 
 func getType(msg any) string {
-	if tmsg, ok := msg.(command.Message); ok && !reflect.ValueOf(tmsg).IsNil() {
-		return tmsg.Type()
+	if msg == nil {
+		return "unknown_type"
+	}
+
+	v := reflect.ValueOf(msg)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return "unknown_type"
+	}
+
+	if msgTyper, ok := msg.(interface{ Type() string }); ok {
+		return msgTyper.Type()
 	}
 
 	t := reflect.TypeOf(msg)
@@ -174,7 +183,17 @@ func getType(msg any) string {
 	}
 
 	typeName := t.String()
+
+	if t.Kind() == reflect.Ptr {
+		typeName = typeName[1:] // remove the "*" prefix
+		t = t.Elem()            // get the type that the pointer points to
+	}
+
 	pkgPath := t.PkgPath()
+	if pkgPath != "" {
+		parts := strings.Split(pkgPath, "/")
+		pkgPath = parts[len(parts)-1]
+	}
 
 	txName := toSnakeCase(typeName)
 
@@ -186,6 +205,6 @@ func getType(msg any) string {
 
 func toSnakeCase(s string) string {
 	//TODO: use tocase package
-	snake := regexp.MustCompile("(a-z0-9)([A-Z])").ReplaceAllString(s, "${1}_${2}")
+	snake := regexp.MustCompile("([a-z0-9])([A-Z])").ReplaceAllString(s, "${1}_${2}")
 	return strings.ToLower(snake)
 }
