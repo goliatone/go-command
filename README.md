@@ -13,6 +13,7 @@ Messages carry data and identify their type:
 ```go
 type Message interface {
     Type() string
+    Validate() error
 }
 ```
 
@@ -42,7 +43,7 @@ type QueryFunc[T Message, R any] func(ctx context.Context, msg T) (R, error)
 
 ## Execution Strategies
 
-The package provides three execution strategies:
+The package provides different execution strategies:
 
 ### Runner
 
@@ -64,12 +65,10 @@ Schedules commands to run periodically:
 ```go
 scheduler := cron.NewScheduler()
 
-id, err := cron.RegisterHandler(scheduler, &MyHandler{}, cron.HandlerOptions{
+id, err := cron.AddCommand(scheduler, &MyHandler{}, cron.HandlerOptions{
     Expression: "*/5 * * * *",
-    ExecutionOptions: types.ExecutionOptions{
-        MaxRetries: 3,
-        Timeout: time.Minute,
-    },
+    MaxRetries: 3,
+    Timeout: time.Minute,
 })
 ```
 
@@ -131,10 +130,13 @@ type UserHandler struct {
 func (h *UserHandler) Execute(ctx context.Context, cmd CreateUserCommand) error {
     return h.db.CreateUser(ctx, cmd.Name, cmd.Email)
 }
+```
 
+The same can be accomplished using a function:
+```go
 // Function implementation
 func handleCreateUser(ctx context.Context, cmd CreateUserCommand) error {
-    // Implementation
+    return h.db.CreateUser(ctx, cmd.Name, cmd.Email)
 }
 ```
 
