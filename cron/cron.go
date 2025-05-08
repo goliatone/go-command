@@ -34,6 +34,7 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new scheduler instance with the provided options
+// TODO: Move to scheduler.NewCron()?
 func NewScheduler(opts ...Option) *Scheduler {
 	cs := &Scheduler{
 		location: time.Local,
@@ -52,6 +53,10 @@ func NewScheduler(opts ...Option) *Scheduler {
 
 	cs.cron = rcron.New(cs.build()...)
 	return cs
+}
+
+func (cs *Scheduler) SetLogger(logger Logger) {
+	cs.logger = logger
 }
 
 // build converts our implementation-agnostic options to rcron options
