@@ -9,13 +9,13 @@ import (
 	"github.com/goliatone/go-command/runner"
 )
 
-type ParallelExecutor[T command.Message] struct {
+type ParallelExecutor[T any] struct {
 	handlers []command.Commander[T]
 	options  []runner.Option
 }
 
 // NewParallelExecutor creates a new ParallelExecutor with the provided handlers
-func NewParallelExecutor[T command.Message](handlers []command.Commander[T], opts ...runner.Option) *ParallelExecutor[T] {
+func NewParallelExecutor[T any](handlers []command.Commander[T], opts ...runner.Option) *ParallelExecutor[T] {
 	return &ParallelExecutor[T]{
 		handlers: handlers,
 		options:  opts,
@@ -63,7 +63,7 @@ func (p *ParallelExecutor[T]) Execute(ctx context.Context, msg T) error {
 }
 
 // ParallelExecute runs handlers concurrently with function handlers
-func ParallelExecute[T command.Message](ctx context.Context, msg T, handlers []command.CommandFunc[T], opts ...runner.Option) error {
+func ParallelExecute[T any](ctx context.Context, msg T, handlers []command.CommandFunc[T], opts ...runner.Option) error {
 	var commanders []command.Commander[T]
 	for _, h := range handlers {
 		commanders = append(commanders, h)
