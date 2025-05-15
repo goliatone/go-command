@@ -2,10 +2,12 @@ package flow
 
 import (
 	"context"
-	"errors"
+	// "errors"
+	"fmt"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/runner"
+	"github.com/goliatone/go-errors"
 )
 
 // BatchExecutor processes commands in batches
@@ -66,27 +68,43 @@ func (b *BatchExecutor[T]) Execute(ctx context.Context, messages []T) error {
 	errCh := make(chan error, len(batches))
 	semaphore := make(chan struct{}, b.concurrency)
 
-	for _, batch := range batches {
+	for batchIdx, batch := range batches {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled during batch execution").
+				WithTextCode("BATCH_CONTEXT_CANCELLED").
+				WithMetadata(map[string]any{
+					"total_batches":     len(batches),
+					"completed_batches": batchIdx,
+					"batch_size":        b.batchSize,
+					"concurrency":       b.concurrency,
+				})
 		case semaphore <- struct{}{}:
 			// worker slot available
 		}
 
-		go func(batchItems []T) {
+		go func(batchItems []T, batchIndex int) {
 			defer func() { <-semaphore }()
 
 			h := runner.NewHandler(b.options...)
 
 			var batchErr error
-			for _, msg := range batchItems {
+			for msgIdx, msg := range batchItems {
 				if err := runner.RunCommand(ctx, h, b.handler, msg); err != nil {
-					wrappedErr := command.WrapError(
-						"BatchExecutionFailed",
-						"handler failed in batch execution",
+					wrappedErr := errors.Wrap(
 						err,
-					)
+						errors.CategoryHandler,
+						"handler failed in batch execution",
+					).
+						WithTextCode("BATCH_EXECUTION_FAILED").
+						WithMetadata(map[string]any{
+							"batch_index":   batchIndex,
+							"message_index": msgIdx,
+							"message_type":  command.GetMessageType(msg),
+							"handler_type":  fmt.Sprintf("%T", b.handler),
+							"batch_size":    len(batchItems),
+							"stop_on_error": h.ShouldStopOnErr(),
+						})
 
 					if h.ShouldStopOnErr() {
 						errCh <- wrappedErr
@@ -102,7 +120,7 @@ func (b *BatchExecutor[T]) Execute(ctx context.Context, messages []T) error {
 			} else {
 				errCh <- nil
 			}
-		}(batch)
+		}(batch, batchIdx)
 	}
 
 	var finalErr error
