@@ -1,6 +1,10 @@
 package command
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/goliatone/go-errors"
+)
 
 // Message is the interface command and queries messages must implement
 type Message interface {
@@ -8,8 +12,10 @@ type Message interface {
 	Validate() error
 }
 
+// @deprecated
 type BaseMessage struct{}
 
+// @deprecated
 func (b BaseMessage) Validate() error {
 	return nil
 }
@@ -32,12 +38,14 @@ type MessageHandler[T any] struct{}
 
 func (h *MessageHandler[T]) ValidateMessage(msg T) error {
 	if IsNilMessage(msg) {
-		return WrapError("InvalidMessage", "nil message pointer", nil)
+		return errors.New(errors.CategoryValidation, "nil message pointer").
+			WithTextCode("INVALID_MESSAGE")
 	}
 
 	if m, ok := any(msg).(Message); ok {
 		if err := m.Validate(); err != nil {
-			return WrapError("InvalidMessage", "message validation failed", err)
+			return errors.Wrap(err, errors.CategoryValidation, "message validation failed").
+				WithTextCode("VALIDATION_FAILED")
 		}
 	}
 
