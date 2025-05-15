@@ -62,7 +62,9 @@ func TestCronScheduler(t *testing.T) {
 		// Schedule job to run every second
 		entryID, err := scheduler.AddHandler(command.HandlerConfig{
 			Expression: "@every 1s",
-		}, handler)
+		}, func() {
+			handler.Execute(context.Background(), nil)
+		})
 
 		if err != nil {
 			t.Fatalf("Failed to add handler: %v", err)
@@ -86,7 +88,9 @@ func TestCronScheduler(t *testing.T) {
 		// Schedule job to run every second
 		entryID, err := scheduler.AddHandler(command.HandlerConfig{
 			Expression: "* * * * * *",
-		}, handler)
+		}, func() {
+			handler.Execute(context.Background(), nil)
+		})
 
 		if err != nil {
 			t.Fatalf("Failed to add handler: %v", err)
@@ -139,7 +143,9 @@ func TestCronScheduler(t *testing.T) {
 
 		_, err := scheduler.AddHandler(command.HandlerConfig{
 			Expression: "invalid",
-		}, handler)
+		}, func() {
+			handler.Execute(context.Background(), nil)
+		})
 
 		if err == nil {
 			t.Error("Expected error for invalid cron expression")
@@ -152,7 +158,9 @@ func TestCronScheduler(t *testing.T) {
 
 		_, err := scheduler.AddHandler(command.HandlerConfig{
 			Expression: "",
-		}, handler)
+		}, func() {
+			handler.Execute(context.Background(), nil)
+		})
 
 		if err == nil {
 			t.Error("Expected error for empty cron expression")
