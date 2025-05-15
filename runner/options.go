@@ -1,9 +1,29 @@
 //go:generate options-setters -input ./options.go -output ./options_setters.go
 package runner
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// Middleware defines a function that wraps/enhances the behavior of
+// a handler function. It allows you to intercept and modify the execution
+// of the function passed to Handler.Run (business logic) without changing
+// its implementation. Each middleware receives the next function in the
+// chain and returns a new function that can perform additional actions
+// before or after calling the next function. This pattern enables
+// composable concerns such as logging, telemetry, authentication, retry logic,
+// in a clean and decoupled manner, similar to middleware in HTTP routers
+// or RPC frameworks.
+type Middleware func(next func(context.Context) error) func(context.Context) error
 
 type Option func(*Handler)
+
+func WithMiddleware(mw ...Middleware) Option {
+	return func(h *Handler) {
+		h.middleware = append(h.middleware, mw...)
+	}
+}
 
 func WithTimeout(t time.Duration) Option {
 	return func(r *Handler) {
