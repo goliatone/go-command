@@ -14,6 +14,7 @@ import (
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
+	gerrors "github.com/goliatone/go-errors"
 )
 
 type TestMessage struct {
@@ -207,9 +208,9 @@ func TestCommandDispatcher(t *testing.T) {
 
 		err := Dispatch(context.Background(), CreateUserMessage{Email: "test@example.com"})
 
-		var msgErr command.Error
+		var msgErr gerrors.Error
 		if errors.Is(err, &msgErr) {
-			t.Errorf("expected command.Error, got %v", err)
+			t.Errorf("expected errors.Error, got %v", err)
 		}
 
 		if secondHandlerCalled {
@@ -832,7 +833,7 @@ func TestGetType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := tt.setup(t)
-			result := getType(input)
+			result := command.GetMessageType(input)
 			if result != tt.expected {
 				t.Errorf("getType(%v) = %s, expected %s", input, result, tt.expected)
 			}
@@ -844,7 +845,7 @@ func TestGetTypeWithGenericTypes(t *testing.T) {
 	// generic with struct type
 	t.Run("Generic with struct", func(t *testing.T) {
 		var structMsg regularStruct
-		result := getType(structMsg)
+		result := command.GetMessageType(structMsg)
 		expected := "dispatcher::dispatcher.regular_struct"
 		if result != expected {
 			t.Errorf("getType(regularStruct{}) = %s, expected %s", result, expected)
@@ -854,7 +855,7 @@ func TestGetTypeWithGenericTypes(t *testing.T) {
 	// generic with nil pointer
 	t.Run("Generic with nil pointer", func(t *testing.T) {
 		var ptrMsg *ptrMockMessage
-		result := getType(ptrMsg)
+		result := command.GetMessageType(ptrMsg)
 		expected := "unknown_type"
 		if result != expected {
 			t.Errorf("getType(nil *ptrMockMessage) = %s, expected %s", result, expected)
@@ -864,7 +865,7 @@ func TestGetTypeWithGenericTypes(t *testing.T) {
 	// generic with zero value that implements messageTyper
 	t.Run("Generic with message implementation", func(t *testing.T) {
 		msg := mockMessage{typeName: ""}
-		result := getType(msg)
+		result := command.GetMessageType(msg)
 		expected := "" // Type() method returns empty string
 		if result != expected {
 			t.Errorf("getType(mockMessage{typeName:\"\"}) = %s, expected %s", result, expected)
@@ -876,7 +877,7 @@ func TestSubscribeCommandSimulation(t *testing.T) {
 	// var msg T where T is the struct commands.InboxStartServiceMessage
 	var msg regularStruct
 
-	result := getType(msg)
+	result := command.GetMessageType(msg)
 
 	expected := "dispatcher::dispatcher.regular_struct"
 	if result != expected {
