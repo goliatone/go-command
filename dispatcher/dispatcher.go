@@ -2,15 +2,12 @@ package dispatcher
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"reflect"
-	"regexp"
-	"strings"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
 	"github.com/goliatone/go-command/runner"
+	"github.com/goliatone/go-errors"
 )
 
 type Subscription interface {
@@ -28,7 +25,7 @@ func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Opti
 		runner: h,
 		cmd:    cmd,
 	}
-	return mux.Add(getType(msg), wrapper)
+	return mux.Add(command.GetMessageType(msg), wrapper)
 }
 
 func SubscribeCommandFunc[T any](handler command.CommandFunc[T], runnerOpts ...runner.Option) Subscription {
@@ -43,7 +40,7 @@ func SubscribeQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runne
 		runner: r,
 		qry:    qry,
 	}
-	return mux.Add(getType(msg), wrapper)
+	return mux.Add(command.GetMessageType(msg), wrapper)
 }
 
 func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) Subscription {
@@ -52,22 +49,22 @@ func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ..
 
 func getCommandHandlers[T any](mx *router.Mux) ([]*commandWrapper[T], error) {
 	var msg T
-	handlers := mx.Get(getType(msg))
+	handlers := mx.Get(command.GetMessageType(msg))
 	if len(handlers) == 0 {
-		return nil, fmt.Errorf("no command handlers for message type %s", getType(msg))
+		return nil, fmt.Errorf("no command handlers for message type %s", command.GetMessageType(msg))
 	}
 
 	var typedHandlers []*commandWrapper[T]
 	for _, h := range handlers {
 		cmdHandler, ok := h.Handler.(*commandWrapper[T])
 		if !ok {
-			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", getType(msg))
+			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", command.GetMessageType(msg))
 		}
 		typedHandlers = append(typedHandlers, cmdHandler)
 	}
 
 	if len(typedHandlers) == 0 {
-		return nil, fmt.Errorf("no command handlers for message type %s", getType(msg))
+		return nil, fmt.Errorf("no command handlers for message type %s", command.GetMessageType(msg))
 	}
 
 	return typedHandlers, nil
@@ -81,21 +78,31 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 
 	wrapers, err := getCommandHandlers[T](mux)
 	if err != nil {
-		return command.WrapError("DispatchHandlerError", err.Error(), err)
+		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
+			WithTextCode("HANDLER_LOOKUP_ERROR").
+			WithMetadata(map[string]any{
+				"message_type": command.GetMessageType(msg),
+			})
 	}
 
 	if ctx.Err() != nil {
-		return command.WrapError("ContextError", "context canceled or deadline exceeded", ctx.Err())
+		return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
+			WithTextCode("CONTEXT_ERROR")
 	}
 
 	var errs error
 	for _, cw := range wrapers {
 		if err := runner.RunCommand(ctx, cw.runner, cw.cmd, msg); err != nil {
-			wrappedErr := command.WrapError(
-				"HandlerExecutionFailed",
-				fmt.Sprintf("handler failed for type %s", getType(msg)),
+			wrappedErr := errors.Wrap(
 				err,
-			)
+				errors.CategoryHandler,
+				fmt.Sprintf("handler failed for type %s", command.GetMessageType(msg)),
+			).
+				WithTextCode("HANDLER_EXECUTION_FAILED").
+				WithMetadata(map[string]any{
+					"message_type": command.GetMessageType(msg),
+					"handler":      fmt.Sprintf("%T", cw.cmd),
+				})
 			if ExitOnErr {
 				return wrappedErr
 			}
@@ -108,19 +115,21 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 
 func getQueryHandler[T any, R any](mx *router.Mux) (*queryWrapper[T, R], error) {
 	var msg T
-	handlers := mx.Get(getType(msg))
+	handlers := mx.Get(command.GetMessageType(msg))
 
 	if len(handlers) == 0 {
-		return nil, fmt.Errorf("no query handlers for message type %s", getType(msg))
+		return nil, fmt.Errorf("no query handlers for message type %s", command.GetMessageType(msg))
 	}
 
 	if len(handlers) > 1 {
-		return nil, errors.New("multiple query handlers found, ambiguous query")
+		return nil, errors.New(
+			errors.CategoryBadInput,
+			"multiple query handlers found, ambiguous query")
 	}
 
 	qh, ok := handlers[0].Handler.(*queryWrapper[T, R])
 	if !ok {
-		return nil, fmt.Errorf("handler does not implement QueryHandler for type %s", getType(msg))
+		return nil, fmt.Errorf("handler does not implement QueryHandler for type %s", command.GetMessageType(msg))
 	}
 	return qh, nil
 }
@@ -135,20 +144,32 @@ func Query[T any, R any](ctx context.Context, msg T) (R, error) {
 	var zero R
 	qw, err := getQueryHandler[T, R](mux)
 	if err != nil {
-		return zero, command.WrapError("QueryHandlerError", err.Error(), err)
+		return zero, errors.Wrap(err, errors.CategoryHandler, "failed to get query handler").
+			WithTextCode("QUERY_HANDLER_LOOKUP_ERROR").
+			WithMetadata(map[string]any{
+				"message_type": command.GetMessageType(msg),
+				"result_type":  fmt.Sprintf("%T", zero),
+			})
 	}
 
 	if ctx.Err() != nil {
-		return zero, command.WrapError("ContextError", "context canceled or deadline exceeded", ctx.Err())
+		return zero, errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
+			WithTextCode("CONTEXT_ERROR")
 	}
 
 	result, qerr := runner.RunQuery(ctx, qw.runner, qw.qry, msg)
 	if qerr != nil {
-		return zero, command.WrapError(
-			"HandlerExecutionFailed",
-			fmt.Sprintf("query handler failed for type %s", getType(msg)),
+		return zero, errors.Wrap(
 			qerr,
-		)
+			errors.CategoryHandler,
+			fmt.Sprintf("query handler failed for type %s", command.GetMessageType(msg)),
+		).
+			WithTextCode("QUERY_EXECUTION_FAILED").
+			WithMetadata(map[string]any{
+				"message_type": command.GetMessageType(msg),
+				"result_type":  fmt.Sprintf("%T", zero),
+				"handler":      fmt.Sprintf("%T", qw.qry),
+			})
 	}
 	return result, nil
 }
@@ -161,50 +182,4 @@ type commandWrapper[T any] struct {
 type queryWrapper[T any, R any] struct {
 	runner *runner.Handler
 	qry    command.Querier[T, R]
-}
-
-func getType(msg any) string {
-	if msg == nil {
-		return "unknown_type"
-	}
-
-	v := reflect.ValueOf(msg)
-	if v.Kind() == reflect.Ptr && v.IsNil() {
-		return "unknown_type"
-	}
-
-	if msgTyper, ok := msg.(interface{ Type() string }); ok {
-		return msgTyper.Type()
-	}
-
-	t := reflect.TypeOf(msg)
-	if t == nil {
-		return "unknown_type"
-	}
-
-	typeName := t.String()
-
-	if t.Kind() == reflect.Ptr {
-		typeName = typeName[1:] // remove the "*" prefix
-		t = t.Elem()            // get the type that the pointer points to
-	}
-
-	pkgPath := t.PkgPath()
-	if pkgPath != "" {
-		parts := strings.Split(pkgPath, "/")
-		pkgPath = parts[len(parts)-1]
-	}
-
-	txName := toSnakeCase(typeName)
-
-	if pkgPath == "" {
-		return txName
-	}
-	return pkgPath + "::" + txName
-}
-
-func toSnakeCase(s string) string {
-	//TODO: use tocase package
-	snake := regexp.MustCompile("([a-z0-9])([A-Z])").ReplaceAllString(s, "${1}_${2}")
-	return strings.ToLower(snake)
 }
