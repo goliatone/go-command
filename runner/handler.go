@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 // Logger interface shared across packages
@@ -16,6 +17,14 @@ type Logger interface {
 	Error(msg string, args ...any)
 }
 
+// Handler wraps configuration options so that we can later
+// call a function with known behavior in terms of handling
+// errors, rtries, timeouts, etc
+// We do so by providing a Run method:
+//
+//	Run(ctx context.Context, fn func(context.Context) error)
+//
+// This ensures consistent execution behavior
 type Handler struct {
 	mu sync.Mutex
 
@@ -23,6 +32,7 @@ type Handler struct {
 	errorHandler  func(error)
 	doneHandler   func(r *Handler)
 	retryStrategy RetryStrategy
+	middleware    []Middleware
 
 	EntryID        int
 	runs           int
@@ -104,18 +114,37 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 
 	maxRetries := h.maxRetries
 	strategy := h.retryStrategy
+	middleware := h.middleware
 	h.mu.Unlock()
 
 	ctx, cancel := h.contextWithSettings(ctx)
 	defer cancel()
 
+	wrapped := fn
+	for i := len(middleware) - 1; i >= 0; i-- {
+		wrapped = middleware[i](wrapped)
+	}
+
 	var finalErr error
+	executionStart := time.Now()
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled during handler execution").
+				WithTextCode("HANDLER_CONTEXT_CANCELLED").
+				WithMetadata(map[string]any{
+					"attempt":         attempt + 1,
+					"max_retries":     maxRetries,
+					"elapsed_time":    time.Since(executionStart),
+					"run_once":        h.runOnce,
+					"max_runs":        h.maxRuns,
+					"successful_runs": h.getSuccessfulRuns(),
+				})
 		}
+		attemptStart := time.Now()
+		err := h.execute(ctx, wrapped)
+		attemptDuration := time.Since(attemptStart)
 
-		err := h.execute(ctx, fn)
 		if err == nil {
 			finalErr = nil
 			break
@@ -124,14 +153,20 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 		finalErr = err
 
 		if attempt < maxRetries {
-			h.handleError(command.WrapError(
-				"Run Failed",
-				fmt.Sprintf("Runner failed, attempt %d of %d",
-					attempt+1,
-					maxRetries+1,
-				),
+			retryErr := errors.Wrap(
 				err,
-			))
+				errors.CategoryInternal,
+				fmt.Sprintf("handler failed on attempt %d of %d", attempt+1, maxRetries+1),
+			).
+				WithTextCode("HANDLER_RETRY_ATTEMPT").
+				WithMetadata(map[string]any{
+					"attempt":          attempt + 1,
+					"max_attempts":     maxRetries + 1,
+					"attempt_duration": attemptDuration,
+					"retry_strategy":   fmt.Sprintf("%T", strategy),
+				})
+
+			h.handleError(retryErr)
 
 			if strategy != nil {
 				delay := strategy.SleepDuration(attempt, err)
@@ -146,15 +181,28 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	defer h.mu.Unlock()
 
 	h.runs++
+	totalDuration := time.Since(executionStart)
 
 	if finalErr == nil {
 		h.successfulRuns++
 	} else {
-		h.handleError(command.WrapError(
-			"Run Failed",
-			fmt.Sprintf("Runner failed after %d attempts", h.maxRetries+1),
+		finalErr = errors.Wrap(
 			finalErr,
-		))
+			errors.CategoryInternal,
+			fmt.Sprintf("handler failed after %d attempts", maxRetries+1),
+		).
+			WithTextCode("HANDLER_MAX_RETRIES_EXCEEDED").
+			WithMetadata(map[string]any{
+				"total_attempts":  maxRetries + 1,
+				"total_duration":  totalDuration,
+				"successful_runs": h.successfulRuns,
+				"total_runs":      h.runs,
+				"run_once":        h.runOnce,
+				"max_runs":        h.maxRuns,
+				"retry_strategy":  fmt.Sprintf("%T", strategy),
+			})
+
+		h.handleError(finalErr)
 	}
 
 	if h.maxRuns > 0 && h.successfulRuns >= h.maxRuns {
@@ -162,6 +210,12 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	}
 
 	return finalErr
+}
+
+func (h *Handler) getSuccessfulRuns() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.successfulRuns
 }
 
 func (h *Handler) handleError(err error) {
