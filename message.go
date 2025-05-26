@@ -38,7 +38,7 @@ type MessageHandler[T any] struct{}
 
 func (h *MessageHandler[T]) ValidateMessage(msg T) error {
 	if IsNilMessage(msg) {
-		return errors.New(errors.CategoryValidation, "nil message pointer").
+		return errors.New("nil message pointer", errors.CategoryValidation).
 			WithTextCode("INVALID_MESSAGE")
 	}
 
