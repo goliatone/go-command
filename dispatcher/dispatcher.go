@@ -70,6 +70,28 @@ func getCommandHandlers[T any](mx *router.Mux) ([]*commandWrapper[T], error) {
 	return typedHandlers, nil
 }
 
+func DispatchWithResult[T any, R any](ctx context.Context, msg T) (R, error) {
+	result := command.NewResult[R]()
+	ctx = command.ContextWithResult(ctx, result)
+
+	err := Dispatch(ctx, msg)
+	if err != nil {
+		var zero R
+		// TODO: how do we handle agumenting a returned errors.Error?
+		return zero, errors.Wrap(err, errors.CategoryCommand, "dispatch generated error").
+			WithTextCode("DISPATCHER_ERROR")
+	}
+
+	value, stored := result.Load()
+	if !stored {
+		var zero R
+		return zero, errors.New("command did not store a result", errors.CategoryCommand).
+			WithTextCode("RESULT_ERROR")
+	}
+
+	return value, result.Error()
+}
+
 // Dispatch executes all registered CommandHandlers for T.
 func Dispatch[T any](ctx context.Context, msg T) error {
 	if err := (&command.MessageHandler[T]{}).ValidateMessage(msg); err != nil {
@@ -123,8 +145,8 @@ func getQueryHandler[T any, R any](mx *router.Mux) (*queryWrapper[T, R], error) 
 
 	if len(handlers) > 1 {
 		return nil, errors.New(
-			errors.CategoryBadInput,
-			"multiple query handlers found, ambiguous query")
+			"multiple query handlers found, ambiguous query",
+			errors.CategoryBadInput)
 	}
 
 	qh, ok := handlers[0].Handler.(*queryWrapper[T, R])
