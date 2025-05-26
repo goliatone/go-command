@@ -58,6 +58,11 @@ handler := runner.NewHandler(
 err := runner.RunCommand(ctx, handler, cmd, msg)
 ```
 
+The handler's `Run` function will check if the command returns an error, and if so, it will check if the error implements these interfaces:
+
+- `interface{ IsRetryable() bool }`: If the error exposes a `IsRetryable` function and returns `false` we will not retry, if returns `true`, we check the other logic to determine retries.
+- `interface{ RetryDelay(int) time.Duration }`: If the error exposes a `RetryDelay` function that returns a `time.Duration`, we will use that value to known when the next attempt should be.
+
 ### Cron
 
 Schedules commands to run periodically:
