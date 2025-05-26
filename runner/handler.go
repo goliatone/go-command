@@ -152,6 +152,10 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 
 		finalErr = err
 
+		if !h.shouldRetryError(err, attempt, maxRetries) {
+			break
+		}
+
 		if attempt < maxRetries {
 			retryErr := errors.Wrap(
 				err,
@@ -168,11 +172,8 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 
 			h.handleError(retryErr)
 
-			if strategy != nil {
-				delay := strategy.SleepDuration(attempt, err)
-				if delay > 0 {
-					time.Sleep(delay)
-				}
+			if delay := h.getRetryDelay(err, attempt, strategy); delay > 0 {
+				time.Sleep(delay)
 			}
 		}
 	}
@@ -210,6 +211,42 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	}
 
 	return finalErr
+}
+
+func (h *Handler) shouldRetryError(err error, attempt int, maxRetries int) bool {
+	if h.exitOnError {
+		return false
+	}
+
+	if retryable, ok := err.(interface{ IsRetryable() bool }); ok {
+		return retryable.IsRetryable() && attempt < maxRetries
+	}
+
+	return !h.isUnretryableError(err)
+}
+
+func (h *Handler) isUnretryableError(err error) bool {
+	// TODO: we could add specfici unretryable error types here
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return false
+}
+
+func (h *Handler) getRetryDelay(err error, attempt int, defaultStrategy RetryStrategy) time.Duration {
+
+	if delayable, ok := err.(interface{ RetryDelay(int) time.Duration }); ok {
+		if delay := delayable.RetryDelay(attempt); delay > 0 {
+			return delay
+		}
+	}
+
+	if defaultStrategy != nil {
+		return defaultStrategy.SleepDuration(attempt, err)
+	}
+
+	return 0
 }
 
 func (h *Handler) getSuccessfulRuns() int {
