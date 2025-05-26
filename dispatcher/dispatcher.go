@@ -74,8 +74,7 @@ func DispatchWithResult[T any, R any](ctx context.Context, msg T) (R, error) {
 	result := command.NewResult[R]()
 	ctx = command.ContextWithResult(ctx, result)
 
-	err := Dispatch(ctx, msg)
-	if err != nil {
+	if err := Dispatch(ctx, msg); err != nil {
 		var zero R
 		// TODO: how do we handle agumenting a returned errors.Error?
 		return zero, errors.Wrap(err, errors.CategoryCommand, "dispatch generated error").

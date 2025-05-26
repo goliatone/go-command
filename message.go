@@ -9,15 +9,6 @@ import (
 // Message is the interface command and queries messages must implement
 type Message interface {
 	Type() string
-	Validate() error
-}
-
-// @deprecated
-type BaseMessage struct{}
-
-// @deprecated
-func (b BaseMessage) Validate() error {
-	return nil
 }
 
 func IsNilMessage(msg any) bool {
@@ -42,7 +33,7 @@ func (h *MessageHandler[T]) ValidateMessage(msg T) error {
 			WithTextCode("INVALID_MESSAGE")
 	}
 
-	if m, ok := any(msg).(Message); ok {
+	if m, ok := any(msg).(interface{ Validate() error }); ok {
 		if err := m.Validate(); err != nil {
 			return errors.Wrap(err, errors.CategoryValidation, "message validation failed").
 				WithTextCode("VALIDATION_FAILED")
