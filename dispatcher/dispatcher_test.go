@@ -610,7 +610,6 @@ func TestHTTPIntegration(t *testing.T) {
 /////
 
 type TestPointerMessage struct {
-	command.BaseMessage
 	Value string
 }
 
@@ -619,7 +618,6 @@ func (t *TestPointerMessage) Type() string {
 }
 
 type TestValueMessage struct {
-	command.BaseMessage
 	Value string
 }
 
@@ -656,8 +654,7 @@ func TestMessageValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := &command.MessageHandler[command.Message]{}
-			err := handler.ValidateMessage(tt.msg)
+			err := command.ValidateMessage(tt.msg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateMessage() error = %v, wantErr %v", err, tt.wantErr)
 			}
