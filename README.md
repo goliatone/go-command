@@ -13,7 +13,6 @@ Messages carry data and identify their type:
 ```go
 type Message interface {
     Type() string
-    Validate() error
 }
 ```
 
@@ -62,6 +61,8 @@ The handler's `Run` function will check if the command returns an error, and if 
 
 - `interface{ IsRetryable() bool }`: If the error exposes a `IsRetryable` function and returns `false` we will not retry, if returns `true`, we check the other logic to determine retries.
 - `interface{ RetryDelay(int) time.Duration }`: If the error exposes a `RetryDelay` function that returns a `time.Duration`, we will use that value to known when the next attempt should be.
+
+Look at [goliatone/go-errors](https://github.com/goliatone/go-errors) for an implementation.
 
 ### Cron
 
