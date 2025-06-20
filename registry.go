@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -12,7 +13,6 @@ type Registry struct {
 	commandsToRegister []any
 	initialized        bool
 	cronRegisterFn     func(opts HandlerConfig, handler any) error
-	cliRegisterFn      func(opts CLIConfig, handler any) error
 	cliOptions         []kong.Option
 }
 
@@ -29,14 +29,11 @@ func (r *Registry) SetCronRegister(fn func(opts HandlerConfig, handler any) erro
 	return r
 }
 
-func (r *Registry) SetCLIRegister(fn func(opts CLIConfig, handler any) error) *Registry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cliRegisterFn = fn
-	return r
-}
-
 func (r *Registry) RegisterCommand(cmd any) error {
+	if cmd == nil {
+		return fmt.Errorf("command cannot be nil")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -56,23 +53,25 @@ func (r *Registry) Initialize() error {
 		return fmt.Errorf("registry already initialized")
 	}
 
+	var errs error
+	for _, cmd := range r.commandsToRegister {
+		if cliCmd, ok := cmd.(CLICommand); ok {
+			r.registerWithCLI(cliCmd)
+		}
+
+		if cronCmd, ok := cmd.(CronCommand); ok {
+			if err := r.registerWithCron(cronCmd); err != nil {
+				errs = errors.Join(errs, err)
+			}
+		}
+	}
+
 	r.initialized = true
 
-	for _, cmd := range r.commandsToRegister {
-		r.registerWithCLI(cmd)
-		r.registerWithCron(cmd)
-	}
-
-	return nil
+	return errs
 }
 
-func (r *Registry) registerWithCron(cmd any) error {
-	cronCmd, ok := cmd.(CronCommand)
-
-	if !ok {
-		return fmt.Errorf("command does not implement CronCommand interface")
-	}
-
+func (r *Registry) registerWithCron(cronCmd CronCommand) error {
 	if r.cronRegisterFn == nil {
 		return fmt.Errorf("cron scheduler not provided during initialization")
 	}
@@ -83,18 +82,9 @@ func (r *Registry) registerWithCron(cmd any) error {
 	return r.cronRegisterFn(config, handler)
 }
 
-func (r *Registry) registerWithCLI(cmd any) error {
-	cliCmd, ok := cmd.(CLICommand)
-	if !ok {
-		return fmt.Errorf("command does not implement CLICommand interface")
-	}
-
+func (r *Registry) registerWithCLI(cliCmd CLICommand) error {
 	opts := cliCmd.CLIOptions()
 	kongCmd := cliCmd.CLIHandler()
-
-	if r.cliRegisterFn != nil {
-		return r.cliRegisterFn(opts, kongCmd)
-	}
 
 	tags := opts.BuildTags()
 
@@ -110,15 +100,15 @@ func (r *Registry) registerWithCLI(cmd any) error {
 	return nil
 }
 
-func (r *Registry) GetCLIOptions() []kong.Option {
+func (r *Registry) GetCLIOptions() ([]kong.Option, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if !r.initialized {
-		panic("registry not initialzied")
+		return nil, fmt.Errorf("registry not initialzied")
 	}
 
 	options := make([]kong.Option, len(r.cliOptions))
 	copy(options, r.cliOptions)
-	return options
+	return options, nil
 }
