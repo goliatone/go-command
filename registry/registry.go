@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+
 	"github.com/alecthomas/kong"
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/dispatcher"
@@ -27,18 +29,22 @@ func SetCronRegister(fn func(opts command.HandlerConfig, handler any) error) {
 	globalRegistry.SetCronRegister(fn)
 }
 
-func SetCLIRegister(fn func(opts command.CLIConfig, handler any) error) {
-	globalRegistry.SetCLIRegister(fn)
-}
-
-func Init() error {
-	return globalRegistry.Initialize()
-}
-
-func GetCLIOptions() []kong.Option {
+func GetCLIOptions() ([]kong.Option, error) {
 	return globalRegistry.GetCLIOptions()
 }
 
-func Reset() {
+func Start(_ context.Context) error {
+	return globalRegistry.Initialize()
+}
+
+func Stop() error {
 	globalRegistry = command.NewRegistry()
+	return nil
+}
+
+func WithTestRegistry(fn func()) {
+	old := globalRegistry
+	defer func() { globalRegistry = old }()
+	globalRegistry = command.NewRegistry()
+	fn()
 }
