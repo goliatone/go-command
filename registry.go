@@ -8,6 +8,10 @@ import (
 	"github.com/alecthomas/kong"
 )
 
+func NilCronRegister(opts HandlerConfig, handler any) error {
+	return nil
+}
+
 type Registry struct {
 	mu                 sync.RWMutex
 	commandsToRegister []any
