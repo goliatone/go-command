@@ -18,21 +18,18 @@ import (
 )
 
 type TestMessage struct {
-	command.BaseMessage
 	ID int
 }
 
 func (t TestMessage) Type() string { return "test" }
 
 type CreateUserMessage struct {
-	command.BaseMessage
 	Email string
 }
 
 func (e CreateUserMessage) Type() string { return "user.create" }
 
 type GetUserMessage struct {
-	command.BaseMessage
 	ID string
 }
 
@@ -729,7 +726,6 @@ type messageTyper interface {
 
 // command.Message implementation
 type extMessage struct {
-	command.BaseMessage
 }
 
 func (m extMessage) Type() string {

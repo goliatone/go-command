@@ -18,6 +18,7 @@ var ExitOnErr = false
 var mux = router.NewMux()
 
 // Subscribe a CommandHandler for a particular message type T.
+// TODO: should this return an error?!
 func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
 	var msg T
 	h := runner.NewHandler(runnerOpts...)
