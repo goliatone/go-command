@@ -9,10 +9,6 @@ import (
 	"github.com/goliatone/go-command/runner"
 )
 
-func NilCronRegister(opts command.HandlerConfig, handler any) error {
-	return nil
-}
-
 var globalRegistry = command.NewRegistry()
 
 func RegisterCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error) {
