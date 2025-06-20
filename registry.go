@@ -1,11 +1,10 @@
 package command
 
 import (
-	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/alecthomas/kong"
+	"github.com/goliatone/go-errors"
 )
 
 func NilCronRegister(opts HandlerConfig, handler any) error {
@@ -35,14 +34,16 @@ func (r *Registry) SetCronRegister(fn func(opts HandlerConfig, handler any) erro
 
 func (r *Registry) RegisterCommand(cmd any) error {
 	if cmd == nil {
-		return fmt.Errorf("command cannot be nil")
+		return errors.New("command cannot be nil", errors.CategoryBadInput).
+			WithTextCode("NIL_COMMAND")
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.initialized {
-		return fmt.Errorf("cannot register commands after registry has been initialized")
+		return errors.New("cannot register commands after registry has been initialized", errors.CategoryConflict).
+			WithTextCode("REGISTRY_ALREADY_INITIALIZED")
 	}
 	r.commandsToRegister = append(r.commandsToRegister, cmd)
 
@@ -54,13 +55,16 @@ func (r *Registry) Initialize() error {
 	defer r.mu.Unlock()
 
 	if r.initialized {
-		return fmt.Errorf("registry already initialized")
+		return errors.New("registry already initialized", errors.CategoryConflict).
+			WithTextCode("REGISTRY_ALREADY_INITIALIZED")
 	}
 
 	var errs error
 	for _, cmd := range r.commandsToRegister {
 		if cliCmd, ok := cmd.(CLICommand); ok {
-			r.registerWithCLI(cliCmd)
+			if err := r.registerWithCLI(cliCmd); err != nil {
+				errs = errors.Join(errs, err)
+			}
 		}
 
 		if cronCmd, ok := cmd.(CronCommand); ok {
@@ -77,13 +81,22 @@ func (r *Registry) Initialize() error {
 
 func (r *Registry) registerWithCron(cronCmd CronCommand) error {
 	if r.cronRegisterFn == nil {
-		return fmt.Errorf("cron scheduler not provided during initialization")
+		return errors.New("cron scheduler not provided during initialization", errors.CategoryBadInput).
+			WithTextCode("CRON_SCHEDULER_NOT_SET")
 	}
 
 	handler := cronCmd.CronHandler()
 	config := cronCmd.CronOptions()
 
-	return r.cronRegisterFn(config, handler)
+	if err := r.cronRegisterFn(config, handler); err != nil {
+		return errors.Wrap(err, errors.CategoryExternal, "cron scheduler registration failed").
+			WithTextCode("CRON_REGISTRATION_FAILED").
+			WithMetadata(map[string]any{
+				"config": config,
+			})
+	}
+
+	return nil
 }
 
 func (r *Registry) registerWithCLI(cliCmd CLICommand) error {
@@ -109,7 +122,8 @@ func (r *Registry) GetCLIOptions() ([]kong.Option, error) {
 	defer r.mu.Unlock()
 
 	if !r.initialized {
-		return nil, fmt.Errorf("registry not initialzied")
+		return nil, errors.New("registry not initialized", errors.CategoryConflict).
+			WithTextCode("REGISTRY_NOT_INITIALIZED")
 	}
 
 	options := make([]kong.Option, len(r.cliOptions))
