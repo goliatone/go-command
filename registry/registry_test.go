@@ -172,7 +172,7 @@ func TestGetCLIOptionsBeforeInitialization(t *testing.T) {
 		options, err := GetCLIOptions()
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialzied")
+		assert.Contains(t, err.Error(), "registry not initialized")
 		assert.Nil(t, options)
 	})
 }
@@ -224,12 +224,12 @@ func TestStop(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, options, 1)
 
-		err = Stop()
+		err = Stop(context.Background())
 		assert.NoError(t, err)
 
 		_, err = GetCLIOptions()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialzied")
+		assert.Contains(t, err.Error(), "registry not initialized")
 	})
 }
 

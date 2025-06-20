@@ -319,7 +319,7 @@ func TestGetCLIOptions(t *testing.T) {
 		options, err := registry.GetCLIOptions()
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialzied")
+		assert.Contains(t, err.Error(), "registry not initialized")
 		assert.Nil(t, options)
 	})
 }
