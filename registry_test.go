@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test command implementations
 type TestCommand struct {
 	name string
 }
@@ -56,7 +55,6 @@ func (t *TestCLICommand) Run(ctx *kong.Context) error {
 	return nil
 }
 
-// CLI-only command
 type CLIOnlyCommand struct {
 	name string
 }
@@ -73,7 +71,6 @@ func (c *CLIOnlyCommand) CLIOptions() CLIConfig {
 	}
 }
 
-// Cron-only command
 type CronOnlyCommand struct {
 	name string
 }
@@ -91,7 +88,6 @@ func (c *CronOnlyCommand) CronOptions() HandlerConfig {
 	}
 }
 
-// Mock cron register function
 type mockCronRegister struct {
 	mu            sync.Mutex
 	registrations []HandlerConfig
@@ -135,7 +131,7 @@ func TestRegistrySetCronRegister(t *testing.T) {
 
 	result := registry.SetCronRegister(mockCron.register)
 
-	assert.Same(t, registry, result) // Should return self for chaining
+	assert.Same(t, registry, result)
 	assert.NotNil(t, registry.cronRegisterFn)
 }
 
@@ -218,14 +214,12 @@ func TestInitialize(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, registry.initialized)
 
-		// Check CLI commands were registered
 		cliOptions, err := registry.GetCLIOptions()
 		assert.NoError(t, err)
-		assert.Len(t, cliOptions, 2) // cmd1 and cmd2 support CLI
+		assert.Len(t, cliOptions, 2)
 
-		// Check cron commands were registered
 		cronRegs := mockCron.getRegistrations()
-		assert.Len(t, cronRegs, 2) // cmd1 and cmd3 support cron
+		assert.Len(t, cronRegs, 2)
 	})
 
 	t.Run("already initialized", func(t *testing.T) {
@@ -250,7 +244,7 @@ func TestInitialize(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "mock cron registration error")
-		assert.True(t, registry.initialized) // Should still be marked as initialized
+		assert.True(t, registry.initialized)
 	})
 
 	t.Run("no cron register function", func(t *testing.T) {
@@ -315,9 +309,8 @@ func TestGetCLIOptions(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, options, 1)
 
-		// Verify it's a copy, not the original slice
 		options = append(options, kong.DynamicCommand("test2", "desc2", "group2", nil))
-		assert.Len(t, registry.cliOptions, 1) // Original should be unchanged
+		assert.Len(t, registry.cliOptions, 1)
 	})
 
 	t.Run("not initialized", func(t *testing.T) {
@@ -326,7 +319,7 @@ func TestGetCLIOptions(t *testing.T) {
 		options, err := registry.GetCLIOptions()
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialzied") // Note: typo in your code
+		assert.Contains(t, err.Error(), "registry not initialzied")
 		assert.Nil(t, options)
 	})
 }
@@ -336,7 +329,6 @@ func TestRegistryConcurrency(t *testing.T) {
 	mockCron := &mockCronRegister{}
 	registry.SetCronRegister(mockCron.register)
 
-	// Test concurrent registration
 	var wg sync.WaitGroup
 	errors := make(chan error, 10)
 
@@ -354,19 +346,16 @@ func TestRegistryConcurrency(t *testing.T) {
 	wg.Wait()
 	close(errors)
 
-	// Check for registration errors
 	var regErrors []error
 	for err := range errors {
 		regErrors = append(regErrors, err)
 	}
 	assert.Empty(t, regErrors)
 
-	// Initialize and verify all commands were registered
 	err := registry.Initialize()
 	assert.NoError(t, err)
 	assert.Len(t, registry.commandsToRegister, 10)
 
-	// Test concurrent access to GetCLIOptions
 	wg = sync.WaitGroup{}
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -385,11 +374,10 @@ func TestRegistryMultipleInitialization(t *testing.T) {
 
 	cmd := &TestCommand{name: "test"}
 	require.NoError(t, registry.RegisterCommand(cmd))
-	// First initialization should succeed
+
 	err1 := registry.Initialize()
 	assert.NoError(t, err1)
 
-	// Second initialization should fail
 	err2 := registry.Initialize()
 	assert.Error(t, err2)
 	assert.Contains(t, err2.Error(), "registry already initialized")
@@ -410,7 +398,6 @@ func TestRegistryEdgeCases(t *testing.T) {
 	t.Run("command with no interfaces", func(t *testing.T) {
 		registry := NewRegistry()
 
-		// Command that implements neither CLI nor Cron interfaces
 		type NoInterfaceCommand struct{}
 		cmd := &NoInterfaceCommand{}
 
@@ -418,10 +405,10 @@ func TestRegistryEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = registry.Initialize()
-		assert.NoError(t, err) // Should not error, just skip the command
+		assert.NoError(t, err)
 
 		options, err := registry.GetCLIOptions()
 		assert.NoError(t, err)
-		assert.Empty(t, options) // No CLI commands registered
+		assert.Empty(t, options)
 	})
 }
