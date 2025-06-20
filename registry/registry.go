@@ -33,7 +33,7 @@ func Start(_ context.Context) error {
 	return globalRegistry.Initialize()
 }
 
-func Stop() error {
+func Stop(_ context.Context) error {
 	globalRegistry = command.NewRegistry()
 	return nil
 }
