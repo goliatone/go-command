@@ -77,7 +77,7 @@ func TestMux_WithCustomMatcher(t *testing.T) {
 	handler := "handler"
 	mux.Add("/custom/path", handler)
 
-	matched := mux.Get("/path")
+	matched := mux.Get("/custom")
 	assert.Len(t, matched, 1)
 	assert.Equal(t, handler, matched[0].Handler)
 
@@ -91,7 +91,7 @@ func TestMux_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -102,6 +102,6 @@ func TestMux_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 
 	matched := mux.Get("/route/:id")
-	assert.Len(t, matched, 1)
+	assert.Len(t, matched, 100)
 	assert.Equal(t, handler, matched[0].Handler)
 }

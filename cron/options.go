@@ -1,4 +1,4 @@
-//go:generate options-setters -input ./options.go -output ./options_setters.go -package cron
+//go:generate options-setters -input ./options.go -output ./options_setters.go
 package cron
 
 import (
@@ -6,16 +6,6 @@ import (
 	"io"
 	"time"
 )
-
-// HandlerOptions defines scheduling options for a cron job
-type HandlerOptions struct {
-	Timeout    time.Duration
-	Deadline   time.Time
-	MaxRetries int
-	MaxRuns    int
-	RunOnce    bool
-	Expression string
-}
 
 // LogLevel represents different logging levels
 type LogLevel int

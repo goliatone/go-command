@@ -14,24 +14,22 @@ import (
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
+	gerrors "github.com/goliatone/go-errors"
 )
 
 type TestMessage struct {
-	command.BaseMessage
 	ID int
 }
 
 func (t TestMessage) Type() string { return "test" }
 
 type CreateUserMessage struct {
-	command.BaseMessage
 	Email string
 }
 
 func (e CreateUserMessage) Type() string { return "user.create" }
 
 type GetUserMessage struct {
-	command.BaseMessage
 	ID string
 }
 
@@ -207,9 +205,9 @@ func TestCommandDispatcher(t *testing.T) {
 
 		err := Dispatch(context.Background(), CreateUserMessage{Email: "test@example.com"})
 
-		var msgErr command.Error
+		var msgErr gerrors.Error
 		if errors.Is(err, &msgErr) {
-			t.Errorf("expected command.Error, got %v", err)
+			t.Errorf("expected errors.Error, got %v", err)
 		}
 
 		if secondHandlerCalled {
@@ -609,7 +607,6 @@ func TestHTTPIntegration(t *testing.T) {
 /////
 
 type TestPointerMessage struct {
-	command.BaseMessage
 	Value string
 }
 
@@ -618,7 +615,6 @@ func (t *TestPointerMessage) Type() string {
 }
 
 type TestValueMessage struct {
-	command.BaseMessage
 	Value string
 }
 
@@ -655,8 +651,7 @@ func TestMessageValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := &command.MessageHandler[command.Message]{}
-			err := handler.ValidateMessage(tt.msg)
+			err := command.ValidateMessage(tt.msg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateMessage() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -722,5 +717,163 @@ func TestQueryWithPointers(t *testing.T) {
 	_, err = Query[*TestPointerMessage, TestResponse](context.Background(), nilMsg)
 	if err == nil {
 		t.Error("Query() expected error for nil message")
+	}
+}
+
+type messageTyper interface {
+	Type() string
+}
+
+// command.Message implementation
+type extMessage struct {
+}
+
+func (m extMessage) Type() string {
+	return "ext_message"
+}
+
+// command.Message implementation
+type mockMessage struct {
+	typeName string
+}
+
+func (m mockMessage) Type() string {
+	return m.typeName
+}
+
+// pointer struct
+type ptrMockMessage struct {
+	typeName string
+}
+
+func (m *ptrMockMessage) Type() string {
+	return m.typeName
+}
+
+// struct that doesnt impelment Message
+type regularStruct struct {
+	Name string
+}
+
+func TestGetType(t *testing.T) {
+	var _ messageTyper = mockMessage{typeName: "test"}
+	var _ messageTyper = &ptrMockMessage{typeName: "test"}
+
+	tests := []struct {
+		name     string
+		input    any
+		expected string
+		setup    func(t *testing.T) any
+	}{
+		{
+			name:     "Nil value",
+			expected: "unknown_type",
+			setup: func(t *testing.T) any {
+				return nil
+			},
+		},
+		{
+			name:     "Struct implementing command.Message",
+			expected: "ext_message",
+			setup: func(t *testing.T) any {
+				return extMessage{}
+			},
+		},
+		{
+			name:     "Struct implementing command.Message",
+			expected: "mock_message_type",
+			setup: func(t *testing.T) any {
+				return mockMessage{typeName: "mock_message_type"}
+			},
+		},
+		{
+			name:     "Pointer to struct implementing command.Message",
+			expected: "ptr_mock_message_type",
+			setup: func(t *testing.T) any {
+				return &ptrMockMessage{typeName: "ptr_mock_message_type"}
+			},
+		},
+		{
+			name:     "Nil pointer to struct implementing command.Message",
+			expected: "unknown_type",
+			setup: func(t *testing.T) any {
+				return (*ptrMockMessage)(nil)
+			},
+		},
+		{
+			name:     "Regular struct",
+			expected: "dispatcher::dispatcher.regular_struct",
+			setup: func(t *testing.T) any {
+				return regularStruct{Name: "test"}
+			},
+		},
+		{
+			name:     "String",
+			expected: "string",
+			setup: func(t *testing.T) any {
+				return "test_string"
+			},
+		},
+		{
+			name:     "Integer",
+			expected: "int",
+			setup: func(t *testing.T) any {
+				return 42
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := tt.setup(t)
+			result := command.GetMessageType(input)
+			if result != tt.expected {
+				t.Errorf("getType(%v) = %s, expected %s", input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetTypeWithGenericTypes(t *testing.T) {
+	// generic with struct type
+	t.Run("Generic with struct", func(t *testing.T) {
+		var structMsg regularStruct
+		result := command.GetMessageType(structMsg)
+		expected := "dispatcher::dispatcher.regular_struct"
+		if result != expected {
+			t.Errorf("getType(regularStruct{}) = %s, expected %s", result, expected)
+		}
+	})
+
+	// generic with nil pointer
+	t.Run("Generic with nil pointer", func(t *testing.T) {
+		var ptrMsg *ptrMockMessage
+		result := command.GetMessageType(ptrMsg)
+		expected := "unknown_type"
+		if result != expected {
+			t.Errorf("getType(nil *ptrMockMessage) = %s, expected %s", result, expected)
+		}
+	})
+
+	// generic with zero value that implements messageTyper
+	t.Run("Generic with message implementation", func(t *testing.T) {
+		msg := mockMessage{typeName: ""}
+		result := command.GetMessageType(msg)
+		expected := "" // Type() method returns empty string
+		if result != expected {
+			t.Errorf("getType(mockMessage{typeName:\"\"}) = %s, expected %s", result, expected)
+		}
+	})
+}
+
+func TestSubscribeCommandSimulation(t *testing.T) {
+	// var msg T where T is the struct commands.InboxStartServiceMessage
+	var msg regularStruct
+
+	result := command.GetMessageType(msg)
+
+	expected := "dispatcher::dispatcher.regular_struct"
+	if result != expected {
+		t.Errorf("getType = %s, expected %s", result, expected)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/goliatone/go-command"
@@ -33,6 +34,7 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new scheduler instance with the provided options
+// TODO: Move to scheduler.NewCron()?
 func NewScheduler(opts ...Option) *Scheduler {
 	cs := &Scheduler{
 		location: time.Local,
@@ -51,6 +53,10 @@ func NewScheduler(opts ...Option) *Scheduler {
 
 	cs.cron = rcron.New(cs.build()...)
 	return cs
+}
+
+func (cs *Scheduler) SetLogger(logger Logger) {
+	cs.logger = logger
 }
 
 // build converts our implementation-agnostic options to rcron options
@@ -98,7 +104,7 @@ func (cs *Scheduler) build() []rcron.Option {
 }
 
 // AddCommand is a type-safe way to add command handlers
-func AddCommand[T command.Message](s *Scheduler, opts HandlerOptions, handler command.CommandFunc[T]) (Subscription, error) {
+func AddCommand[T any](s *Scheduler, opts command.HandlerConfig, handler command.CommandFunc[T]) (Subscription, error) {
 	runnerOpts := makeRunnerOptions(s, opts)
 	h := runner.NewHandler(runnerOpts...)
 
@@ -121,7 +127,11 @@ func (s *Scheduler) addJob(expr string, job rcron.Job) (Subscription, error) {
 // AddHandler registers a handler for scheduled execution
 // It accepts any handler type that implements the Message interface and returns
 // an entryID that can be used to remove the job later
-func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, error) {
+//   - handler: func()
+//   - handler: func() error
+//   - handler: command.Commander[T]
+//   - handler: command.CommandFunc[T]
+func (s *Scheduler) AddHandler(opts command.HandlerConfig, handler any) (Subscription, error) {
 	if opts.Expression == "" {
 		return nil, fmt.Errorf("cron expression cannot be empty")
 	}
@@ -131,58 +141,20 @@ func (s *Scheduler) AddHandler(opts HandlerOptions, handler any) (Subscription, 
 
 	var job rcron.Job
 	switch r := handler.(type) {
-	case command.Commander[command.Message]:
-		job = makeCommandJob(context.Background(), s, h, r.Execute)
-	case command.CommandFunc[command.Message]:
-		job = makeCommandJob(context.Background(), s, h, r)
 	case func():
 		job = makeSimpleJob(context.Background(), s, h, r)
 	case func() error:
 		job = makeErrorJob(context.Background(), s, h, r)
 	default:
-		return nil, fmt.Errorf("unsupported handler type: %T", handler)
+		// TODO: we might want to deprectate this, it is overly complicated :/
+		if cmdJob := tryCommandJob(handler, s, h); cmdJob != nil {
+			job = cmdJob
+		} else {
+			return nil, fmt.Errorf("unsupported handler type: %T", handler)
+		}
 	}
 
 	return s.addJob(opts.Expression, job)
-}
-
-func (c *Scheduler) wrapCommandHandler(handler interface {
-	Execute(context.Context, command.Message) error
-}, h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			return handler.Execute(ctx, nil)
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
-}
-
-func (c *Scheduler) wrapSimpleHandler(handler func(), h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			handler()
-			return nil
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
-}
-
-func (c *Scheduler) wrapErrorHandler(handler func() error, h *runner.Handler) rcron.Job {
-	return rcron.FuncJob(func() {
-		ctx := context.Background()
-		err := h.Run(ctx, func(ctx context.Context) error {
-			return handler()
-		})
-		if err != nil {
-			c.errorHandler(err)
-		}
-	})
 }
 
 // RemoveHandler removes a scheduled job by its entry ID
@@ -202,7 +174,7 @@ func (c *Scheduler) Stop(_ context.Context) error {
 	return nil
 }
 
-func makeRunnerOptions(s *Scheduler, opts HandlerOptions) []runner.Option {
+func makeRunnerOptions(s *Scheduler, opts command.HandlerConfig) []runner.Option {
 	return []runner.Option{
 		runner.WithMaxRetries(opts.MaxRetries),
 		runner.WithTimeout(opts.Timeout),
@@ -236,7 +208,8 @@ func makeErrorJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func(
 	})
 }
 
-func makeCommandJob[T command.Message](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
+// TODO: Is there a way we can actually make this so that the message is not an empty message?!
+func makeCommandJob[T any](ctx context.Context, s *Scheduler, h *runner.Handler, handler command.CommandFunc[T]) rcron.Job {
 	return rcron.FuncJob(func() {
 		var msg T
 		if err := runner.RunCommand(ctx, h, handler, msg); err != nil {
@@ -252,4 +225,52 @@ func makeLogger(out io.Writer, level LogLevel) rcron.Logger {
 		cronLogger = rcron.VerbosePrintfLogger(stdLogger)
 	}
 	return cronLogger
+}
+
+// tryCommandJob attempts to match any command.Commander[T] or command.CommandFunc[T]
+func tryCommandJob(handler any, s *Scheduler, h *runner.Handler) rcron.Job {
+	handlerType := reflect.TypeOf(handler)
+	if handlerType == nil || handlerType.Kind() != reflect.Func {
+		return nil
+	}
+
+	// Ensure function has the correct signature: func(context.Context, *T) error
+	if handlerType.NumIn() < 2 || handlerType.NumOut() != 1 {
+		return nil
+	}
+
+	// Extract the message type T (first argument after context.Context)
+	msgType := handlerType.In(1)
+	// if msgType.Kind() != reflect.Ptr {
+	// 	return nil // Ensure T is a pointer type (e.g., *ExecutionMessage)
+	// }
+
+	if msgType.Implements(reflect.TypeOf((*command.Message)(nil)).Elem()) || msgType.Implements(reflect.TypeOf((command.Message)(nil)).Elem()) {
+		wrappedFunc := func(ctx context.Context, msg any) error {
+
+			if msg == nil {
+				msg = reflect.Zero(msgType).Interface()
+			}
+
+			msgValue := reflect.ValueOf(msg)
+
+			// TODO: Once we fix makeCommandJob to actually product an event
+			// if !msgValue.IsValid() || msgValue.Type() != msgType {
+			// 	return fmt.Errorf("invalid message type: expected %s, got %T", msgType, msg)
+			// }
+
+			// call the original function with the correct argument type
+			results := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(ctx), msgValue})
+
+			// extract and return error result
+			if err, ok := results[0].Interface().(error); ok {
+				return err
+			}
+			return nil
+		}
+
+		return makeCommandJob(context.Background(), s, h, wrappedFunc)
+	}
+
+	return nil
 }
