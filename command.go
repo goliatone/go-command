@@ -54,6 +54,7 @@ func GetMessageType(msg any) string {
 		return "unknown_type"
 	}
 
+	// if msg implements Type() then we use that:
 	if msgTyper, ok := msg.(interface{ Type() string }); ok {
 		return msgTyper.Type()
 	}
