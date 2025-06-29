@@ -24,6 +24,10 @@ type Entry struct {
 	Handler any
 }
 
+func (i *Entry) Pattern() string {
+	return i.pattern
+}
+
 func (i *Entry) Unsubscribe() {
 	h := i.hmap
 	h.mu.Lock()
@@ -45,6 +49,10 @@ func NewMux(opts ...Option) *Mux {
 		handlers:   make(map[string][]Entry),
 		routeMatch: strings.HasPrefix,
 		entryComp:  compareHandlers,
+	}
+
+	for _, opt := range opts {
+		opt(m)
 	}
 
 	return m
