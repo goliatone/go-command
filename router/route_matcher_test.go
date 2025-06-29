@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/goliatone/go-command/router"
@@ -51,6 +52,51 @@ func TestMakeRouteMatcher_MQTTStyle(t *testing.T) {
 		{"Pattern is just wildcard", "#", "a/b/c", true},
 		{"Pattern is just single wildcard", "+", "a", true},
 		{"Pattern is just single wildcard no match", "+", "a/b", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mqttMatcher(tc.pattern, tc.topic)
+			if got != tc.want {
+				t.Errorf("mqttMatcher(pattern: %q, topic: %q) = %v; want %v", tc.pattern, tc.topic, got, tc.want)
+			}
+		})
+	}
+}
+func TestMakeRouteMatcher_Transformer(t *testing.T) {
+	mqttMatcher := router.MakeRouteMatcher(router.MakeRouteMatcherOptions{
+		Separator:        ".",
+		OnlyFinalSegment: true,
+		PatternTransformer: func(s string) string {
+			return strings.ReplaceAll(s, "::", ".")
+		},
+	})
+
+	testCases := []struct {
+		name    string
+		pattern string
+		topic   string
+		want    bool
+	}{
+		{"Exact match", "a::b::c", "a.b.c", true},
+		{"Exact mismatch", "a::b::c", "a.b.d", false},
+		{"Exact match with empty segments", "a::::c", "a..c", true},
+
+		// single level wildcard "*"
+		{"Single wildcard (*) middle", "a::*::c", "a.b.c", true},
+		{"Single wildcard (*) does not match zero", "a::*::c", "a.c", false},
+		{"Single wildcard (*) does not match multiple", "a::*::c", "a.b.d.c", false},
+		{"Single wildcard start", "*::b::c", "a.b.c", true},
+		{"Single wildcard end", "a::b::*", "a.b.c", true},
+
+		// single level wildcard "+" aliased to *
+		{"Single wildcard (+) middle", "a::+::c", "a.b.c", true},
+
+		// multi level wildcard #
+		{"Multi wildcard matches everything", "#", "a.b.c", true},
+		{"Multi wildcard at end", "a::#", "a.b.c", true},
+		{"Multi wildcard matches parent", "a::b::#", "a.b", true},
+		{"Multi wildcard matches zero levels at end", "a::#", "a", true},
 	}
 
 	for _, tc := range testCases {
