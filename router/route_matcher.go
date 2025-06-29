@@ -4,9 +4,9 @@ import "strings"
 
 // MakeRouteMatcherOptions configures the route matching behavior
 type MakeRouteMatcherOptions struct {
-	Separator        string // separator for splitting pattern/topic (default: "/")
-	OnlyFinalSegment bool   // if true, multi-level wildcard (#) must be final segment (default: false)
-
+	Separator          string // separator for splitting pattern/topic (default: "/")
+	OnlyFinalSegment   bool   // if true, multi-level wildcard (#) must be final segment (default: false)
+	PatternTransformer func(string) string
 }
 
 // MakeRouteMatcher creates a configurable pattern matching function
@@ -16,11 +16,19 @@ type MakeRouteMatcherOptions struct {
 func MakeRouteMatcher(opts ...MakeRouteMatcherOptions) func(pattern, topic string) bool {
 	separator := "/"
 	onlyFinalSegment := false
+	transformer := func(a string) string {
+		return a
+	}
 
 	if len(opts) > 0 {
 		if opts[0].Separator != "" {
 			separator = opts[0].Separator
 		}
+
+		if opts[0].PatternTransformer != nil {
+			transformer = opts[0].PatternTransformer
+		}
+
 		onlyFinalSegment = opts[0].OnlyFinalSegment
 	}
 
@@ -28,6 +36,8 @@ func MakeRouteMatcher(opts ...MakeRouteMatcherOptions) func(pattern, topic strin
 		if pattern == topic {
 			return true
 		}
+
+		pattern = transformer(pattern)
 
 		patternParts := strings.Split(pattern, separator)
 		topicParts := strings.Split(topic, separator)
