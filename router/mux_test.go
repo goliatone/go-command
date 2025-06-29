@@ -69,7 +69,7 @@ func TestMux_Unsubscribe(t *testing.T) {
 
 func TestMux_WithCustomMatcher(t *testing.T) {
 	customMatcher := func(route, path string) bool {
-		return strings.HasSuffix(route, path)
+		return strings.HasPrefix(route, path)
 	}
 
 	mux := NewMux(WithRouteMatcher(customMatcher))
