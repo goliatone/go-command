@@ -1,5 +1,30 @@
 # Changelog
 
+# [0.4.0](https://github.com/goliatone/go-command/compare/v0.3.0...v0.4.0) - (2025-06-29)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Test for custom matcher ([9446378](https://github.com/goliatone/go-command/commit/944637844754dc1bf58ba7f7e503598a063ee32c))  - (goliatone)
+- Apply options to mux ([7958e46](https://github.com/goliatone/go-command/commit/7958e4664c7e8773df2f20bbd93ef278cdb09c6d))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.4.0 ([d2d2fcc](https://github.com/goliatone/go-command/commit/d2d2fcc857f7813ef3aca74c426a6cce34875372))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Pattern transformer ([4cd31f2](https://github.com/goliatone/go-command/commit/4cd31f211c5f81f28e32b573adddf551e4ba2a5a))  - (goliatone)
+- With matcher option ([b2e69a3](https://github.com/goliatone/go-command/commit/b2e69a3d8915181020a8eec2e8bf3b1a2c09b85a))  - (goliatone)
+- Custom route matcher to implement MQTT and AMQP topics ([a16b8ca](https://github.com/goliatone/go-command/commit/a16b8ca0d1991c605e6bbf1fed6be17155bad26e))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.3.0 ([3dd82e9](https://github.com/goliatone/go-command/commit/3dd82e94b8e83747397d594ff371b42c05b1e64c))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([4a6651f](https://github.com/goliatone/go-command/commit/4a6651f2ef9191a007e27e7fea027973b74fc4d1))  - (goliatone)
+
 # [0.3.0](https://github.com/goliatone/go-command/compare/v0.2.0...v0.3.0) - (2025-06-24)
 
 ## <!-- 1 -->🐛 Bug Fixes
