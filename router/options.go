@@ -13,3 +13,9 @@ func WithEntryComparator(comp func(a, b any) bool) Option {
 		m.entryComp = comp
 	}
 }
+
+func WithMatcher(matcher func(pattern, topic string) bool) Option {
+	return func(m *Mux) {
+		m.routeMatch = matcher
+	}
+}
