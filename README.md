@@ -1,14 +1,29 @@
-# Go Commands
+# Go Command
 
-## Universal Message Handlers
+A flexible Go package for implementing command and query patterns with support for multiple execution strategies including CLI, cron scheduling, message dispatching, and batch/parallel processing.
 
-This package implements a pattern for handling messages through commands and queries with type safety and flexible execution strategies.
+## Overview
 
-## Core Components
+`go-command` provides a robust framework for building applications using the Command Query Responsibility Segregation (CQRS) pattern. It offers:
 
-### Message Interface
+- **Type-safe message handling** through Go generics
+- **Multiple execution strategies** (CLI, cron, dispatcher, batch, parallel)
+- **Flexible error handling** with retry support
+- **Context-aware operations** with cancellation and timeouts
+- **Registry system** for automatic command/query discovery
+- **Integration with popular frameworks** (Kong for CLI, cron for scheduling)
 
-Messages carry data and identify their type:
+## Installation
+
+```bash
+go get github.com/goliatone/go-command
+```
+
+## Core Concepts
+
+### Messages
+
+Messages are data carriers that implement the `Message` interface:
 
 ```go
 type Message interface {
@@ -16,209 +31,99 @@ type Message interface {
 }
 ```
 
-### Command Pattern
+Example:
+```go
+type CreateUserCommand struct {
+    Email string
+    Name  string
+}
+
+func (c CreateUserCommand) Type() string {
+    return "user.create"
+}
+```
+
+### Commands
 
 Commands handle operations with side effects:
 
 ```go
-type Commander[T Message] interface {
+type Commander[T any] interface {
     Execute(ctx context.Context, msg T) error
 }
 
-type CommandFunc[T Message] func(ctx context.Context, msg T) error
+// Function adapter
+type CommandFunc[T any] func(ctx context.Context, msg T) error
 ```
 
-### Query Pattern
+### Queries
 
 Queries retrieve data without side effects:
 
 ```go
-type Querier[T Message, R any] interface {
+type Querier[T any, R any] interface {
     Query(ctx context.Context, msg T) (R, error)
 }
 
-type QueryFunc[T Message, R any] func(ctx context.Context, msg T) (R, error)
+// Function adapter  
+type QueryFunc[T any, R any] func(ctx context.Context, msg T) (R, error)
 ```
 
-## Registry System
+## Execution Strategies
 
-The registry system allows commands and queries to be registered once and executed through multiple interfaces (CLI, cron jobs, etc.). Commands can optionally implement additional interfaces to enable different execution modes.
+### 1. Dispatcher Pattern
 
-### Basic Registration
-
-Register commands and queries globally for automatic discovery:
+The dispatcher provides a centralized message routing system:
 
 ```go
-import "github.com/goliatone/go-command/registry"
+import "github.com/goliatone/go-command/dispatcher"
 
-// Register a command
-sub, err := registry.RegisterCommand(myCommand)
+// Subscribe a command handler
+dispatcher.SubscribeCommand(&CreateUserHandler{db: db})
 
-// Register a query
-sub, err := registry.RegisterQuery(myQuery)
+// Or use a function
+dispatcher.SubscribeCommandFunc(func(ctx context.Context, cmd CreateUserCommand) error {
+    // Handle command
+    return nil
+})
 
-// Initialize the registry
-err := registry.Start(context.Background())
+// Dispatch a command
+err := dispatcher.Dispatch(context.Background(), CreateUserCommand{
+    Email: "user@example.com",
+    Name:  "John Doe",
+})
+
+// Subscribe a query handler
+dispatcher.SubscribeQuery(&GetUserHandler{db: db})
+
+// Execute a query
+user, err := dispatcher.Query[GetUserMessage, *User](context.Background(), GetUserMessage{
+    ID: "user-123",
+})
 ```
 
-### Optional Command Interfaces
+### 2. Registry System with CLI and Cron
 
-Commands can implement optional interfaces to enable additional execution modes:
-
-#### CLI Interface
-
-Enable command-line execution by implementing `CLICommand`:
-
-```go
-type CLICommand interface {
-    CLIHandler() any
-    CLIOptions() CLIConfig
-}
-
-type CLIConfig struct {
-    Name        string
-    Description string
-    Group       string
-    Aliases     []string
-    Hidden      bool
-}
-```
-
-Example implementation:
-
-```go
-type SyncDataCommand struct {
-    service SyncService
-    logger  Logger
-}
-
-func (c *SyncDataCommand) CLIHandler() any {
-    return &SyncDataCLICommand{cmd: c}
-}
-
-func (c *SyncDataCommand) CLIOptions() command.CLIConfig {
-    return command.CLIConfig{
-        Name:        "sync",
-        Description: "Synchronize data between source and target",
-        Group:       "data",
-        Aliases:     []string{"s"},
-    }
-}
-
-// Kong CLI adapter
-type SyncDataCLICommand struct {
-    Source    string `kong:"help='Source directory',required"`
-    Target    string `kong:"help='Target directory',required"`
-    BatchSize int    `kong:"help='Batch size',default=100"`
-    cmd       *SyncDataCommand
-}
-
-func (s *SyncDataCLICommand) Run(ctx *kong.Context) error {
-    return s.cmd.Execute(context.Background(), &SyncDataEvent{
-        Source:    s.Source,
-        Target:    s.Target,
-        BatchSize: s.BatchSize,
-    })
-}
-```
-
-#### Cron Interface
-
-Enable scheduled execution by implementing `CronCommand`:
-
-```go
-type CronCommand interface {
-    CronHandler() func() error
-    CronOptions() HandlerConfig
-}
-
-type HandlerConfig struct {
-    Expression string        // Cron expression
-    MaxRetries int           // Maximum retry attempts
-    Timeout    time.Duration // Execution timeout
-    MaxRuns    int           // Maximum total runs
-    RunOnce    bool          // Run only once
-}
-```
-
-Example implementation:
-
-```go
-func (c *SyncDataCommand) CronHandler() func() error {
-    return func() error {
-        ctx := context.Background()
-        event := &SyncDataEvent{
-            Source:    os.Getenv("SYNC_SOURCE"),
-            Target:    os.Getenv("SYNC_TARGET"),
-            BatchSize: 500,
-        }
-        return c.Execute(ctx, event)
-    }
-}
-
-func (c *SyncDataCommand) CronOptions() command.HandlerConfig {
-    return command.HandlerConfig{
-        Expression: "0 2 * * *", // Run daily at 2 AM
-        MaxRetries: 3,
-        Timeout:    time.Hour,
-    }
-}
-```
-
-### Registry Setup
-
-Configure the registry with optional components:
+The registry allows commands to be registered once and executed through multiple interfaces:
 
 ```go
 import (
-    "github.com/goliatone/go-command/cron"
     "github.com/goliatone/go-command/registry"
+    "github.com/goliatone/go-command/cron"
 )
 
-// Set up cron scheduler (optional)
-scheduler := cron.NewScheduler()
-scheduler.Start(context.Background())
-
-registry.SetCronRegister(func(opts command.HandlerConfig, handler any) error {
-    _, err := scheduler.AddHandler(opts, handler)
-    return err
-})
-
-// Register commands
-registry.RegisterCommand(syncCommand)
-
-// Initialize registry (registers commands with CLI and cron)
-err := registry.Start(context.Background())
-
-// Get CLI options for Kong
-cliOptions, err := registry.GetCLIOptions()
-```
-
-### Complete Example
-
-```go
-// Message definition
-type SyncDataEvent struct {
-    Source    string `kong:"help='Source directory',required"`
-    Target    string `kong:"help='Target directory',required"`
-    BatchSize int    `kong:"help='Batch size',default=100"`
-}
-
-func (e SyncDataEvent) Type() string { return "sync_data" }
-
-// Command implementation with multiple interfaces
+// Command that supports multiple execution modes
 type SyncDataCommand struct {
     service SyncService
     logger  Logger
 }
 
-// Core command logic
+// Core business logic
 func (c *SyncDataCommand) Execute(ctx context.Context, evt *SyncDataEvent) error {
-    c.logger.Info("Syncing from %s to %s", evt.Source, evt.Target)
     return c.service.Sync(ctx, evt.Source, evt.Target, evt.BatchSize)
 }
 
-// CLI interface implementation
+// Enable CLI execution
 func (c *SyncDataCommand) CLIHandler() any {
     return &SyncDataCLICommand{cmd: c}
 }
@@ -231,178 +136,353 @@ func (c *SyncDataCommand) CLIOptions() command.CLIConfig {
     }
 }
 
-// Cron interface implementation
+// Enable cron scheduling
 func (c *SyncDataCommand) CronHandler() func() error {
     return func() error {
-        ctx := context.Background()
-        event := &SyncDataEvent{
+        return c.Execute(context.Background(), &SyncDataEvent{
             Source:    os.Getenv("SYNC_SOURCE"),
             Target:    os.Getenv("SYNC_TARGET"),
             BatchSize: 500,
-        }
-        return c.Execute(ctx, event)
+        })
     }
 }
 
 func (c *SyncDataCommand) CronOptions() command.HandlerConfig {
     return command.HandlerConfig{
-        Expression: "0 2 * * *",
+        Expression: "0 2 * * *", // Daily at 2 AM
         MaxRetries: 3,
         Timeout:    time.Hour,
     }
 }
 
-// Kong CLI adapter
-type SyncDataCLICommand struct {
-    SyncDataEvent `kong:"embed"`
-    cmd           *SyncDataCommand
-}
+// Setup
+scheduler := cron.NewScheduler()
+scheduler.Start(context.Background())
 
-func (s *SyncDataCLICommand) Run(ctx *kong.Context) error {
-    return s.cmd.Execute(context.Background(), &s.SyncDataEvent)
-}
+registry.SetCronRegister(func(opts command.HandlerConfig, handler any) error {
+    _, err := scheduler.AddHandler(opts, handler)
+    return err
+})
+
+registry.RegisterCommand(syncCmd)
+registry.Start(context.Background())
+
+// Get CLI options for Kong integration
+cliOptions, _ := registry.GetCLIOptions()
 ```
 
-## Execution Strategies
+### 3. Batch Executor
 
-The package provides different execution strategies:
-
-### Runner
-
-Manages retries, timeouts, and execution control:
+Process commands in batches with concurrency control:
 
 ```go
+import "github.com/goliatone/go-command/flow"
+
+// Create batch executor
+executor := flow.NewBatchExecutor(
+    &ItemProcessor{},
+    flow.WithBatchSize[ProcessItemCommand](100),
+    flow.WithConcurrency[ProcessItemCommand](5),
+)
+
+// Process messages in batches
+messages := []ProcessItemCommand{
+    {ItemID: "1"}, {ItemID: "2"}, // ... more items
+}
+err := executor.Execute(context.Background(), messages)
+
+// Or use the functional approach
+err = flow.ExecuteBatch(
+    context.Background(),
+    messages,
+    processFunc,
+    100, // batch size
+    5,   // concurrency
+)
+```
+
+The batch executor:
+- Splits messages into batches of specified size
+- Processes batches concurrently with configurable parallelism
+- Supports error handling with optional stop-on-error behavior
+- Provides detailed error metadata for debugging
+
+### 4. Parallel Executor
+
+Execute multiple handlers concurrently for the same message:
+
+```go
+import "github.com/goliatone/go-command/flow"
+
+// Create parallel executor with multiple handlers
+handlers := []command.Commander[NotificationEvent]{
+    &EmailNotifier{},
+    &SMSNotifier{},
+    &PushNotifier{},
+}
+
+executor := flow.NewParallelExecutor(handlers)
+
+// Execute all handlers in parallel
+err := executor.Execute(context.Background(), NotificationEvent{
+    UserID:  "user-123",
+    Message: "Your order has been shipped",
+})
+
+// Or use the functional approach
+err = flow.ParallelExecute(
+    context.Background(),
+    event,
+    []command.CommandFunc[NotificationEvent]{
+        sendEmail,
+        sendSMS,
+        sendPush,
+    },
+)
+```
+
+The parallel executor:
+- Runs all handlers concurrently
+- Supports context cancellation
+- Can stop all handlers on first error (configurable)
+- Collects and returns all errors
+
+### 5. Runner with Retry Logic
+
+The runner provides execution control with retries and timeouts:
+
+```go
+import "github.com/goliatone/go-command/runner"
+
 handler := runner.NewHandler(
     runner.WithMaxRetries(3),
-    runner.WithTimeout(time.Minute),
+    runner.WithTimeout(30 * time.Second),
+    runner.WithRetryDelay(time.Second),
+    runner.WithStopOnError(true),
 )
 
 err := runner.RunCommand(ctx, handler, cmd, msg)
 ```
 
-The handler's `Run` function will check if the command returns an error, and if so, it will check if the error implements these interfaces:
+The runner supports custom retry logic through error interfaces:
+- `IsRetryable() bool` - Control whether an error should trigger a retry
+- `RetryDelay(attempt int) time.Duration` - Custom retry delay calculation
 
-- `interface{ IsRetryable() bool }`: If the error exposes a `IsRetryable` function and returns `false` we will not retry, if returns `true`, we check the other logic to determine retries.
-- `interface{ RetryDelay(int) time.Duration }`: If the error exposes a `RetryDelay` function that returns a `time.Duration`, we will use that value to known when the next attempt should be.
+### 6. Cron Scheduler
 
-Look at [goliatone/go-errors](https://github.com/goliatone/go-errors) for an implementation.
-
-### Cron
-
-Schedules commands to run periodically:
+Schedule commands to run periodically:
 
 ```go
-scheduler := cron.NewScheduler()
+import "github.com/goliatone/go-command/cron"
 
-id, err := cron.AddCommand(scheduler, &MyHandler{}, cron.HandlerOptions{
-    Expression: "*/5 * * * *",
-    MaxRetries: 3,
-    Timeout: time.Minute,
-})
+scheduler := cron.NewScheduler(
+    cron.WithLocation(time.UTC),
+    cron.WithLogLevel(cron.LogLevelInfo),
+)
+
+// Add a command to run every 5 minutes
+id, err := scheduler.AddHandler(
+    command.HandlerConfig{
+        Expression: "*/5 * * * *",
+        MaxRetries: 3,
+        Timeout:    time.Minute,
+    },
+    func() error {
+        return processBatch(context.Background())
+    },
+)
+
+scheduler.Start(context.Background())
 ```
 
-<!-- Processes commands asynchronously with River:
-### Queue
+## Complete Example
+
+Here's a comprehensive example showing multiple features:
 
 ```go
-q, err := queue.NewQueue(driver)
-err = queue.RegisterHandler(q, &MyHandler{})
-err = queue.EnqueueCommand(q, cmd, &queue.JobOptions{
-    ExecutionOptions: types.ExecutionOptions{
-        MaxRetries: 3,
-        Timeout: time.Minute,
-    },
-})
-``` -->
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+    
+    "github.com/goliatone/go-command"
+    "github.com/goliatone/go-command/dispatcher"
+    "github.com/goliatone/go-command/flow"
+    "github.com/goliatone/go-command/registry"
+)
+
+// Define messages
+type ProcessOrderCommand struct {
+    OrderID string
+    UserID  string
+}
+
+func (c ProcessOrderCommand) Type() string { return "order.process" }
+
+type NotifyUserCommand struct {
+    UserID  string
+    Message string
+}
+
+func (c NotifyUserCommand) Type() string { return "user.notify" }
+
+// Command handlers
+type OrderProcessor struct {
+    orderService OrderService
+    logger       Logger
+}
+
+func (p *OrderProcessor) Execute(ctx context.Context, cmd ProcessOrderCommand) error {
+    log.Printf("Processing order %s for user %s", cmd.OrderID, cmd.UserID)
+    
+    // Process the order
+    if err := p.orderService.Process(cmd.OrderID); err != nil {
+        return err
+    }
+    
+    // Dispatch notification
+    return dispatcher.Dispatch(ctx, NotifyUserCommand{
+        UserID:  cmd.UserID,
+        Message: "Your order has been processed",
+    })
+}
+
+// Batch processing example
+func processDailyOrders(ctx context.Context) error {
+    orders := []ProcessOrderCommand{
+        {OrderID: "1", UserID: "user1"},
+        {OrderID: "2", UserID: "user2"},
+        // ... more orders
+    }
+    
+    return flow.ExecuteBatch(
+        ctx,
+        orders,
+        func(ctx context.Context, cmd ProcessOrderCommand) error {
+            return dispatcher.Dispatch(ctx, cmd)
+        },
+        50,  // batch size
+        10,  // concurrency
+    )
+}
+
+// Parallel notification example  
+func notifyAllChannels(ctx context.Context, userID, message string) error {
+    cmd := NotifyUserCommand{UserID: userID, Message: message}
+    
+    return flow.ParallelExecute(
+        ctx,
+        cmd,
+        []command.CommandFunc[NotifyUserCommand]{
+            sendEmail,
+            sendSMS,
+            sendPushNotification,
+        },
+    )
+}
+
+func main() {
+    // Register handlers
+    dispatcher.SubscribeCommand(&OrderProcessor{
+        orderService: &orderService{},
+        logger:       &logger{},
+    })
+    
+    dispatcher.SubscribeCommandFunc(func(ctx context.Context, cmd NotifyUserCommand) error {
+        return notifyAllChannels(ctx, cmd.UserID, cmd.Message)
+    })
+    
+    // Process an order
+    err := dispatcher.Dispatch(context.Background(), ProcessOrderCommand{
+        OrderID: "12345",
+        UserID:  "user-789",
+    })
+    
+    if err != nil {
+        log.Fatal("Failed to process order:", err)
+    }
+}
+```
 
 ## Error Handling
 
-All strategies use a common error handler:
+The package provides consistent error handling across all execution strategies:
 
 ```go
-type ErrorHandler func(error)
-```
+// Configure error handler
+handler := runner.NewHandler(
+    runner.WithErrorHandler(func(err error) {
+        log.Printf("Command execution failed: %v", err)
+    }),
+)
 
-Configure error handling through options:
-
-```go
-WithErrorHandler(func(err error) {
-    log.Printf("error: %v", err)
-})
-```
-
-## Message Implementation
-
-Create messages as data carriers:
-
-```go
-type CreateUserCommand struct {
-    Name  string
-    Email string
+// Custom retryable errors
+type RetryableError struct {
+    err   error
+    delay time.Duration
 }
 
-func (c CreateUserCommand) Type() string {
-    return "create_user"
-}
-```
-
-## Handler Implementation
-
-Implement handlers either as structs or functions:
-
-```go
-// Struct implementation
-type UserHandler struct {
-    db Database
-}
-
-func (h *UserHandler) Execute(ctx context.Context, cmd CreateUserCommand) error {
-    return h.db.CreateUser(ctx, cmd.Name, cmd.Email)
-}
-```
-
-The same can be accomplished using a function:
-```go
-// Function implementation
-func handleCreateUser(ctx context.Context, cmd CreateUserCommand) error {
-    return h.db.CreateUser(ctx, cmd.Name, cmd.Email)
+func (e RetryableError) Error() string { return e.err.Error() }
+func (e RetryableError) IsRetryable() bool { return true }
+func (e RetryableError) RetryDelay(attempt int) time.Duration {
+    return e.delay * time.Duration(attempt)
 }
 ```
 
 ## Testing
 
-The registry provides utilities for testing:
+The package provides utilities for testing:
 
 ```go
 import "github.com/goliatone/go-command/registry"
 
-func TestMyCommand(t *testing.T) {
+func TestCommand(t *testing.T) {
     registry.WithTestRegistry(func() {
-        // Register and test commands in isolation
-        _, err := registry.RegisterCommand(myCommand)
+        // Register test command
+        registry.RegisterCommand(myCommand)
+        
+        // Start registry
+        err := registry.Start(context.Background())
         require.NoError(t, err)
-
-        err = registry.Start(context.Background())
-        require.NoError(t, err)
-
-        // Test CLI options
-        options, err := registry.GetCLIOptions()
+        
+        // Test execution
+        err = dispatcher.Dispatch(context.Background(), MyCommand{})
         assert.NoError(t, err)
-        assert.Len(t, options, 1)
     })
 }
 ```
 
-## Design Benefits
+## Advanced Features
 
-- **Type-safe message handling** through generics
-- **Consistent error handling** across execution strategies
-- **Context propagation** for cancellation and timeouts
-- **Clear separation** between commands and queries
-- **Flexible execution options** (retry, timeout, scheduling)
-- **Thread-safe operations**
-- **Optional interfaces** for different execution modes
-- **Centralized registration** with automatic discovery
-- **CLI integration** with Kong framework
-- **Cron scheduling** with configurable options
-- **Test isolation** utilities
+### Message Type Resolution
+
+Messages can implement custom type resolution:
+```go
+func (m MyMessage) Type() string {
+    return "custom.message.type"
+}
+```
+
+Or rely on automatic type detection based on struct name.
+
+### Context Propagation
+
+All operations support context for:
+- Cancellation
+- Deadlines
+- Value propagation
+- Tracing integration
+
+### Thread Safety
+
+All components are designed to be thread-safe and can be used concurrently.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
