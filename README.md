@@ -1,10 +1,10 @@
 # Go Command
 
-A flexible Go package for implementing command and query patterns with support for multiple execution strategies including CLI, cron scheduling, message dispatching, and batch/parallel processing.
+A Go package for implementing command and query patterns with support for multiple execution strategies including CLI, cron scheduling, message dispatching, and batch/parallel processing.
 
 ## Overview
 
-`go-command` provides a robust framework for building applications using the Command Query Responsibility Segregation (CQRS) pattern. It offers:
+`go-command` provides a framework for building applications inspired by the Command Query Responsibility Segregation (CQRS) pattern. It offers:
 
 - **Type-safe message handling** through Go generics
 - **Multiple execution strategies** (CLI, cron, dispatcher, batch, parallel)
@@ -65,7 +65,7 @@ type Querier[T any, R any] interface {
     Query(ctx context.Context, msg T) (R, error)
 }
 
-// Function adapter  
+// Function adapter
 type QueryFunc[T any, R any] func(ctx context.Context, msg T) (R, error)
 ```
 
@@ -306,7 +306,7 @@ import (
     "context"
     "log"
     "time"
-    
+
     "github.com/goliatone/go-command"
     "github.com/goliatone/go-command/dispatcher"
     "github.com/goliatone/go-command/flow"
@@ -336,12 +336,12 @@ type OrderProcessor struct {
 
 func (p *OrderProcessor) Execute(ctx context.Context, cmd ProcessOrderCommand) error {
     log.Printf("Processing order %s for user %s", cmd.OrderID, cmd.UserID)
-    
+
     // Process the order
     if err := p.orderService.Process(cmd.OrderID); err != nil {
         return err
     }
-    
+
     // Dispatch notification
     return dispatcher.Dispatch(ctx, NotifyUserCommand{
         UserID:  cmd.UserID,
@@ -356,7 +356,7 @@ func processDailyOrders(ctx context.Context) error {
         {OrderID: "2", UserID: "user2"},
         // ... more orders
     }
-    
+
     return flow.ExecuteBatch(
         ctx,
         orders,
@@ -368,10 +368,10 @@ func processDailyOrders(ctx context.Context) error {
     )
 }
 
-// Parallel notification example  
+// Parallel notification example
 func notifyAllChannels(ctx context.Context, userID, message string) error {
     cmd := NotifyUserCommand{UserID: userID, Message: message}
-    
+
     return flow.ParallelExecute(
         ctx,
         cmd,
@@ -389,17 +389,17 @@ func main() {
         orderService: &orderService{},
         logger:       &logger{},
     })
-    
+
     dispatcher.SubscribeCommandFunc(func(ctx context.Context, cmd NotifyUserCommand) error {
         return notifyAllChannels(ctx, cmd.UserID, cmd.Message)
     })
-    
+
     // Process an order
     err := dispatcher.Dispatch(context.Background(), ProcessOrderCommand{
         OrderID: "12345",
         UserID:  "user-789",
     })
-    
+
     if err != nil {
         log.Fatal("Failed to process order:", err)
     }
@@ -442,11 +442,11 @@ func TestCommand(t *testing.T) {
     registry.WithTestRegistry(func() {
         // Register test command
         registry.RegisterCommand(myCommand)
-        
+
         // Start registry
         err := registry.Start(context.Background())
         require.NoError(t, err)
-        
+
         // Test execution
         err = dispatcher.Dispatch(context.Background(), MyCommand{})
         assert.NoError(t, err)
