@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
@@ -19,10 +20,13 @@ var ExitOnErr = false
 var (
 	defaultMux = router.NewMux()
 	testMux    *router.Mux // Only set during tests for isolation
+	testMuxMu  sync.RWMutex
 )
 
 // getMux returns the active mux (test override or default)
 func getMux() *router.Mux {
+	testMuxMu.RLock()
+	defer testMuxMu.RUnlock()
 	if testMux != nil {
 		return testMux
 	}
@@ -31,6 +35,8 @@ func getMux() *router.Mux {
 
 // setTestMux overrides the mux for testing (package-private, test-only)
 func setTestMux(m *router.Mux) {
+	testMuxMu.Lock()
+	defer testMuxMu.Unlock()
 	testMux = m
 }
 
