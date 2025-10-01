@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,8 +16,8 @@ func TestHandler_NoError_NoRetries(t *testing.T) {
 	cf := countingFunc{failUntil: 0}
 	h.Run(context.Background(), cf.fn)
 
-	if cf.calls != 1 {
-		t.Errorf("expected calls=1, got %d", cf.calls)
+	if cf.calls.Load() != 1 {
+		t.Errorf("expected calls=1, got %d", cf.calls.Load())
 	}
 
 	if runs := hRuns(h); runs != 1 {
@@ -33,8 +34,8 @@ func TestHandler_SuccessOnSecondAttempt(t *testing.T) {
 	cf := countingFunc{failUntil: 1}
 	h.Run(context.Background(), cf.fn)
 
-	if cf.calls != 2 {
-		t.Errorf("expected calls=2, got %d", cf.calls)
+	if cf.calls.Load() != 2 {
+		t.Errorf("expected calls=2, got %d", cf.calls.Load())
 	}
 
 	if hRuns(h) != 1 {
@@ -52,8 +53,8 @@ func TestHandler_AllAttemptsFail(t *testing.T) {
 	cf := countingFunc{failUntil: 5}
 	h.Run(context.Background(), cf.fn)
 
-	if cf.calls != 3 {
-		t.Errorf("expected calls=3 (1 initial + 2 retries), got %d", cf.calls)
+	if cf.calls.Load() != 3 {
+		t.Errorf("expected calls=3 (1 initial + 2 retries), got %d", cf.calls.Load())
 	}
 	if hSuccess(h) != 0 {
 		t.Errorf("Handler.successfulRuns should remain 0 for all fail, got %d", hSuccess(h))
@@ -66,13 +67,13 @@ func TestHandler_RunOnce(t *testing.T) {
 	cf := countingFunc{}
 
 	h.Run(context.Background(), cf.fn)
-	if cf.calls != 1 {
-		t.Errorf("expected calls=1 after first run, got %d", cf.calls)
+	if cf.calls.Load() != 1 {
+		t.Errorf("expected calls=1 after first run, got %d", cf.calls.Load())
 	}
 
 	h.Run(context.Background(), cf.fn)
-	if cf.calls != 1 {
-		t.Errorf("expected calls=1 after second run (skipped), got %d", cf.calls)
+	if cf.calls.Load() != 1 {
+		t.Errorf("expected calls=1 after second run (skipped), got %d", cf.calls.Load())
 	}
 
 	if hSuccess(h) != 1 {
@@ -100,8 +101,8 @@ func TestHandler_MaxRuns(t *testing.T) {
 
 	h.Run(context.Background(), cf.fn)
 
-	if cf.calls != 2 {
-		t.Errorf("expected calls=2, got %d", cf.calls)
+	if cf.calls.Load() != 2 {
+		t.Errorf("expected calls=2, got %d", cf.calls.Load())
 	}
 
 	if hSuccess(h) != 2 {
@@ -183,8 +184,8 @@ func TestHandler_Concurrency(t *testing.T) {
 		t.Errorf("expected Handler.successfulRuns=%d, got %d", goroutines, hSuccess(h))
 	}
 
-	if cf.calls < goroutines {
-		t.Errorf("expected at least %d calls, got %d", goroutines, cf.calls)
+	if cf.calls.Load() < int32(goroutines) {
+		t.Errorf("expected at least %d calls, got %d", goroutines, cf.calls.Load())
 	}
 }
 
@@ -333,15 +334,15 @@ func noErrorFunc(_ context.Context) error {
 }
 
 type countingFunc struct {
-	calls     int
+	calls     atomic.Int32
 	failUntil int // fail this many times, then succeed
 }
 
 func (cf *countingFunc) fn(_ context.Context) error {
-	cf.calls++
-	fmt.Printf("[FNC] count: %d\n", cf.calls)
-	if cf.calls <= cf.failUntil {
-		return fmt.Errorf("forced error attempt %d", cf.calls)
+	currentCalls := cf.calls.Add(1)
+	fmt.Printf("[FNC] count: %d\n", currentCalls)
+	if int(currentCalls) <= cf.failUntil {
+		return fmt.Errorf("forced error attempt %d", currentCalls)
 	}
 	return nil
 }
