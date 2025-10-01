@@ -12,7 +12,8 @@ import (
 )
 
 func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	var wg sync.WaitGroup
 	numGoroutines := 100
@@ -37,7 +38,8 @@ func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestConcurrentDispatch(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	var counter atomic.Int32
 	numHandlers := 10
@@ -76,7 +78,8 @@ func TestConcurrentDispatch(t *testing.T) {
 }
 
 func TestConcurrentSubscribeDispatch(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	var counter atomic.Int32
 	var wg sync.WaitGroup
@@ -112,7 +115,8 @@ func TestConcurrentSubscribeDispatch(t *testing.T) {
 }
 
 func TestRaceSubscribeUnsubscribe(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	done := make(chan struct{})
 
@@ -151,7 +155,8 @@ func TestRaceSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestHandlerPanic(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	panicMsg := "intentional panic"
 

@@ -117,7 +117,8 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 }
 
 func TestCommandDispatcher(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
@@ -217,7 +218,8 @@ func TestCommandDispatcher(t *testing.T) {
 }
 
 func TestQueryDispatcher(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	t.Run("successful query execution", func(t *testing.T) {
 		db := newMockDB()
@@ -323,7 +325,8 @@ func TestQueryDispatcher(t *testing.T) {
 // }
 
 func TestHTTPIntegration(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	db := newMockDB()
 
@@ -660,7 +663,8 @@ func TestMessageValidation(t *testing.T) {
 }
 
 func TestDispatchWithPointers(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	commandHandler := command.CommandFunc[*TestPointerMessage](func(ctx context.Context, msg *TestPointerMessage) error {
 		msg.Value = "handled"
@@ -689,7 +693,8 @@ func TestDispatchWithPointers(t *testing.T) {
 }
 
 func TestQueryWithPointers(t *testing.T) {
-	mux = router.NewMux()
+	setTestMux(router.NewMux())
+	t.Cleanup(func() { setTestMux(nil) })
 
 	queryHandler := command.QueryFunc[*TestPointerMessage, TestResponse](func(ctx context.Context, msg *TestPointerMessage) (TestResponse, error) {
 		msg.Value = "queried"
