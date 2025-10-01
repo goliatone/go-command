@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.5.0](https://github.com/goliatone/go-command/compare/v0.4.0...v0.5.0) - (2025-10-01)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Test handle serial exec ([d1f8bdf](https://github.com/goliatone/go-command/commit/d1f8bdffb554abd0d469e91c97bdbdbd05ee3ee0))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.5.0 ([c93c190](https://github.com/goliatone/go-command/commit/c93c190a0239fcfe3566319b8627569be7c8ba5f))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.4.0 ([ed3f803](https://github.com/goliatone/go-command/commit/ed3f80339daaca3970c97c6fedfee12d0ca0cc86))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([97f8d9f](https://github.com/goliatone/go-command/commit/97f8d9f1a2e61648b9fec3253ee586e84e3425e7))  - (goliatone)
+
 # [0.4.0](https://github.com/goliatone/go-command/compare/v0.3.0...v0.4.0) - (2025-06-29)
 
 ## <!-- 1 -->🐛 Bug Fixes
