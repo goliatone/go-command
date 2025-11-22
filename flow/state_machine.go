@@ -105,7 +105,9 @@ func (s *StateMachine[T]) Execute(ctx context.Context, msg T) error {
 		current = s.req.CurrentState(msg)
 	}
 	if strings.TrimSpace(current) == "" {
-		current = s.initial
+		return errors.New("current state missing (store empty and no CurrentState provided)", errors.CategoryBadInput).
+			WithTextCode("STATE_MACHINE_STATE_MISSING").
+			WithMetadata(map[string]any{"entity": s.entity, "key": key})
 	}
 	current = normalizeState(current)
 
