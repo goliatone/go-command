@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/goliatone/go-command/flow"
@@ -78,6 +79,9 @@ func NewApp(ctx context.Context) (*App, error) {
 	req := flow.TransitionRequest[OrderMsg]{
 		StateKey: func(m OrderMsg) string { return m.ID },
 		Event:    func(m OrderMsg) string { return m.Event },
+		CurrentState: func(m OrderMsg) string {
+			return m.Target
+		},
 	}
 
 	sm, err := flow.NewStateMachine(cfg, store, req, guards, actions)
@@ -124,6 +128,9 @@ func (a *App) GetOrders() []*Order {
 	for _, order := range a.Orders {
 		orders = append(orders, order)
 	}
+	sort.Slice(orders, func(i, j int) bool {
+		return orders[i].ID < orders[j].ID
+	})
 	return orders
 }
 
@@ -160,27 +167,45 @@ func (a *App) Transition(id, event string, admin bool) error {
 		a.mu.Unlock()
 		return fmt.Errorf("order %s not found", id)
 	}
+	currentState := order.State
 	a.mu.Unlock()
 
+	fmt.Printf("[DEBUG] Transition start: id=%s event=%s admin=%v currentOrderState=%s\n", id, event, admin, currentState)
+	fmt.Printf("[DEBUG] StateMachine ptr=%p Store ptr=%p\n", a.StateMachine, a.StateStore)
+
 	msg := OrderMsg{
-		ID:    id,
-		Event: event,
-		Admin: admin,
+		ID:     id,
+		Event:  event,
+		Admin:  admin,
+		Target: currentState, // provide current state as fallback for the state machine
 	}
 
 	ctx := context.Background()
+
+	// Check store state before
+	storeBefore, _ := a.StateStore.Load(ctx, id)
+	fmt.Printf("[DEBUG] Store state before Execute: %s (store ptr=%p)\n", storeBefore, a.StateStore)
+
 	if err := a.StateMachine.Execute(ctx, msg); err != nil {
+		fmt.Printf("[DEBUG] Execute failed: %v\n", err)
 		return err
 	}
 
 	state, err := a.StateStore.Load(ctx, id)
 	if err != nil {
+		fmt.Printf("[DEBUG] Load failed: %v\n", err)
 		return err
 	}
 
+	fmt.Printf("[DEBUG] Store state after Execute: %s\n", state)
+
 	a.mu.Lock()
 	order.State = state
+	// persist the synced state back into the store to ensure consistency
+	_ = a.StateStore.Save(ctx, id, state)
 	a.mu.Unlock()
+
+	fmt.Printf("[DEBUG] Updated order.State to: %s\n", state)
 
 	return nil
 }
