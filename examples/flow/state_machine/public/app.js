@@ -191,6 +191,10 @@ async function createOrder() {
 async function executeTransition(orderId, event) {
     const adminMode = document.getElementById('admin-mode').checked;
 
+    const actionsContainer = document.getElementById(`actions-${orderId}`);
+    const buttons = actionsContainer ? actionsContainer.querySelectorAll('button') : [];
+    buttons.forEach(btn => btn.disabled = true);
+
     try {
         const data = await API.post(`/api/orders/${orderId}/transition`, {
             event: event,
@@ -210,6 +214,8 @@ async function executeTransition(orderId, event) {
         showToast(message, 'error');
         // Reload to ensure UI is in sync
         await loadOrders();
+    } finally {
+        buttons.forEach(btn => btn.disabled = false);
     }
 }
 
