@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order State Machine Demo</title>
+    <link rel="stylesheet" href="/public/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Order State Machine Demo</h1>
+            <p>Interactive workflow demonstration with guard conditions and actions</p>
+        </header>
+
+        <div class="main-content">
+            <!-- State Machine Visualization -->
+            <section class="card state-machine-section">
+                <h2>State Machine Configuration</h2>
+                <div id="state-diagram" class="state-diagram">
+                    <div class="loading">Loading state machine...</div>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <section class="card control-panel">
+                <h2>Control Panel</h2>
+
+                <div class="info-box">
+                    <h3>How it works:</h3>
+                    <ol>
+                        <li>Create a new order (starts in "draft" state)</li>
+                        <li>Toggle "Admin Mode" to see different available transitions</li>
+                        <li>Click transition buttons to move orders through states</li>
+                        <li>Some transitions require admin privileges (🔒 guard)</li>
+                    </ol>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="admin-mode">
+                        <strong>Admin Mode</strong>
+                    </label>
+                    <p class="help-text">
+                        When enabled, you can execute guarded transitions like "approve" and "cancel" from approved state.
+                        When disabled, these actions will be hidden.
+                    </p>
+                </div>
+
+                <button id="create-order-btn" class="btn btn-primary">Create New Order</button>
+            </section>
+
+            <!-- Orders List -->
+            <section class="card orders-section">
+                <h2>Orders</h2>
+                <div id="orders-list" class="orders-list">
+                    <p class="text-muted">No orders yet. Create one to get started.</p>
+                </div>
+            </section>
+
+            <!-- Audit Log -->
+            <section class="card audit-section">
+                <h2>Audit Log</h2>
+                <div id="audit-log" class="audit-log">
+                    <p class="text-muted">No events yet.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="/public/app.js"></script>
+</body>
+</html>
