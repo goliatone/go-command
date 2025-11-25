@@ -1,5 +1,41 @@
 # Changelog
 
+# [0.7.0](https://github.com/goliatone/go-command/compare/v0.6.0...v0.7.0) - (2025-11-25)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Explicit error if current state missing ([bdde49f](https://github.com/goliatone/go-command/commit/bdde49fd02ab116a2692a5315a446b0070d6a908))  - (goliatone)
+- Example use current state ([5eba2f2](https://github.com/goliatone/go-command/commit/5eba2f275028b49289f09d54d1efb5a96d8bcbe0))  - (goliatone)
+- Add error strategy to flow ([8f6bb28](https://github.com/goliatone/go-command/commit/8f6bb28614087cf88b4275544bf71e8a4f08e1d1))  - (goliatone)
+- Merge options for flow exec ([463954a](https://github.com/goliatone/go-command/commit/463954a205db950f2130e31c02a461e30f18b2cd))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.7.0 ([0cf8b32](https://github.com/goliatone/go-command/commit/0cf8b32770cca1ccdb031bb361fe2f87cf2049e5))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Cli group ([5764986](https://github.com/goliatone/go-command/commit/57649863c3dbfb0359412e87df054c8d50c39a72))  - (goliatone)
+- Flow state machine options ([9fc9938](https://github.com/goliatone/go-command/commit/9fc9938c29ec6130c449ecf6232bdf4d985a5a24))  - (goliatone)
+- Cli tree for submodules ([1b6b11c](https://github.com/goliatone/go-command/commit/1b6b11c65392c41b8623c14dfa2b4f8086d6d262))  - (goliatone)
+- Flow state machine helper ([38335fb](https://github.com/goliatone/go-command/commit/38335fbffe95ae32a3559497ef74263e674458ac))  - (goliatone)
+- Flow implementation ([e045aa9](https://github.com/goliatone/go-command/commit/e045aa9e8c99d07cf0a1cddb63eff77902c8c128))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.6.0 ([0d72462](https://github.com/goliatone/go-command/commit/0d72462bfd3e4e7d8113c5c4e1101ca5df4647ce))  - (goliatone)
+
+## <!-- 30 -->📝 Other
+
+- PR [#6](https://github.com/goliatone/go-command/pull/6): testing issues ([5302e00](https://github.com/goliatone/go-command/commit/5302e00390409069124fe0a4261ef20bad3ee1e6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([8468be0](https://github.com/goliatone/go-command/commit/8468be00783ccd6147c3c9014d9db46f15c3a0dc))  - (goliatone)
+- Update deps ([b229fef](https://github.com/goliatone/go-command/commit/b229fef1435207803be0f43fda0ffac1678bb55c))  - (goliatone)
+- Update example ([0bc12cd](https://github.com/goliatone/go-command/commit/0bc12cd0b14d7f9461341ca3a9274a57b86bc6c7))  - (goliatone)
+- Update tasks ([f5fecc7](https://github.com/goliatone/go-command/commit/f5fecc79b11c0c266989b432f59a9f3620bd5f53))  - (goliatone)
+
 # [0.6.0](https://github.com/goliatone/go-command/compare/v0.5.0...v0.6.0) - (2025-10-01)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -13,6 +49,10 @@
 ## <!-- 3 -->📚 Documentation
 
 - Update changelog for v0.5.0 ([c511815](https://github.com/goliatone/go-command/commit/c5118152665db6917c77a91f6b2d8a4319f9046a))  - (goliatone)
+
+## <!-- 30 -->📝 Other
+
+- PR [#5](https://github.com/goliatone/go-command/pull/5): testing issues ([4714fb6](https://github.com/goliatone/go-command/commit/4714fb677a81ed29884fbda8fc770b671847d9c9))  - (goliatone)
 
 ## <!-- 7 -->⚙️ Miscellaneous Tasks
 
