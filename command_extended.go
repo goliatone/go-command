@@ -18,10 +18,18 @@ type HTTPCommand interface {
 
 type CLIConfig struct {
 	Name        string
+	Path        []string
 	Description string
-	Group       string
-	Aliases     []string
-	Hidden      bool
+	// Group is kept for backward compatibility; prefer Groups for nested paths.
+	Group   string
+	Groups  []CLIGroup
+	Aliases []string
+	Hidden  bool
+}
+
+type CLIGroup struct {
+	Name        string
+	Description string
 }
 
 func (opts CLIConfig) BuildTags() []string {
