@@ -96,6 +96,11 @@ function dev:test {
     lgr exec -- go test ./...
 }
 
+# Run flow package tests
+function flow:test {
+    lgr exec -- go test ./flow/...
+}
+
 ##
 ## ########################################
 ##           Version Management

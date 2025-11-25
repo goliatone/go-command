@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.6.0](https://github.com/goliatone/go-command/compare/v0.5.0...v0.6.0) - (2025-10-01)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Expose mux for tsts ([93cae75](https://github.com/goliatone/go-command/commit/93cae7534b4d2784e5144cb23fc5753eb189fdd7))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.6.0 ([89af010](https://github.com/goliatone/go-command/commit/89af0106c331d67cc92118b14d3b220a9df4bb53))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.5.0 ([c511815](https://github.com/goliatone/go-command/commit/c5118152665db6917c77a91f6b2d8a4319f9046a))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([b67cf51](https://github.com/goliatone/go-command/commit/b67cf514ac2b11b2520a3eba30b31c55b2e51099))  - (goliatone)
+
 # [0.5.0](https://github.com/goliatone/go-command/compare/v0.4.0...v0.5.0) - (2025-10-01)
 
 ## <!-- 1 -->🐛 Bug Fixes

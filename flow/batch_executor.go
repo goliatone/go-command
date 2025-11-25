@@ -15,7 +15,7 @@ type BatchExecutor[T command.Message] struct {
 	batchSize   int
 	concurrency int
 	handler     command.Commander[T]
-	options     []runner.Option
+	options     []Option
 }
 
 type BatchExecutorOption[T command.Message] func(*BatchExecutor[T])
@@ -41,6 +41,7 @@ func NewBatchExecutor[T command.Message](handler command.Commander[T], opts ...B
 		handler:     handler,
 		batchSize:   100,
 		concurrency: 5,
+		options:     nil,
 	}
 
 	for _, opt := range opts {
@@ -50,6 +51,13 @@ func NewBatchExecutor[T command.Message](handler command.Commander[T], opts ...B
 	}
 
 	return be
+}
+
+// WithRunnerOptions attaches runner options to the batch executor.
+func WithRunnerOptions[T command.Message](opts ...Option) BatchExecutorOption[T] {
+	return func(be *BatchExecutor[T]) {
+		be.options = mergeOptions(opts...)
+	}
 }
 
 func (b *BatchExecutor[T]) Execute(ctx context.Context, messages []T) error {
@@ -140,7 +148,7 @@ func ExecuteBatch[T command.Message](ctx context.Context, messages []T, handler 
 		WithBatchSize[T](batchSize),
 		WithConcurrency[T](concurrency),
 	)
-	executor.options = opts
+	executor.options = mergeOptions(opts...)
 
 	return executor.Execute(ctx, messages)
 }

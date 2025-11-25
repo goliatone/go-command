@@ -16,11 +16,13 @@ type Registry struct {
 	commandsToRegister []any
 	initialized        bool
 	cronRegisterFn     func(opts HandlerConfig, handler any) error
+	cliRoot            *cliNode
 	cliOptions         []kong.Option
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
+		cliRoot:    newCLINode("root"),
 		cliOptions: make([]kong.Option, 0),
 	}
 }
@@ -74,6 +76,12 @@ func (r *Registry) Initialize() error {
 		}
 	}
 
+	if opts, err := buildCLIOptions(r.cliRoot); err != nil {
+		errs = errors.Join(errs, err)
+	} else {
+		r.cliOptions = opts
+	}
+
 	r.initialized = true
 
 	return errs
@@ -103,17 +111,20 @@ func (r *Registry) registerWithCLI(cliCmd CLICommand) error {
 	opts := cliCmd.CLIOptions()
 	kongCmd := cliCmd.CLIHandler()
 
-	tags := opts.BuildTags()
+	path := opts.normalizedPath()
+	if len(path) == 0 {
+		return errors.New("cli command name or path required", errors.CategoryBadInput).
+			WithTextCode("CLI_COMMAND_PATH_MISSING")
+	}
 
-	option := kong.DynamicCommand(
-		opts.Name,
-		opts.Description,
-		opts.Group,
-		kongCmd,
-		tags...,
-	)
+	if kongCmd == nil {
+		return errors.New("cli handler cannot be nil", errors.CategoryBadInput).
+			WithTextCode("CLI_HANDLER_NIL")
+	}
 
-	r.cliOptions = append(r.cliOptions, option)
+	if err := r.cliRoot.insert(path, opts, kongCmd); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -124,6 +135,15 @@ func (r *Registry) GetCLIOptions() ([]kong.Option, error) {
 	if !r.initialized {
 		return nil, errors.New("registry not initialized", errors.CategoryConflict).
 			WithTextCode("REGISTRY_NOT_INITIALIZED")
+	}
+
+	// Lazily build CLI options if not yet computed (eg: when no CLI commands).
+	if r.cliOptions == nil {
+		opts, err := buildCLIOptions(r.cliRoot)
+		if err != nil {
+			return nil, err
+		}
+		r.cliOptions = opts
 	}
 
 	options := make([]kong.Option, len(r.cliOptions))

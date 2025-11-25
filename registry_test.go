@@ -71,6 +71,35 @@ func (c *CLIOnlyCommand) CLIOptions() CLIConfig {
 	}
 }
 
+type PathCommand struct {
+	name    string
+	path    []string
+	desc    string
+	aliases []string
+	groups  []CLIGroup
+}
+
+type PathCommandCLI struct {
+}
+
+func (c *PathCommand) CLIHandler() any {
+	return &PathCommandCLI{}
+}
+
+func (c *PathCommand) CLIOptions() CLIConfig {
+	return CLIConfig{
+		Name:        c.name,
+		Path:        c.path,
+		Description: c.desc,
+		Aliases:     c.aliases,
+		Groups:      c.groups,
+	}
+}
+
+func (c *PathCommandCLI) Run(_ *kong.Context) error {
+	return nil
+}
+
 type CronOnlyCommand struct {
 	name string
 }
@@ -216,7 +245,12 @@ func TestInitialize(t *testing.T) {
 
 		cliOptions, err := registry.GetCLIOptions()
 		assert.NoError(t, err)
-		assert.Len(t, cliOptions, 2)
+		parser, err := kong.New(&struct{}{}, append(cliOptions, kong.Name("app"))...)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"test1"})
+		assert.NoError(t, err)
+		_, err = parser.Parse([]string{"cli-only"})
+		assert.NoError(t, err)
 
 		cronRegs := mockCron.getRegistrations()
 		assert.Len(t, cronRegs, 2)
@@ -266,7 +300,9 @@ func TestRegisterWithCLI(t *testing.T) {
 	err := registry.registerWithCLI(cmd)
 
 	assert.NoError(t, err)
-	assert.Len(t, registry.cliOptions, 1)
+	opts, err := buildCLIOptions(registry.cliRoot)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, opts)
 }
 
 func TestRegisterWithCron(t *testing.T) {
@@ -299,18 +335,19 @@ func TestRegisterWithCron(t *testing.T) {
 func TestGetCLIOptions(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		registry := NewRegistry()
-		registry.initialized = true
-
-		// Add some options directly for testing
-		registry.cliOptions = append(registry.cliOptions, kong.DynamicCommand("test", "desc", "group", nil))
+		cmd := &CLIOnlyCommand{name: "cli-only"}
+		require.NoError(t, registry.RegisterCommand(cmd))
+		registry.SetCronRegister(NilCronRegister)
+		require.NoError(t, registry.Initialize())
 
 		options, err := registry.GetCLIOptions()
 
 		assert.NoError(t, err)
-		assert.Len(t, options, 1)
+		assert.NotEmpty(t, options)
 
-		options = append(options, kong.DynamicCommand("test2", "desc2", "group2", nil))
-		assert.Len(t, registry.cliOptions, 1)
+		options = append(options, kong.Name("dummy"))
+		copied, _ := registry.GetCLIOptions()
+		assert.NotEqual(t, len(options), len(copied))
 	})
 
 	t.Run("not initialized", func(t *testing.T) {
@@ -411,4 +448,52 @@ func TestRegistryEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, options)
 	})
+}
+
+func TestNestedCLIPathsAndAliases(t *testing.T) {
+	registry := NewRegistry()
+	registry.SetCronRegister(NilCronRegister)
+
+	create := &PathCommand{
+		name:    "create",
+		path:    []string{"prompt", "create"},
+		desc:    "Create prompts",
+		groups:  []CLIGroup{{Name: "prompt", Description: "Prompt commands"}},
+		aliases: []string{"add"},
+	}
+	list := &PathCommand{
+		name:    "list",
+		path:    []string{"prompt", "list"},
+		desc:    "List prompts",
+		aliases: []string{"ls"},
+	}
+
+	require.NoError(t, registry.RegisterCommand(create))
+	require.NoError(t, registry.RegisterCommand(list))
+	require.NoError(t, registry.Initialize())
+
+	opts, err := registry.GetCLIOptions()
+	require.NoError(t, err)
+	parser, err := kong.New(&struct{}{}, append(opts, kong.Name("ctx"))...)
+	require.NoError(t, err)
+
+	ctx, err := parser.Parse([]string{"prompt", "create"})
+	require.NoError(t, err)
+	require.NoError(t, ctx.Run())
+	assert.Equal(t, "prompt create", ctx.Command())
+
+	ctx, err = parser.Parse([]string{"prompt", "ls"})
+	require.NoError(t, err)
+	require.NoError(t, ctx.Run())
+	assert.Contains(t, ctx.Command(), "prompt list")
+
+	var promptNode *kong.Node
+	for _, child := range parser.Model.Node.Children {
+		if child != nil && child.Name == "prompt" {
+			promptNode = child
+			break
+		}
+	}
+	require.NotNil(t, promptNode)
+	assert.Equal(t, "Prompt commands", promptNode.Help)
 }

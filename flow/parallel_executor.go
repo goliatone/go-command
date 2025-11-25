@@ -13,14 +13,24 @@ import (
 
 type ParallelExecutor[T any] struct {
 	handlers []command.Commander[T]
-	options  []runner.Option
+	options  []Option
+	strategy ErrorStrategy
+}
+
+// WithErrorStrategy overrides the error strategy used to combine handler errors.
+func (p *ParallelExecutor[T]) WithErrorStrategy(strategy ErrorStrategy) *ParallelExecutor[T] {
+	if strategy != nil {
+		p.strategy = strategy
+	}
+	return p
 }
 
 // NewParallelExecutor creates a new ParallelExecutor with the provided handlers
 func NewParallelExecutor[T any](handlers []command.Commander[T], opts ...runner.Option) *ParallelExecutor[T] {
 	return &ParallelExecutor[T]{
 		handlers: handlers,
-		options:  opts,
+		options:  mergeOptions(opts...),
+		strategy: AggregateErrorStrategy{},
 	}
 }
 
@@ -63,33 +73,34 @@ func (p *ParallelExecutor[T]) Execute(ctx context.Context, msg T) error {
 	}
 	wg.Wait()
 
-	var finalErr error
+	var errorsList []error
 	var successCount int
 	for _, err := range errs {
 		if err != nil {
-			finalErr = errors.Join(finalErr, err)
+			errorsList = append(errorsList, err)
 		} else {
 			successCount++
 		}
 	}
 
-	if finalErr != nil {
-		finalErr = errors.Wrap(
-			finalErr,
-			errors.CategoryHandler,
-			fmt.Sprintf("parallel execution completed with %d failures out of %d handlers",
-				len(p.handlers)-successCount, len(p.handlers)),
-		).
-			WithTextCode("PARALLEL_EXECUTION_SUMMARY").
-			WithMetadata(map[string]any{
-				"total_handlers":   len(p.handlers),
-				"successful_count": successCount,
-				"failed_count":     len(p.handlers) - successCount,
-				"message_type":     command.GetMessageType(msg),
-			})
+	if len(errorsList) == 0 {
+		return nil
 	}
 
-	return finalErr
+	combined := p.strategy.HandleErrors(errorsList)
+	return errors.Wrap(
+		combined,
+		errors.CategoryHandler,
+		fmt.Sprintf("parallel execution completed with %d failures out of %d handlers",
+			len(p.handlers)-successCount, len(p.handlers)),
+	).
+		WithTextCode("PARALLEL_EXECUTION_SUMMARY").
+		WithMetadata(map[string]any{
+			"total_handlers":   len(p.handlers),
+			"successful_count": successCount,
+			"failed_count":     len(p.handlers) - successCount,
+			"message_type":     command.GetMessageType(msg),
+		})
 }
 
 // ParallelExecute runs handlers concurrently with function handlers
