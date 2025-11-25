@@ -136,6 +136,18 @@ func (c *SyncDataCommand) CLIOptions() command.CLIConfig {
     }
 }
 
+// Namespaced commands (e.g., ctx prompt create)
+func (c *CreatePromptCommand) CLIOptions() command.CLIConfig {
+    return command.CLIConfig{
+        Path:        []string{"prompt", "create"},
+        Description: "Create a prompt",
+        Aliases:     []string{"add"},
+        Groups: []command.CLIGroup{
+            {Name: "prompt", Description: "Prompt management"},
+        },
+    }
+}
+
 // Enable cron scheduling
 func (c *SyncDataCommand) CronHandler() func() error {
     return func() error {
