@@ -34,16 +34,17 @@ func TestStateMachineTransitionsAndGuards(t *testing.T) {
 		actionCalled = true
 		return nil
 	})
-	req := TransitionRequest[smMsg]{
-		StateKey: func(m smMsg) string { return m.ID },
-		Event:    func(m smMsg) string { return m.Event },
-	}
+	req := TransitionRequestFromState(
+		func(m smMsg) string { return m.ID },
+		func(m smMsg) string { return m.State },
+		func(m smMsg) string { return m.Event },
+	)
 	sm, err := NewStateMachine(cfg, store, req, guards, actions)
 	if err != nil {
 		t.Fatalf("expected state machine build success: %v", err)
 	}
 
-	if err := sm.Execute(context.Background(), smMsg{ID: "1", Event: "approve", Number: 2}); err != nil {
+	if err := sm.Execute(context.Background(), smMsg{ID: "1", State: "draft", Event: "approve", Number: 2}); err != nil {
 		t.Fatalf("expected transition success: %v", err)
 	}
 	state, _ := store.Load(context.Background(), "1")

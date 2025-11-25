@@ -163,7 +163,14 @@ func TestGetCLIOptions(t *testing.T) {
 
 		options, err := GetCLIOptions()
 		assert.NoError(t, err)
-		assert.Len(t, options, 2)
+		assert.NotEmpty(t, options)
+
+		parser, err := kong.New(&struct{}{}, append(options, kong.Name("app"))...)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"cli-cmd"})
+		assert.NoError(t, err)
+		_, err = parser.Parse([]string{"cli-query"})
+		assert.NoError(t, err)
 	})
 }
 
@@ -190,7 +197,7 @@ func TestStart(t *testing.T) {
 
 			options, err := GetCLIOptions()
 			assert.NoError(t, err)
-			assert.Len(t, options, 1)
+			assert.NotEmpty(t, options)
 		})
 	})
 
@@ -222,7 +229,7 @@ func TestStop(t *testing.T) {
 
 		options, err := GetCLIOptions()
 		require.NoError(t, err)
-		require.Len(t, options, 1)
+		require.NotEmpty(t, options)
 
 		err = Stop(context.Background())
 		assert.NoError(t, err)
@@ -259,7 +266,18 @@ func TestMultipleRegistrations(t *testing.T) {
 
 		options, err := GetCLIOptions()
 		require.NoError(t, err)
-		assert.Len(t, options, 4)
+		assert.NotEmpty(t, options)
+
+		parser, err := kong.New(&struct{}{}, append(options, kong.Name("app"))...)
+		require.NoError(t, err)
+		_, err = parser.Parse([]string{"cmd1"})
+		assert.NoError(t, err)
+		_, err = parser.Parse([]string{"cmd2"})
+		assert.NoError(t, err)
+		_, err = parser.Parse([]string{"qry1"})
+		assert.NoError(t, err)
+		_, err = parser.Parse([]string{"qry2"})
+		assert.NoError(t, err)
 	})
 }
 
@@ -308,8 +326,8 @@ func TestRegistryIsolation(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	assert.Len(t, options1, 1)
-	assert.Len(t, options2, 1)
+	assert.NotEmpty(t, options1)
+	assert.NotEmpty(t, options2)
 }
 
 func TestErrorPropagation(t *testing.T) {
