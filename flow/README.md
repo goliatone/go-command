@@ -270,7 +270,7 @@ Registries (handlers, guards, actions, metrics recorders) resolve the IDs refere
 
 ## State Machine Usage
 
-Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis):
+Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis). You must provide either a stored state or a `CurrentState` extractor; otherwise the state machine errors to prevent silent resets (use `WithInitialFallback(true)` to allow reset-to-initial):
 
 ```go
 smCfg := flow.StateMachineConfig{
@@ -286,11 +286,14 @@ actions := flow.NewActionRegistry[OrderMsg]()
 actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil })
 store := flow.NewInMemoryStateStore()
 req := flow.TransitionRequest[OrderMsg]{
-  StateKey: func(m OrderMsg) string { return m.ID },
-  Event:    func(m OrderMsg) string { return m.Event },
+  StateKey:     func(m OrderMsg) string { return m.ID },
+  Event:        func(m OrderMsg) string { return m.Event },
+  CurrentState: func(m OrderMsg) string { return m.State }, // fallback when store has no entry
 }
 sm, _ := flow.NewStateMachine(smCfg, store, req, guards, actions)
 ```
+
+Helper: `flow.TransitionRequestFromState(idFn, stateFn, eventFn)` builds a request using ID/current state/event to reduce boilerplate. Option `flow.WithInitialFallback(true)` re-enables the legacy behavior of falling back to the initial state when both store and CurrentState are empty.
 
 ## Metrics/Tracing Decorators
 
