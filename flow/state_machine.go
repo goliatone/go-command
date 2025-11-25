@@ -18,14 +18,25 @@ type TransitionRequest[T any] struct {
 
 // StateMachine executes transitions with optional guards/actions and persistence.
 type StateMachine[T command.Message] struct {
-	entity      string
-	initial     string
-	states      map[string]StateConfig
-	transitions map[string]TransitionConfig
-	store       StateStore
-	guards      *GuardRegistry[T]
-	actions     *ActionRegistry[T]
-	req         TransitionRequest[T]
+	entity               string
+	initial              string
+	states               map[string]StateConfig
+	transitions          map[string]TransitionConfig
+	store                StateStore
+	guards               *GuardRegistry[T]
+	actions              *ActionRegistry[T]
+	req                  TransitionRequest[T]
+	allowInitialFallback bool
+}
+
+// StateMachineOption customizes state machine behavior.
+type StateMachineOption[T command.Message] func(*StateMachine[T])
+
+// WithInitialFallback allows falling back to the initial state when both store and CurrentState are empty.
+func WithInitialFallback[T command.Message](enable bool) StateMachineOption[T] {
+	return func(sm *StateMachine[T]) {
+		sm.allowInitialFallback = enable
+	}
 }
 
 // NewStateMachine constructs a state machine flow.
@@ -35,6 +46,7 @@ func NewStateMachine[T command.Message](
 	req TransitionRequest[T],
 	guards *GuardRegistry[T],
 	actions *ActionRegistry[T],
+	opts ...StateMachineOption[T],
 ) (*StateMachine[T], error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -67,7 +79,7 @@ func NewStateMachine[T command.Message](
 		store = NewInMemoryStateStore()
 	}
 
-	return &StateMachine[T]{
+	sm := &StateMachine[T]{
 		entity:      cfg.Entity,
 		initial:     initial,
 		states:      states,
@@ -76,7 +88,15 @@ func NewStateMachine[T command.Message](
 		guards:      guards,
 		actions:     actions,
 		req:         req,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(sm)
+		}
+	}
+
+	return sm, nil
 }
 
 // Execute applies a transition based on the incoming message.
@@ -105,9 +125,13 @@ func (s *StateMachine[T]) Execute(ctx context.Context, msg T) error {
 		current = s.req.CurrentState(msg)
 	}
 	if strings.TrimSpace(current) == "" {
-		return errors.New("current state missing (store empty and no CurrentState provided)", errors.CategoryBadInput).
-			WithTextCode("STATE_MACHINE_STATE_MISSING").
-			WithMetadata(map[string]any{"entity": s.entity, "key": key})
+		if s.allowInitialFallback {
+			current = s.initial
+		} else {
+			return errors.New("current state missing (store empty and no CurrentState provided)", errors.CategoryBadInput).
+				WithTextCode("STATE_MACHINE_STATE_MISSING").
+				WithMetadata(map[string]any{"entity": s.entity, "key": key})
+		}
 	}
 	current = normalizeState(current)
 
