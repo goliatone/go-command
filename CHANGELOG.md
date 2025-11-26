@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.9.0](https://github.com/goliatone/go-command/compare/v0.8.0...v0.9.0) - (2025-11-26)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Cli handler keep value ([31beebe](https://github.com/goliatone/go-command/commit/31beebe9d4627dd13f0835de080bbb304fbe0a8a))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.9.0 ([74de437](https://github.com/goliatone/go-command/commit/74de4373ff7e4ce2a18e429329812df69277a5dd))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.8.0 ([b245c31](https://github.com/goliatone/go-command/commit/b245c31d8995d584bdb7985d872e22910c27dddf))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([c9387d9](https://github.com/goliatone/go-command/commit/c9387d9496a44d80e8e648415a074bb6fb0be4ed))  - (goliatone)
+- Update gitignore ([b864155](https://github.com/goliatone/go-command/commit/b8641550a7e42590279aa5008edeace8c9732463))  - (goliatone)
+- Update readme ([2bf3927](https://github.com/goliatone/go-command/commit/2bf3927949cdb543a54daa4df0d195ade5c66267))  - (goliatone)
+
 # [0.8.0](https://github.com/goliatone/go-command/compare/v0.7.0...v0.8.0) - (2025-11-26)
 
 ## <!-- 1 -->🐛 Bug Fixes
