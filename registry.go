@@ -113,7 +113,7 @@ func (r *Registry) registerWithCLI(cliCmd CLICommand) error {
 
 	path := opts.normalizedPath()
 	if len(path) == 0 {
-		return errors.New("cli command name or path required", errors.CategoryBadInput).
+		return errors.New("cli command path required", errors.CategoryBadInput).
 			WithTextCode("CLI_COMMAND_PATH_MISSING")
 	}
 
