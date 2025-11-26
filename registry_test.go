@@ -99,6 +99,32 @@ func (c *PathCommandCLI) Run(_ *kong.Context) error {
 	return nil
 }
 
+type injectedService struct {
+	called bool
+}
+
+type pointerCLICommand struct {
+	svc *injectedService
+}
+
+func (c *pointerCLICommand) CLIHandler() any {
+	return c
+}
+
+func (c *pointerCLICommand) CLIOptions() CLIConfig {
+	return CLIConfig{
+		Path: []string{"new"},
+	}
+}
+
+func (c *pointerCLICommand) Run(_ *kong.Context) error {
+	if c.svc == nil {
+		return errors.New("service not configured")
+	}
+	c.svc.called = true
+	return nil
+}
+
 type CronOnlyCommand struct {
 	name string
 }
@@ -302,6 +328,26 @@ func TestRegisterWithCLI(t *testing.T) {
 	opts, err := buildCLIOptions(registry.cliRoot)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, opts)
+}
+
+func TestCLIHandlerPreservesInjectedPointerFields(t *testing.T) {
+	registry := NewRegistry()
+	cmd := &pointerCLICommand{svc: &injectedService{}}
+
+	require.NoError(t, registry.RegisterCommand(cmd))
+	require.NoError(t, registry.Initialize())
+
+	opts, err := registry.GetCLIOptions()
+	require.NoError(t, err)
+
+	parser, err := kong.New(&struct{}{}, append(opts, kong.Name("ctx"))...)
+	require.NoError(t, err)
+
+	ctx, err := parser.Parse([]string{"new"})
+	require.NoError(t, err)
+	require.NoError(t, ctx.Run())
+
+	assert.True(t, cmd.svc.called)
 }
 
 func TestRegisterWithCron(t *testing.T) {
