@@ -128,8 +128,19 @@ func buildStructForNode(node *cliNode) (reflect.Value, error) {
 			if child.handler == nil {
 				return reflect.Value{}, fmt.Errorf("cli command %q missing handler", child.name)
 			}
-			fieldType = reflect.TypeOf(child.handler)
-			fieldValue = reflect.ValueOf(child.handler)
+			handler := reflect.ValueOf(child.handler)
+			handlerType := handler.Type()
+			if handlerType.Kind() == reflect.Ptr && handlerType.Elem().Kind() == reflect.Struct {
+				fieldType = handlerType.Elem()
+				if handler.IsNil() {
+					fieldValue = reflect.Zero(handlerType.Elem())
+				} else {
+					fieldValue = handler.Elem()
+				}
+			} else {
+				fieldType = handlerType
+				fieldValue = handler
+			}
 		} else {
 			val, err := buildStructForNode(child)
 			if err != nil {
