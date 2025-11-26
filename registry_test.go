@@ -27,7 +27,7 @@ func (t *TestCommand) CLIHandler() any {
 
 func (t *TestCommand) CLIOptions() CLIConfig {
 	return CLIConfig{
-		Name:        t.name,
+		Path:        []string{t.name},
 		Description: fmt.Sprintf("Test command %s", t.name),
 		Group:       "test",
 	}
@@ -65,7 +65,7 @@ func (c *CLIOnlyCommand) CLIHandler() any {
 
 func (c *CLIOnlyCommand) CLIOptions() CLIConfig {
 	return CLIConfig{
-		Name:        c.name,
+		Path:        []string{c.name},
 		Description: fmt.Sprintf("CLI only command %s", c.name),
 		Group:       "cli",
 	}
@@ -88,7 +88,6 @@ func (c *PathCommand) CLIHandler() any {
 
 func (c *PathCommand) CLIOptions() CLIConfig {
 	return CLIConfig{
-		Name:        c.name,
 		Path:        c.path,
 		Description: c.desc,
 		Aliases:     c.aliases,

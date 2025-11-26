@@ -39,7 +39,7 @@ func (t *GlobalTestCommand) CLIHandler() any {
 
 func (t *GlobalTestCommand) CLIOptions() command.CLIConfig {
 	return command.CLIConfig{
-		Name:        t.name,
+		Path:        []string{t.name},
 		Description: fmt.Sprintf("Global test command %s", t.name),
 		Group:       "test",
 	}
@@ -81,7 +81,7 @@ func (q *GlobalTestQuery) CLIHandler() any {
 
 func (q *GlobalTestQuery) CLIOptions() command.CLIConfig {
 	return command.CLIConfig{
-		Name:        q.name,
+		Path:        []string{q.name},
 		Description: fmt.Sprintf("Global test query %s", q.name),
 		Group:       "query",
 	}
