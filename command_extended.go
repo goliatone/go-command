@@ -17,7 +17,6 @@ type HTTPCommand interface {
 }
 
 type CLIConfig struct {
-	Name        string
 	Path        []string
 	Description string
 	// Group is kept for backward compatibility; prefer Groups for nested paths.
