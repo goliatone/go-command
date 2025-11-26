@@ -130,7 +130,7 @@ func (c *SyncDataCommand) CLIHandler() any {
 
 func (c *SyncDataCommand) CLIOptions() command.CLIConfig {
     return command.CLIConfig{
-        Name:        "sync",
+        Path:        []string{"sync"},
         Description: "Synchronize data between directories",
         Group:       "data",
     }
