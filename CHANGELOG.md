@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.8.0](https://github.com/goliatone/go-command/compare/v0.7.0...v0.8.0) - (2025-11-26)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Remove legacy code ([ddd5d1b](https://github.com/goliatone/go-command/commit/ddd5d1bf27279ec27d1c8d43147eaa926c91276d))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.8.0 ([c4fbedd](https://github.com/goliatone/go-command/commit/c4fbedd0e703084a0157ee162b2a165cfa44b137))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.7.0 ([4e7b9a1](https://github.com/goliatone/go-command/commit/4e7b9a1f8b3f1d5eec71879c20578d531c3bfe0a))  - (goliatone)
+
 # [0.7.0](https://github.com/goliatone/go-command/compare/v0.6.0...v0.7.0) - (2025-11-25)
 
 ## <!-- 1 -->🐛 Bug Fixes
