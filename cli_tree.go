@@ -2,7 +2,6 @@ package command
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 	"sort"
 	"strings"
@@ -84,17 +83,10 @@ func (opts CLIConfig) groupDescription(name string, idx int) string {
 }
 
 func (opts CLIConfig) normalizedPath() []string {
-	if len(opts.Path) > 0 {
-		path := append([]string{}, opts.Path...)
-		if opts.Name != "" && path[len(path)-1] != opts.Name {
-			log.Printf("go-command: CLIConfig.Path %v overrides Name %q; prefer Path only (deprecated mix)", path, opts.Name)
-		}
-		return path
-	}
-	if opts.Name == "" {
+	if len(opts.Path) == 0 {
 		return nil
 	}
-	return []string{opts.Name}
+	return append([]string{}, opts.Path...)
 }
 
 func (n *cliNode) buildKongModel() (any, error) {
