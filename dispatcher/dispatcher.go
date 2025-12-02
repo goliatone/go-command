@@ -138,16 +138,7 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 	var errs error
 	for _, cw := range wrapers {
 		if err := runner.RunCommand(ctx, cw.runner, cw.cmd, msg); err != nil {
-			wrappedErr := errors.Wrap(
-				err,
-				errors.CategoryHandler,
-				fmt.Sprintf("handler failed for type %s", command.GetMessageType(msg)),
-			).
-				WithTextCode("HANDLER_EXECUTION_FAILED").
-				WithMetadata(map[string]any{
-					"message_type": command.GetMessageType(msg),
-					"handler":      fmt.Sprintf("%T", cw.cmd),
-				})
+			wrappedErr := wrapHandlerError(err, msg, cw.cmd)
 			if ExitOnErr {
 				return wrappedErr
 			}
@@ -227,4 +218,45 @@ type commandWrapper[T any] struct {
 type queryWrapper[T any, R any] struct {
 	runner *runner.Handler
 	qry    command.Querier[T, R]
+}
+
+func wrapHandlerError[T any](err error, msg T, handler any) *errors.Error {
+	baseMessage := fmt.Sprintf("handler failed for type %s", command.GetMessageType(msg))
+	metadata := map[string]any{
+		"message_type": command.GetMessageType(msg),
+		"handler":      fmt.Sprintf("%T", handler),
+	}
+
+	if isValidationError(err) {
+		wrapped := errors.Wrap(err, errors.CategoryValidation, baseMessage).
+			WithTextCode("VALIDATION_FAILED").
+			WithMetadata(metadata)
+
+		if wrapped.Code == 0 {
+			wrapped.WithCode(errors.CodeBadRequest)
+		}
+
+		return wrapped
+	}
+
+	return errors.Wrap(err, errors.CategoryHandler, baseMessage).
+		WithTextCode("HANDLER_EXECUTION_FAILED").
+		WithMetadata(metadata)
+}
+
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var validationErr interface{ Validation() bool }
+	if errors.As(err, &validationErr) && validationErr.Validation() {
+		return true
+	}
+
+	if errors.IsValidation(err) {
+		return true
+	}
+
+	return errors.Is(err, command.ErrValidation)
 }
