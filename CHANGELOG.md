@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.10.0](https://github.com/goliatone/go-command/compare/v0.9.0...v0.10.0) - (2025-12-02)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.10.0 ([7ad16e0](https://github.com/goliatone/go-command/commit/7ad16e0e51f82ff1afaec2604b073b476bef3cc0))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Validation wrap erros ([b262db2](https://github.com/goliatone/go-command/commit/b262db2ecc5c3fd1a26ecac68686726838a2e1d2))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.9.0 ([1354145](https://github.com/goliatone/go-command/commit/1354145458ee07f5160456dd00fc44f46ce0bef1))  - (goliatone)
+
 # [0.9.0](https://github.com/goliatone/go-command/compare/v0.8.0...v0.9.0) - (2025-11-26)
 
 ## <!-- 1 -->🐛 Bug Fixes
