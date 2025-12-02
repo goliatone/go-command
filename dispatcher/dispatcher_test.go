@@ -217,6 +217,71 @@ func TestCommandDispatcher(t *testing.T) {
 	})
 }
 
+func TestDispatchErrorClassification(t *testing.T) {
+	t.Run("validation errors are surfaced as validation failures", func(t *testing.T) {
+		setTestMux(router.NewMux())
+		t.Cleanup(func() { setTestMux(nil) })
+
+		validationErr := gerrors.NewValidation("missing fields", gerrors.FieldError{
+			Field:   "email",
+			Message: "required",
+		})
+
+		SubscribeCommand(command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error {
+			return validationErr
+		}))
+
+		err := Dispatch(context.Background(), TestMessage{ID: 1})
+		if err == nil {
+			t.Fatal("expected validation error")
+		}
+
+		var gerr *gerrors.Error
+		if !gerrors.As(err, &gerr) {
+			t.Fatalf("expected go-errors.Error, got %T", err)
+		}
+
+		if gerr.TextCode != "VALIDATION_FAILED" {
+			t.Errorf("expected text code VALIDATION_FAILED, got %s", gerr.TextCode)
+		}
+
+		if gerr.Category != gerrors.CategoryValidation {
+			t.Errorf("expected validation category, got %s", gerr.Category)
+		}
+
+		if gerr.Code != gerrors.CodeBadRequest {
+			t.Errorf("expected HTTP code %d, got %d", gerrors.CodeBadRequest, gerr.Code)
+		}
+	})
+
+	t.Run("non-validation errors remain handler execution failures", func(t *testing.T) {
+		setTestMux(router.NewMux())
+		t.Cleanup(func() { setTestMux(nil) })
+
+		SubscribeCommand(command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error {
+			return fmt.Errorf("boom")
+		}))
+
+		err := Dispatch(context.Background(), TestMessage{ID: 2})
+		if err == nil {
+			t.Fatal("expected handler error")
+		}
+
+		var gerr *gerrors.Error
+		if !gerrors.As(err, &gerr) {
+			t.Fatalf("expected go-errors.Error, got %T", err)
+		}
+
+		if gerr.TextCode != "HANDLER_EXECUTION_FAILED" {
+			t.Errorf("expected text code HANDLER_EXECUTION_FAILED, got %s", gerr.TextCode)
+		}
+
+		if gerr.Category == gerrors.CategoryValidation {
+			t.Errorf("expected non-validation category, got %s", gerr.Category)
+		}
+	})
+}
+
 func TestQueryDispatcher(t *testing.T) {
 	setTestMux(router.NewMux())
 	t.Cleanup(func() { setTestMux(nil) })
