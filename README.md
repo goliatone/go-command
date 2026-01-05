@@ -183,6 +183,40 @@ registry.Start(context.Background())
 cliOptions, _ := registry.GetCLIOptions()
 ```
 
+#### Registry Resolvers
+
+Resolvers run during registry initialization for each registered command. CLI and cron are built-in resolvers (keys `"cli"` and `"cron"`), and you can add more with `AddResolver`:
+
+```go
+cmdRegistry := command.NewRegistry()
+queueRegistry := queuecmd.NewRegistry()
+
+if err := cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry)); err != nil {
+    return err
+}
+```
+
+If your command uses an interface message parameter, implement `command.MessageFactory` to provide a concrete value for metadata:
+
+```go
+type Event interface{ Type() string }
+
+type EventCommand struct{}
+
+func (c *EventCommand) Execute(ctx context.Context, msg Event) error { return nil }
+func (c *EventCommand) MessageValue() any { return &UserCreated{} }
+```
+
+For the global registry helpers, use `registry.AddResolver` and `registry.HasResolver`.
+
+Migration notes:
+- If you switch to resolver-based queue registration, you must attach the queue resolver
+  or queue registration will not happen.
+- When both resolver-based and direct registration are used, the queue layer should treat
+  duplicate registrations as no-ops to avoid conflicts.
+
+See `REGISTRY_RESOLVERS.md` for a deeper guide.
+
 ### 3. Batch Executor
 
 Process commands in batches with concurrency control:
