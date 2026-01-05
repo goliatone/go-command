@@ -271,16 +271,20 @@ func (h *Handler) done() {
 }
 
 func (h *Handler) contextWithSettings(parent context.Context) (context.Context, context.CancelFunc) {
+	timeout := h.timeout
+	if h.noTimeout {
+		timeout = 0
+	}
 	switch {
-	case h.timeout != 0 && !h.deadline.IsZero():
-		ctx, cancelTimeout := context.WithTimeout(parent, h.timeout)
+	case timeout != 0 && !h.deadline.IsZero():
+		ctx, cancelTimeout := context.WithTimeout(parent, timeout)
 		ctxDeadline, cancelDeadline := context.WithDeadline(ctx, h.deadline)
 		return ctxDeadline, func() {
 			cancelDeadline()
 			cancelTimeout()
 		}
-	case h.timeout != 0:
-		return context.WithTimeout(parent, h.timeout)
+	case timeout != 0:
+		return context.WithTimeout(parent, timeout)
 	case !h.deadline.IsZero():
 		return context.WithDeadline(parent, h.deadline)
 	default:
