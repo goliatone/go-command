@@ -1,5 +1,28 @@
 # Changelog
 
+# [0.12.0](https://github.com/goliatone/go-command/compare/v0.11.0...v0.12.0) - (2026-01-05)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Flow config merges options ([01fff85](https://github.com/goliatone/go-command/commit/01fff85e5619944f01170a96c2f998dcd7b266bf))  - (goliatone)
+- Runner respects NoTimeout setup ([6396328](https://github.com/goliatone/go-command/commit/639632852cc442334f6e49a0465547ab0243c0c0))  - (goliatone)
+- Cron schedule validates function savety and support Execute handlers, honors timeouts ([e169488](https://github.com/goliatone/go-command/commit/e1694884631fa876d02815b1428be546adcf7114))  - (goliatone)
+- Inialization handling ([9a015ea](https://github.com/goliatone/go-command/commit/9a015ea1f0a956b8de356c1c4f4fce289bdc627a))  - (goliatone)
+- Use msgType reflect ([7447639](https://github.com/goliatone/go-command/commit/744763959befca05c1f402c632421a437ba6ca54))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.12.0 ([1e12ab1](https://github.com/goliatone/go-command/commit/1e12ab17abc6aabd8134abb896fa3c6240cbefdd))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.11.0 ([33afffe](https://github.com/goliatone/go-command/commit/33afffebae45364b61435d99f42ab5e5d4116a02))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([4fe3650](https://github.com/goliatone/go-command/commit/4fe36507e844be74f6a63c163fc3a6b3dbb233e1))  - (goliatone)
+- Update tests ([34d1dd8](https://github.com/goliatone/go-command/commit/34d1dd8e54de6637586e96b229126eb075eccc99))  - (goliatone)
+
 # [0.11.0](https://github.com/goliatone/go-command/compare/v0.10.0...v0.11.0) - (2026-01-05)
 
 ## <!-- 13 -->📦 Bumps
