@@ -189,6 +189,22 @@ func TestRegistrySetCronRegister(t *testing.T) {
 	assert.NotNil(t, registry.cronRegisterFn)
 }
 
+func TestRegistrySetCronRegisterAfterInitialize(t *testing.T) {
+	registry := NewRegistry()
+	registry.initializing = true
+
+	registry.SetCronRegister(NilCronRegister)
+
+	assert.Nil(t, registry.cronRegisterFn)
+
+	registry.initializing = false
+	registry.initialized = true
+
+	registry.SetCronRegister(NilCronRegister)
+
+	assert.Nil(t, registry.cronRegisterFn)
+}
+
 func TestRegisterCommand(t *testing.T) {
 	tests := []struct {
 		name        string

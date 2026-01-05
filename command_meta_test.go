@@ -70,6 +70,16 @@ func (c *interfaceNoFactoryCommand) Execute(ctx context.Context, msg interfaceMe
 	return nil
 }
 
+type interfaceBadFactoryCommand struct{}
+
+func (c *interfaceBadFactoryCommand) Execute(ctx context.Context, msg interfaceMessage) error {
+	return nil
+}
+
+func (c *interfaceBadFactoryCommand) MessageValue() any {
+	return struct{}{}
+}
+
 func TestMessageTypeForCommandValue(t *testing.T) {
 	meta := MessageTypeForCommand(&valueCommand{})
 
@@ -104,6 +114,12 @@ func TestMessageTypeForCommandInterfaceWithFactory(t *testing.T) {
 
 func TestMessageTypeForCommandInterfaceWithoutFactory(t *testing.T) {
 	meta := MessageTypeForCommand(&interfaceNoFactoryCommand{})
+
+	assert.Equal(t, CommandMeta{}, meta)
+}
+
+func TestMessageTypeForCommandInterfaceFactoryMismatch(t *testing.T) {
+	meta := MessageTypeForCommand(&interfaceBadFactoryCommand{})
 
 	assert.Equal(t, CommandMeta{}, meta)
 }
