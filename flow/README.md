@@ -303,6 +303,13 @@ Use `MetricsDecorator` to wrap any `Flow[T]` with metrics; provide a recorder im
 
 Flows accept explicit handlers; a mux resolver adapter is available for registry-driven dispatch. Compose nested flows by converting them to `command.Commander[T]` via `flow.AsCommander`. Use the namespacing helpers and registries to prevent ID conflicts across modules.
 
+## Registry Resolver Notes
+
+The mux resolver relies on go-command registry metadata. If your command uses an
+interface message parameter, implement `command.MessageFactory` to provide a concrete,
+non-nil message value, otherwise resolver based registration treats the command as
+unsupported and skips metadata driven integrations.
+
 ## Legacy Dispatcher Helpers
 
 `chain_dispatcher.go` and `parallel_dispatcher.go` are legacy wrappers over the global dispatcher; the recommended approach is to use the flow executors with handler/mux resolvers.
@@ -345,16 +352,8 @@ sm, _ := flow.NewStateMachine(smCfg, store, req, guards, nil)
 
 ## Metrics/Tracing Decorators
 
-Use `MetricsDecorator` to wrap any `Flow[T]` with metrics; provide a recorder implementation and optionally register it in `MetricsRecorderRegistry` for config-driven wiring.
+Use `MetricsDecorator` to wrap any `Flow[T]` with metrics, provide a recorder implementation and optionally register it in `MetricsRecorderRegistry` for config-driven wiring.
 
 ## Hybrid Handler/Mux Usage
 
-Flows accept explicit handlers; a mux resolver adapter is available for registry-driven dispatch. Compose nested flows by converting them to `command.Commander[T]` via `flow.AsCommander`. Namespacing helpers avoid ID conflicts when registering handlers/guards/actions/recorders.
-
-
-## Resources
-https://github.com/tiagomelo/go-saga/
-
-https://www.codingexplorations.com/blog/implementing-the-saga-pattern-in-go-a-practical-guide
-
-https://www.baeldung.com/cs/saga-pattern-microservices
+Flows accept explicit handlers; a mux resolver adapter is available for registry driven dispatch. Compose nested flows by converting them to `command.Commander[T]` via `flow.AsCommander`. Namespacing helpers avoid ID conflicts when registering handlers/guards/actions/recorders.

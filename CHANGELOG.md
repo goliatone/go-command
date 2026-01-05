@@ -1,5 +1,16 @@
 # Changelog
 
+# [Unreleased]
+
+## <!-- 16 -->➕ Add
+
+- Registry resolvers with `CommandMeta`, `MessageTypeForCommand`, and `MessageFactory`.
+- Global registry resolver helpers (`AddResolver`, `HasResolver`).
+
+## <!-- 3 -->📚 Documentation
+
+- Document resolver usage and interface message metadata hooks.
+
 # [0.10.0](https://github.com/goliatone/go-command/compare/v0.9.0...v0.10.0) - (2025-12-02)
 
 ## <!-- 13 -->📦 Bumps
@@ -352,5 +363,4 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-
 
