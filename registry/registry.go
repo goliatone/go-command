@@ -25,6 +25,14 @@ func SetCronRegister(fn func(opts command.HandlerConfig, handler any) error) {
 	globalRegistry.SetCronRegister(fn)
 }
 
+func AddResolver(key string, res command.Resolver) error {
+	return globalRegistry.AddResolver(key, res)
+}
+
+func HasResolver(key string) bool {
+	return globalRegistry.HasResolver(key)
+}
+
 func GetCLIOptions() ([]kong.Option, error) {
 	return globalRegistry.GetCLIOptions()
 }
