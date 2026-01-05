@@ -60,6 +60,9 @@ func NewRegistry() *Registry {
 func (r *Registry) SetCronRegister(fn func(opts HandlerConfig, handler any) error) *Registry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.initialized || r.initializing {
+		return r
+	}
 	r.cronRegisterFn = fn
 	return r
 }
