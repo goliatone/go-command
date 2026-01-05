@@ -350,3 +350,38 @@ func TestErrorPropagation(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot register commands after registry has been initialized")
 	})
 }
+
+func TestGlobalRegistryResolvers(t *testing.T) {
+	WithTestRegistry(func() {
+		var called bool
+		err := AddResolver("custom", func(cmd any, meta command.CommandMeta, r *command.Registry) error {
+			called = true
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, HasResolver("custom"))
+
+		SetCronRegister(command.NilCronRegister)
+		_, err = RegisterCommand(&GlobalTestCommand{name: "resolver-test"})
+		require.NoError(t, err)
+
+		err = Start(context.Background())
+		require.NoError(t, err)
+
+		assert.True(t, called)
+	})
+}
+
+func TestGlobalRegistryAddResolverAfterStart(t *testing.T) {
+	WithTestRegistry(func() {
+		SetCronRegister(command.NilCronRegister)
+		_, err := RegisterCommand(&GlobalTestCommand{name: "resolver-late"})
+		require.NoError(t, err)
+
+		err = Start(context.Background())
+		require.NoError(t, err)
+
+		err = AddResolver("late", func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
+		assert.Error(t, err)
+	})
+}

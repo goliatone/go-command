@@ -228,7 +228,7 @@ func TestRegisterCommand(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Len(t, registry.commandsToRegister, 1)
-				assert.Equal(t, tt.cmd, registry.commandsToRegister[0])
+				assert.Equal(t, tt.cmd, registry.commandsToRegister[0].cmd)
 			}
 		})
 	}
@@ -245,8 +245,8 @@ func TestRegisterMultipleCommands(t *testing.T) {
 	assert.NoError(t, err1)
 	assert.NoError(t, err2)
 	assert.Len(t, registry.commandsToRegister, 2)
-	assert.Equal(t, cmd1, registry.commandsToRegister[0])
-	assert.Equal(t, cmd2, registry.commandsToRegister[1])
+	assert.Equal(t, cmd1, registry.commandsToRegister[0].cmd)
+	assert.Equal(t, cmd2, registry.commandsToRegister[1].cmd)
 }
 
 func TestInitialize(t *testing.T) {
@@ -541,4 +541,52 @@ func TestNestedCLIPathsAndAliases(t *testing.T) {
 	}
 	require.NotNil(t, promptNode)
 	assert.Equal(t, "Prompt commands", promptNode.Help)
+}
+
+func TestRegistryResolverOrder(t *testing.T) {
+	registry := NewRegistry()
+	var calls []string
+
+	require.NoError(t, registry.AddResolver("first", func(cmd any, meta CommandMeta, r *Registry) error {
+		calls = append(calls, "first")
+		return nil
+	}))
+	require.NoError(t, registry.AddResolver("second", func(cmd any, meta CommandMeta, r *Registry) error {
+		calls = append(calls, "second")
+		return nil
+	}))
+
+	require.NoError(t, registry.RegisterCommand(&struct{}{}))
+	require.NoError(t, registry.Initialize())
+
+	assert.Equal(t, []string{"first", "second"}, calls)
+}
+
+func TestRegistryResolverValidation(t *testing.T) {
+	registry := NewRegistry()
+
+	err := registry.AddResolver("", func(cmd any, meta CommandMeta, r *Registry) error { return nil })
+	assert.Error(t, err)
+
+	err = registry.AddResolver("nil", nil)
+	assert.Error(t, err)
+
+	err = registry.AddResolver("custom", func(cmd any, meta CommandMeta, r *Registry) error { return nil })
+	assert.NoError(t, err)
+
+	err = registry.AddResolver("custom", func(cmd any, meta CommandMeta, r *Registry) error { return nil })
+	assert.Error(t, err)
+}
+
+func TestRegistryResolverState(t *testing.T) {
+	registry := NewRegistry()
+	assert.True(t, registry.HasResolver("cli"))
+	assert.True(t, registry.HasResolver("cron"))
+	assert.False(t, registry.HasResolver("missing"))
+
+	require.NoError(t, registry.RegisterCommand(&struct{}{}))
+	require.NoError(t, registry.Initialize())
+
+	err := registry.AddResolver("late", func(cmd any, meta CommandMeta, r *Registry) error { return nil })
+	assert.Error(t, err)
 }
