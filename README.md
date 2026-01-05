@@ -171,6 +171,7 @@ func (c *SyncDataCommand) CronOptions() command.HandlerConfig {
 scheduler := cron.NewScheduler()
 scheduler.Start(context.Background())
 
+// Call before Start/Initialize.
 registry.SetCronRegister(func(opts command.HandlerConfig, handler any) error {
     _, err := scheduler.AddHandler(opts, handler)
     return err
@@ -206,6 +207,9 @@ type EventCommand struct{}
 func (c *EventCommand) Execute(ctx context.Context, msg Event) error { return nil }
 func (c *EventCommand) MessageValue() any { return &UserCreated{} }
 ```
+
+`MessageValue()` must return a value assignable to the interface parameter type; otherwise
+metadata is treated as empty and resolvers that rely on `MessageType` will skip it.
 
 For the global registry helpers, use `registry.AddResolver` and `registry.HasResolver`.
 
