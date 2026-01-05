@@ -78,7 +78,7 @@ func messageMetaFromType(cmd any, msgType reflect.Type) (CommandMeta, bool) {
 	}
 
 	if isInterfaceType(msgType) {
-		return messageMetaFromFactory(cmd)
+		return messageMetaFromFactory(cmd, msgType)
 	}
 
 	msgValue := messageValueForType(msgType)
@@ -99,7 +99,7 @@ func messageMetaFromType(cmd any, msgType reflect.Type) (CommandMeta, bool) {
 	}, true
 }
 
-func messageMetaFromFactory(cmd any) (CommandMeta, bool) {
+func messageMetaFromFactory(cmd any, msgType reflect.Type) (CommandMeta, bool) {
 	factory, ok := cmd.(MessageFactory)
 	if !ok {
 		return CommandMeta{}, false
@@ -111,6 +111,9 @@ func messageMetaFromFactory(cmd any) (CommandMeta, bool) {
 	}
 
 	msgTypeValue := reflect.TypeOf(msgValue)
+	if msgType != nil && !msgTypeValue.AssignableTo(msgType) {
+		return CommandMeta{}, false
+	}
 	msgTypeName := GetMessageType(msgValue)
 	if msgTypeName == "" || msgTypeName == "unknown_type" {
 		return CommandMeta{}, false
