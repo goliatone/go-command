@@ -1,15 +1,28 @@
 # Changelog
 
-# [Unreleased]
+# [0.11.0](https://github.com/goliatone/go-command/compare/v0.10.0...v0.11.0) - (2026-01-05)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.11.0 ([299a1ee](https://github.com/goliatone/go-command/commit/299a1ee6e2fe4fa1e3b5016d949f860c1c510d85))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 
-- Registry resolvers with `CommandMeta`, `MessageTypeForCommand`, and `MessageFactory`.
-- Global registry resolver helpers (`AddResolver`, `HasResolver`).
+- HasResolver and AddResolver methods to registry ([a7235e0](https://github.com/goliatone/go-command/commit/a7235e0f98ab620b99f6a57204fb58f2aa7682c4))  - (goliatone)
+- Command meta ([b4c4159](https://github.com/goliatone/go-command/commit/b4c41594871d72f248f82f46ccda9440956a2d8b))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Registry can host custom command resolvers ([9686435](https://github.com/goliatone/go-command/commit/968643580722b9619e44e551d062c728be884915))  - (goliatone)
 
 ## <!-- 3 -->📚 Documentation
 
-- Document resolver usage and interface message metadata hooks.
+- Update changelog for v0.10.0 ([89f1d4a](https://github.com/goliatone/go-command/commit/89f1d4a093c15da04729bd8ada01319b2f77a21b))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([c394390](https://github.com/goliatone/go-command/commit/c394390b37f59c9154d5cbcce330a062bf595900))  - (goliatone)
+- Update tests ([d6434cb](https://github.com/goliatone/go-command/commit/d6434cbe22c7a2a5c500dc2e6fb471745c4f5b39))  - (goliatone)
 
 # [0.10.0](https://github.com/goliatone/go-command/compare/v0.9.0...v0.10.0) - (2025-12-02)
 
@@ -363,4 +376,5 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
+
 
