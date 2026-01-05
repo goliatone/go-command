@@ -11,20 +11,50 @@ func NilCronRegister(opts HandlerConfig, handler any) error {
 	return nil
 }
 
+type Resolver func(cmd any, meta CommandMeta, r *Registry) error
+
+type registeredCommand struct {
+	cmd  any
+	meta CommandMeta
+}
+
 type Registry struct {
 	mu                 sync.RWMutex
-	commandsToRegister []any
+	commandsToRegister []registeredCommand
 	initialized        bool
+	initializing       bool
 	cronRegisterFn     func(opts HandlerConfig, handler any) error
 	cliRoot            *cliNode
 	cliOptions         []kong.Option
+	resolvers          map[string]Resolver
+	resolverOrder      []string
 }
 
 func NewRegistry() *Registry {
-	return &Registry{
-		cliRoot:    newCLINode("root"),
-		cliOptions: make([]kong.Option, 0),
+	registry := &Registry{
+		cliRoot:       newCLINode("root"),
+		cliOptions:    make([]kong.Option, 0),
+		resolvers:     make(map[string]Resolver),
+		resolverOrder: make([]string, 0, 2),
 	}
+
+	_ = registry.AddResolver("cli", func(cmd any, _ CommandMeta, r *Registry) error {
+		cliCmd, ok := cmd.(CLICommand)
+		if !ok {
+			return nil
+		}
+		return r.registerWithCLI(cliCmd)
+	})
+
+	_ = registry.AddResolver("cron", func(cmd any, _ CommandMeta, r *Registry) error {
+		cronCmd, ok := cmd.(CronCommand)
+		if !ok {
+			return nil
+		}
+		return r.registerWithCron(cronCmd)
+	})
+
+	return registry
 }
 
 func (r *Registry) SetCronRegister(fn func(opts HandlerConfig, handler any) error) *Registry {
@@ -43,46 +73,68 @@ func (r *Registry) RegisterCommand(cmd any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.initialized {
+	if r.initialized || r.initializing {
 		return errors.New("cannot register commands after registry has been initialized", errors.CategoryConflict).
 			WithTextCode("REGISTRY_ALREADY_INITIALIZED")
 	}
-	r.commandsToRegister = append(r.commandsToRegister, cmd)
+
+	meta := MessageTypeForCommand(cmd)
+	r.commandsToRegister = append(r.commandsToRegister, registeredCommand{
+		cmd:  cmd,
+		meta: meta,
+	})
 
 	return nil
 }
 
 func (r *Registry) Initialize() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.initialized {
+	if r.initialized || r.initializing {
+		r.mu.Unlock()
 		return errors.New("registry already initialized", errors.CategoryConflict).
 			WithTextCode("REGISTRY_ALREADY_INITIALIZED")
 	}
+	r.initializing = true
+
+	commands := make([]registeredCommand, len(r.commandsToRegister))
+	copy(commands, r.commandsToRegister)
+
+	resolverOrder := make([]string, len(r.resolverOrder))
+	copy(resolverOrder, r.resolverOrder)
+
+	resolvers := make(map[string]Resolver, len(r.resolvers))
+	for key, resolver := range r.resolvers {
+		resolvers[key] = resolver
+	}
+	r.mu.Unlock()
 
 	var errs error
-	for _, cmd := range r.commandsToRegister {
-		if cliCmd, ok := cmd.(CLICommand); ok {
-			if err := r.registerWithCLI(cliCmd); err != nil {
-				errs = errors.Join(errs, err)
+	for _, item := range commands {
+		for _, key := range resolverOrder {
+			resolver := resolvers[key]
+			if resolver == nil {
+				continue
 			}
-		}
-
-		if cronCmd, ok := cmd.(CronCommand); ok {
-			if err := r.registerWithCron(cronCmd); err != nil {
+			if err := resolver(item.cmd, item.meta, r); err != nil {
 				errs = errors.Join(errs, err)
 			}
 		}
 	}
 
-	if opts, err := buildCLIOptions(r.cliRoot); err != nil {
+	var opts []kong.Option
+	if builtOpts, err := buildCLIOptions(r.cliRoot); err != nil {
 		errs = errors.Join(errs, err)
 	} else {
-		r.cliOptions = opts
+		opts = builtOpts
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if opts != nil {
+		r.cliOptions = opts
+	}
 	r.initialized = true
+	r.initializing = false
 
 	return errs
 }
@@ -132,7 +184,7 @@ func (r *Registry) GetCLIOptions() ([]kong.Option, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.initialized {
+	if !r.initialized || r.initializing {
 		return nil, errors.New("registry not initialized", errors.CategoryConflict).
 			WithTextCode("REGISTRY_NOT_INITIALIZED")
 	}
@@ -149,4 +201,48 @@ func (r *Registry) GetCLIOptions() ([]kong.Option, error) {
 	options := make([]kong.Option, len(r.cliOptions))
 	copy(options, r.cliOptions)
 	return options, nil
+}
+
+func (r *Registry) AddResolver(key string, res Resolver) error {
+	if key == "" {
+		return errors.New("resolver key cannot be empty", errors.CategoryBadInput).
+			WithTextCode("RESOLVER_KEY_EMPTY")
+	}
+	if res == nil {
+		return errors.New("resolver cannot be nil", errors.CategoryBadInput).
+			WithTextCode("RESOLVER_NIL")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.initialized || r.initializing {
+		return errors.New("cannot add resolver after registry has been initialized", errors.CategoryConflict).
+			WithTextCode("REGISTRY_ALREADY_INITIALIZED")
+	}
+
+	if r.resolvers == nil {
+		r.resolvers = make(map[string]Resolver)
+	}
+
+	if _, exists := r.resolvers[key]; exists {
+		return errors.New("resolver already registered", errors.CategoryConflict).
+			WithTextCode("RESOLVER_ALREADY_REGISTERED")
+	}
+
+	r.resolvers[key] = res
+	r.resolverOrder = append(r.resolverOrder, key)
+
+	return nil
+}
+
+func (r *Registry) HasResolver(key string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.resolvers == nil {
+		return false
+	}
+	_, exists := r.resolvers[key]
+	return exists
 }
