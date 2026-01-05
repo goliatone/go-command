@@ -37,7 +37,7 @@ func BuildFlows[T command.Message](ctx context.Context, cfg FlowSet, bctx BuildC
 	}
 	flows := make(map[string]Flow[T], len(cfg.Flows))
 	for _, def := range cfg.Flows {
-		flow, err := buildFlow(ctx, def, bctx)
+		flow, err := buildFlow(ctx, cfg.Options, def, bctx)
 		if err != nil {
 			return nil, fmt.Errorf("build flow %s: %w", def.ID, err)
 		}
@@ -46,17 +46,19 @@ func BuildFlows[T command.Message](ctx context.Context, cfg FlowSet, bctx BuildC
 	return flows, nil
 }
 
-func buildFlow[T command.Message](ctx context.Context, def FlowDefinition, bctx BuildContext[T]) (Flow[T], error) {
-	opts := buildRunnerOptions(def.Options)
+func buildFlow[T command.Message](ctx context.Context, defaults FlowOptions, def FlowDefinition, bctx BuildContext[T]) (Flow[T], error) {
+	baseOpts := mergeFlowOptions(FlowOptions{}, defaults, def.Options)
 
 	switch def.Type {
 	case "serial":
+		opts := buildRunnerOptions(mergeFlowOptions(baseOpts, def.Serial.Opts))
 		cmds, err := handlersFromIDs(def.Serial.Steps, bctx.Handlers)
 		if err != nil {
 			return nil, err
 		}
 		return NewSerialExecutor(cmds, opts...), nil
 	case "parallel":
+		opts := buildRunnerOptions(mergeFlowOptions(baseOpts, def.Parallel.Opts))
 		cmds, err := handlersFromIDs(def.Parallel.Steps, bctx.Handlers)
 		if err != nil {
 			return nil, err
@@ -161,10 +163,11 @@ func conditionalBranches[T command.Message](branches []ConditionalBranch, reg *H
 		if err != nil {
 			return nil, err
 		}
+		handler := h
 		out = append(out, Conditional[T]{
 			Guard: b.Guard,
 			Handler: func(ctx context.Context, msg T) error {
-				return h.Execute(ctx, msg)
+				return handler.Execute(ctx, msg)
 			},
 		})
 	}
@@ -178,6 +181,7 @@ func sagaSteps[T command.Message](cfg []SagaStepConfig, reg *HandlerRegistry[T])
 		if err != nil {
 			return nil, err
 		}
+		doHandler := do
 		var comp command.Commander[T]
 		if stepCfg.Compensate != "" {
 			comp, err = handlerFromID(stepCfg.Compensate, reg)
@@ -185,20 +189,49 @@ func sagaSteps[T command.Message](cfg []SagaStepConfig, reg *HandlerRegistry[T])
 				return nil, err
 			}
 		}
+		compHandler := comp
 		steps = append(steps, SagaStep[T]{
 			Name: stepCfg.Do,
 			Execute: func(ctx context.Context, msg T) error {
-				return do.Execute(ctx, msg)
+				return doHandler.Execute(ctx, msg)
 			},
 			Compensate: func(ctx context.Context, msg T) error {
-				if comp == nil {
+				if compHandler == nil {
 					return nil
 				}
-				return comp.Execute(ctx, msg)
+				return compHandler.Execute(ctx, msg)
 			},
 		})
 	}
 	return steps, nil
+}
+
+func mergeFlowOptions(base FlowOptions, overrides ...FlowOptions) FlowOptions {
+	out := base
+	for _, opt := range overrides {
+		if opt.Timeout > 0 {
+			out.Timeout = opt.Timeout
+		}
+		if opt.NoTimeout {
+			out.NoTimeout = true
+		}
+		if opt.MaxRetries > 0 {
+			out.MaxRetries = opt.MaxRetries
+		}
+		if opt.MaxRuns > 0 {
+			out.MaxRuns = opt.MaxRuns
+		}
+		if opt.RunOnce {
+			out.RunOnce = true
+		}
+		if opt.ExitOnError {
+			out.ExitOnError = true
+		}
+		if !opt.Deadline.IsZero() {
+			out.Deadline = opt.Deadline
+		}
+	}
+	return out
 }
 
 // MarshalFlowSet renders FlowSet as JSON (useful for fixtures).
