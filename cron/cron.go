@@ -175,14 +175,22 @@ func (c *Scheduler) Stop(_ context.Context) error {
 }
 
 func makeRunnerOptions(s *Scheduler, opts command.HandlerConfig) []runner.Option {
-	return []runner.Option{
+	runnerOpts := []runner.Option{
 		runner.WithMaxRetries(opts.MaxRetries),
-		runner.WithTimeout(opts.Timeout),
 		runner.WithDeadline(opts.Deadline),
 		runner.WithRunOnce(opts.RunOnce),
 		runner.WithErrorHandler(s.errorHandler),
 		runner.WithLogger(s.logger),
 	}
+	if opts.NoTimeout {
+		runnerOpts = append(runnerOpts, runner.WithNoTimeout())
+	} else if opts.Timeout > 0 {
+		runnerOpts = append(runnerOpts, runner.WithTimeout(opts.Timeout))
+	}
+	if opts.MaxRuns > 0 {
+		runnerOpts = append(runnerOpts, runner.WithMaxRuns(opts.MaxRuns))
+	}
+	return runnerOpts
 }
 
 func makeSimpleJob(ctx context.Context, s *Scheduler, h *runner.Handler, fn func()) rcron.Job {
@@ -229,48 +237,120 @@ func makeLogger(out io.Writer, level LogLevel) rcron.Logger {
 
 // tryCommandJob attempts to match any command.Commander[T] or command.CommandFunc[T]
 func tryCommandJob(handler any, s *Scheduler, h *runner.Handler) rcron.Job {
-	handlerType := reflect.TypeOf(handler)
-	if handlerType == nil || handlerType.Kind() != reflect.Func {
+	if handler == nil {
 		return nil
 	}
 
-	// Ensure function has the correct signature: func(context.Context, *T) error
-	if handlerType.NumIn() < 2 || handlerType.NumOut() != 1 {
-		return nil
-	}
+	handlerValue := reflect.ValueOf(handler)
+	handlerType := handlerValue.Type()
 
-	// Extract the message type T (first argument after context.Context)
-	msgType := handlerType.In(1)
-	// if msgType.Kind() != reflect.Ptr {
-	// 	return nil // Ensure T is a pointer type (e.g., *ExecutionMessage)
-	// }
-
-	if msgType.Implements(reflect.TypeOf((*command.Message)(nil)).Elem()) || msgType.Implements(reflect.TypeOf((command.Message)(nil)).Elem()) {
+	if handlerType.Kind() == reflect.Func {
+		msgType, ok := commandFuncMessageType(handlerType)
+		if !ok {
+			return nil
+		}
 		wrappedFunc := func(ctx context.Context, msg any) error {
-
-			if msg == nil {
-				msg = reflect.Zero(msgType).Interface()
-			}
-
-			msgValue := reflect.ValueOf(msg)
-
-			// TODO: Once we fix makeCommandJob to actually product an event
-			// if !msgValue.IsValid() || msgValue.Type() != msgType {
-			// 	return fmt.Errorf("invalid message type: expected %s, got %T", msgType, msg)
-			// }
-
-			// call the original function with the correct argument type
-			results := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(ctx), msgValue})
-
-			// extract and return error result
+			msgValue := buildMessageValue(msgType, msg)
+			results := handlerValue.Call([]reflect.Value{reflect.ValueOf(ctx), msgValue})
 			if err, ok := results[0].Interface().(error); ok {
 				return err
 			}
 			return nil
 		}
-
 		return makeCommandJob(context.Background(), s, h, wrappedFunc)
 	}
 
-	return nil
+	msgType, ok := commandExecuteMessageType(handlerType)
+	if !ok {
+		return nil
+	}
+	wrappedFunc := func(ctx context.Context, msg any) error {
+		msgValue := buildMessageValue(msgType, msg)
+		results := handlerValue.MethodByName("Execute").Call([]reflect.Value{reflect.ValueOf(ctx), msgValue})
+		if err, ok := results[0].Interface().(error); ok {
+			return err
+		}
+		return nil
+	}
+	return makeCommandJob(context.Background(), s, h, wrappedFunc)
+
+}
+
+func commandFuncMessageType(handlerType reflect.Type) (reflect.Type, bool) {
+	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	messageType := reflect.TypeOf((*command.Message)(nil)).Elem()
+
+	if handlerType.NumIn() != 2 || handlerType.NumOut() != 1 {
+		return nil, false
+	}
+	if !handlerType.In(0).Implements(contextType) {
+		return nil, false
+	}
+	if !handlerType.Out(0).Implements(errorType) {
+		return nil, false
+	}
+	msgType := handlerType.In(1)
+	if !implementsMessage(msgType, messageType) {
+		return nil, false
+	}
+	return msgType, true
+}
+
+func commandExecuteMessageType(handlerType reflect.Type) (reflect.Type, bool) {
+	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	messageType := reflect.TypeOf((*command.Message)(nil)).Elem()
+
+	method, ok := handlerType.MethodByName("Execute")
+	if !ok {
+		return nil, false
+	}
+	if method.Type.NumIn() != 3 || method.Type.NumOut() != 1 {
+		return nil, false
+	}
+	if !method.Type.In(1).Implements(contextType) {
+		return nil, false
+	}
+	if !method.Type.Out(0).Implements(errorType) {
+		return nil, false
+	}
+	msgType := method.Type.In(2)
+	if !implementsMessage(msgType, messageType) {
+		return nil, false
+	}
+	return msgType, true
+}
+
+func implementsMessage(msgType, messageType reflect.Type) bool {
+	if msgType == nil {
+		return false
+	}
+	if msgType.Implements(messageType) {
+		return true
+	}
+	if msgType.Kind() == reflect.Ptr && msgType.Elem().Implements(messageType) {
+		return true
+	}
+	if msgType.Kind() != reflect.Ptr && reflect.PtrTo(msgType).Implements(messageType) {
+		return true
+	}
+	return false
+}
+
+func buildMessageValue(msgType reflect.Type, msg any) reflect.Value {
+	if msg == nil {
+		return reflect.Zero(msgType)
+	}
+	msgValue := reflect.ValueOf(msg)
+	if !msgValue.IsValid() {
+		return reflect.Zero(msgType)
+	}
+	if msgValue.Type().AssignableTo(msgType) {
+		return msgValue
+	}
+	if msgValue.Type().ConvertibleTo(msgType) {
+		return msgValue.Convert(msgType)
+	}
+	return reflect.Zero(msgType)
 }
