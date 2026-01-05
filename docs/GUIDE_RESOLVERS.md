@@ -9,7 +9,7 @@ Resolvers run during `Registry.Initialize()` for every registered command.
 
 - Built in resolvers: `cli` and `cron`
 - Order: insertion order (`cli`, `cron`, then your custom resolvers)
-- Mutations: you cannot call `AddResolver` or `RegisterCommand` after initialization
+- Mutations: you cannot call `AddResolver`, `RegisterCommand`, or `SetCronRegister` after initialization
 
 ## Wiring a Custom Resolver (Local Registry)
 
@@ -79,7 +79,9 @@ func (c *EventCommand) MessageValue() any {
 ```
 
 If `MessageValue()` returns `nil` or produces `"unknown_type"`, metadata is treated as
-empty and resolvers that depend on `MessageType` should skip registration.
+empty and resolvers that depend on `MessageType` should skip registration. The returned
+value must also implement the interface parameter type; otherwise metadata is treated as
+empty.
 
 ## Migration Notes
 
