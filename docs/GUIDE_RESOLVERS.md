@@ -140,6 +140,10 @@ empty and resolvers that depend on `MessageType` should skip registration. The r
 value must also implement the interface parameter type; otherwise metadata is treated as
 empty.
 
+`command.GetMessageType` prefers `Type()` when available. For nil pointers, it creates
+a zero-value instance and calls `Type()` on that. `Type()` must be stable and not depend
+on runtime fields; otherwise pointer registrations may not match runtime messages.
+
 ## Migration Notes
 
 - Existing CLI/Cron behavior stays the same.
