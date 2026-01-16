@@ -50,8 +50,16 @@ func GetMessageType(msg any) string {
 	}
 
 	v := reflect.ValueOf(msg)
-	if v.Kind() == reflect.Ptr && v.IsNil() {
+	t := reflect.TypeOf(msg)
+	if t == nil {
 		return "unknown_type"
+	}
+
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		if msgTyper, ok := zeroValueTyper(t); ok {
+			return msgTyper.Type()
+		}
+		return typeNameFromType(t)
 	}
 
 	// if msg implements Type() then we use that:
@@ -59,11 +67,36 @@ func GetMessageType(msg any) string {
 		return msgTyper.Type()
 	}
 
-	t := reflect.TypeOf(msg)
+	return typeNameFromType(t)
+}
+
+type messageTyper interface {
+	Type() string
+}
+
+var messageTyperType = reflect.TypeOf((*messageTyper)(nil)).Elem()
+
+func zeroValueTyper(t reflect.Type) (messageTyper, bool) {
+	if t == nil {
+		return nil, false
+	}
+	if !t.Implements(messageTyperType) {
+		return nil, false
+	}
+	if t.Kind() == reflect.Ptr {
+		zero := reflect.New(t.Elem())
+		typer, ok := zero.Interface().(messageTyper)
+		return typer, ok
+	}
+	zero := reflect.New(t).Elem()
+	typer, ok := zero.Interface().(messageTyper)
+	return typer, ok
+}
+
+func typeNameFromType(t reflect.Type) string {
 	if t == nil {
 		return "unknown_type"
 	}
-
 	typeName := t.String()
 
 	if t.Kind() == reflect.Ptr {
