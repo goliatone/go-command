@@ -26,9 +26,8 @@ func NewSerialExecutor[T any](handlers []command.Commander[T], opts ...runner.Op
 func (s *SerialExecutor[T]) Execute(ctx context.Context, msg T) error {
 	var errs error
 
-	h := runner.NewHandler(s.options...)
-
 	for i, handler := range s.handlers {
+		h := runner.NewHandler(s.options...)
 		if ctx.Err() != nil {
 			return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
 				WithTextCode("SERIAL_CONTEXT_CANCELLED").
