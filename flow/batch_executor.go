@@ -94,10 +94,9 @@ func (b *BatchExecutor[T]) Execute(ctx context.Context, messages []T) error {
 		go func(batchItems []T, batchIndex int) {
 			defer func() { <-semaphore }()
 
-			h := runner.NewHandler(b.options...)
-
 			var batchErr error
 			for msgIdx, msg := range batchItems {
+				h := runner.NewHandler(b.options...)
 				if err := runner.RunCommand(ctx, h, b.handler, msg); err != nil {
 					wrappedErr := errors.Wrap(
 						err,
