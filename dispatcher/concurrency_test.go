@@ -12,8 +12,8 @@ import (
 )
 
 func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	var wg sync.WaitGroup
 	numGoroutines := 100
@@ -38,8 +38,8 @@ func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestConcurrentDispatch(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	var counter atomic.Int32
 	numHandlers := 10
@@ -78,8 +78,8 @@ func TestConcurrentDispatch(t *testing.T) {
 }
 
 func TestConcurrentSubscribeDispatch(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	var counter atomic.Int32
 	var wg sync.WaitGroup
@@ -115,8 +115,8 @@ func TestConcurrentSubscribeDispatch(t *testing.T) {
 }
 
 func TestRaceSubscribeUnsubscribe(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	done := make(chan struct{})
 
@@ -155,8 +155,8 @@ func TestRaceSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestHandlerPanic(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	panicMsg := "intentional panic"
 

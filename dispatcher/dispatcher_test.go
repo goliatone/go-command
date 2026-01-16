@@ -117,8 +117,8 @@ func (h *GetUserHandler) Query(ctx context.Context, event GetUserMessage) (*User
 }
 
 func TestCommandDispatcher(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	t.Run("successful command execution", func(t *testing.T) {
 		db := newMockDB()
@@ -219,8 +219,8 @@ func TestCommandDispatcher(t *testing.T) {
 
 func TestDispatchErrorClassification(t *testing.T) {
 	t.Run("validation errors are surfaced as validation failures", func(t *testing.T) {
-		setTestMux(router.NewMux())
-		t.Cleanup(func() { setTestMux(nil) })
+		setTestMuxes(router.NewMux(), router.NewMux())
+		t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 		validationErr := gerrors.NewValidation("missing fields", gerrors.FieldError{
 			Field:   "email",
@@ -255,8 +255,8 @@ func TestDispatchErrorClassification(t *testing.T) {
 	})
 
 	t.Run("non-validation errors remain handler execution failures", func(t *testing.T) {
-		setTestMux(router.NewMux())
-		t.Cleanup(func() { setTestMux(nil) })
+		setTestMuxes(router.NewMux(), router.NewMux())
+		t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 		SubscribeCommand(command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error {
 			return fmt.Errorf("boom")
@@ -283,8 +283,8 @@ func TestDispatchErrorClassification(t *testing.T) {
 }
 
 func TestQueryDispatcher(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	t.Run("successful query execution", func(t *testing.T) {
 		db := newMockDB()
@@ -323,6 +323,38 @@ func TestQueryDispatcher(t *testing.T) {
 			t.Error("expected error, got nil")
 		}
 	})
+}
+
+func TestCommandAndQuerySameMessageType(t *testing.T) {
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
+
+	var dispatched bool
+	cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error {
+		dispatched = true
+		return nil
+	})
+	qry := command.QueryFunc[TestMessage, TestResponse](func(ctx context.Context, msg TestMessage) (TestResponse, error) {
+		return TestResponse{Result: fmt.Sprintf("id:%d", msg.ID)}, nil
+	})
+
+	SubscribeCommand(cmd)
+	SubscribeQuery(qry)
+
+	if err := Dispatch(context.Background(), TestMessage{ID: 1}); err != nil {
+		t.Fatalf("expected dispatch to succeed, got %v", err)
+	}
+	if !dispatched {
+		t.Fatal("expected command handler to run")
+	}
+
+	resp, err := Query[TestMessage, TestResponse](context.Background(), TestMessage{ID: 2})
+	if err != nil {
+		t.Fatalf("expected query to succeed, got %v", err)
+	}
+	if resp.Result != "id:2" {
+		t.Fatalf("expected query result id:2, got %s", resp.Result)
+	}
 }
 
 // Example usage
@@ -390,8 +422,8 @@ func TestQueryDispatcher(t *testing.T) {
 // }
 
 func TestHTTPIntegration(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	db := newMockDB()
 
@@ -728,8 +760,8 @@ func TestMessageValidation(t *testing.T) {
 }
 
 func TestDispatchWithPointers(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	commandHandler := command.CommandFunc[*TestPointerMessage](func(ctx context.Context, msg *TestPointerMessage) error {
 		msg.Value = "handled"
@@ -758,8 +790,8 @@ func TestDispatchWithPointers(t *testing.T) {
 }
 
 func TestQueryWithPointers(t *testing.T) {
-	setTestMux(router.NewMux())
-	t.Cleanup(func() { setTestMux(nil) })
+	setTestMuxes(router.NewMux(), router.NewMux())
+	t.Cleanup(func() { setTestMuxes(nil, nil) })
 
 	queryHandler := command.QueryFunc[*TestPointerMessage, TestResponse](func(ctx context.Context, msg *TestPointerMessage) (TestResponse, error) {
 		msg.Value = "queried"
@@ -865,7 +897,7 @@ func TestGetType(t *testing.T) {
 		},
 		{
 			name:     "Nil pointer to struct implementing command.Message",
-			expected: "unknown_type",
+			expected: "",
 			setup: func(t *testing.T) any {
 				return (*ptrMockMessage)(nil)
 			},
@@ -919,7 +951,7 @@ func TestGetTypeWithGenericTypes(t *testing.T) {
 	t.Run("Generic with nil pointer", func(t *testing.T) {
 		var ptrMsg *ptrMockMessage
 		result := command.GetMessageType(ptrMsg)
-		expected := "unknown_type"
+		expected := ""
 		if result != expected {
 			t.Errorf("getType(nil *ptrMockMessage) = %s, expected %s", result, expected)
 		}
