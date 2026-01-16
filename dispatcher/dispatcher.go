@@ -18,26 +18,49 @@ type Subscription interface {
 var ExitOnErr = false
 
 var (
-	defaultMux = router.NewMux()
-	testMux    *router.Mux // Only set during tests for isolation
-	testMuxMu  sync.RWMutex
+	defaultCommandMux = router.NewMux()
+	defaultQueryMux   = router.NewMux()
+	testCommandMux    *router.Mux // Only set during tests for isolation
+	testQueryMux      *router.Mux // Only set during tests for isolation
+	testMuxMu         sync.RWMutex
 )
 
-// getMux returns the active mux (test override or default)
-func getMux() *router.Mux {
+// getCommandMux returns the active command mux (test override or default)
+func getCommandMux() *router.Mux {
 	testMuxMu.RLock()
 	defer testMuxMu.RUnlock()
-	if testMux != nil {
-		return testMux
+	if testCommandMux != nil {
+		return testCommandMux
 	}
-	return defaultMux
+	return defaultCommandMux
 }
 
-// setTestMux overrides the mux for testing (package-private, test-only)
-func setTestMux(m *router.Mux) {
+// getQueryMux returns the active query mux (test override or default)
+func getQueryMux() *router.Mux {
+	testMuxMu.RLock()
+	defer testMuxMu.RUnlock()
+	if testQueryMux != nil {
+		return testQueryMux
+	}
+	return defaultQueryMux
+}
+
+// setTestMuxes overrides muxes for testing (package-private, test-only)
+func setTestMuxes(commandMux, queryMux *router.Mux) {
 	testMuxMu.Lock()
 	defer testMuxMu.Unlock()
-	testMux = m
+	testCommandMux = commandMux
+	testQueryMux = queryMux
+}
+
+// Reset clears all command/query subscriptions.
+func Reset() {
+	testMuxMu.Lock()
+	defer testMuxMu.Unlock()
+	defaultCommandMux = router.NewMux()
+	defaultQueryMux = router.NewMux()
+	testCommandMux = nil
+	testQueryMux = nil
 }
 
 // Subscribe a CommandHandler for a particular message type T.
@@ -49,7 +72,7 @@ func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Opti
 		runner: h,
 		cmd:    cmd,
 	}
-	return getMux().Add(command.GetMessageType(msg), wrapper)
+	return getCommandMux().Add(command.GetMessageType(msg), wrapper)
 }
 
 func SubscribeCommandFunc[T any](handler command.CommandFunc[T], runnerOpts ...runner.Option) Subscription {
@@ -64,7 +87,7 @@ func SubscribeQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runne
 		runner: r,
 		qry:    qry,
 	}
-	return getMux().Add(command.GetMessageType(msg), wrapper)
+	return getQueryMux().Add(command.GetMessageType(msg), wrapper)
 }
 
 func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) Subscription {
@@ -73,7 +96,7 @@ func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ..
 
 func getCommandHandlers[T any]() ([]*commandWrapper[T], error) {
 	var msg T
-	handlers := getMux().Get(command.GetMessageType(msg))
+	handlers := getCommandMux().Get(command.GetMessageType(msg))
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no command handlers for message type %s", command.GetMessageType(msg))
 	}
@@ -151,7 +174,7 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 
 func getQueryHandler[T any, R any]() (*queryWrapper[T, R], error) {
 	var msg T
-	handlers := getMux().Get(command.GetMessageType(msg))
+	handlers := getQueryMux().Get(command.GetMessageType(msg))
 
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no query handlers for message type %s", command.GetMessageType(msg))
