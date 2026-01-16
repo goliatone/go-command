@@ -1,5 +1,19 @@
 # Changelog
 
+# [Unreleased]
+
+## <!-- 16 -->➕ Add
+
+- Add REPL exposure metadata interface and helper for opt-in discovery. - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Document resolver-based REPL exposure discovery and defaults. - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Add exposure metadata tests. - (goliatone)
+
 # [0.12.0](https://github.com/goliatone/go-command/compare/v0.11.0...v0.12.0) - (2026-01-05)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -399,5 +413,4 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-
 
