@@ -48,6 +48,63 @@ if err := registry.Start(context.Background()); err != nil {
 }
 ```
 
+## REPL Exposure Metadata (go-admin)
+
+Commands can opt in to REPL exposure by implementing `command.ExposableCommand`
+and returning `ExposeInAdmin=true`. This metadata is collected via a resolver
+during `Registry.Initialize()` and does not change command registration.
+
+```go
+type CacheWarmCommand struct{}
+
+func (c *CacheWarmCommand) Execute(ctx context.Context, msg *CacheWarmMessage) error {
+    return nil
+}
+
+func (c *CacheWarmCommand) CLIHandler() any { return c }
+func (c *CacheWarmCommand) CLIOptions() command.CLIConfig {
+    return command.CLIConfig{
+        Path:        []string{"cache", "warm"},
+        Description: "Warm cache entries",
+    }
+}
+
+func (c *CacheWarmCommand) Exposure() command.CommandExposure {
+    return command.CommandExposure{
+        ExposeInAdmin: true,
+        Tags:          []string{"ops", "cache"},
+        Mutates:       true,
+        Permissions:   []string{"admin.exec"},
+    }
+}
+```
+
+Resolver example for discovery:
+
+```go
+exposureStore := newExposureStore()
+
+if err := registry.AddResolver("exposure", func(cmd any, meta command.CommandMeta, r *command.Registry) error {
+    if _, ok := cmd.(command.CLICommand); !ok {
+        return nil
+    }
+    exposure, ok := command.ExposureOf(cmd)
+    if !ok || !exposure.ExposeInAdmin {
+        return nil
+    }
+    exposureStore.Add(meta, exposure)
+    return nil
+}); err != nil {
+    return err
+}
+```
+
+Exposure defaults:
+
+- `Mutates=false` means read-only.
+- If `Permissions` is empty, consumers should derive permissions from `Mutates`
+  (read-only vs execute). If `Permissions` is set, enforce them explicitly.
+
 ## Message Metadata and MessageFactory
 
 `MessageTypeForCommand` uses the command signature to produce `CommandMeta`. For value
