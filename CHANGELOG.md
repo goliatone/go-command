@@ -1,18 +1,32 @@
 # Changelog
 
-# [Unreleased]
+# [0.13.0](https://github.com/goliatone/go-command/compare/v0.12.0...v0.13.0) - (2026-01-16)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Track subscriptions, reset dispatcher state ([ed44d61](https://github.com/goliatone/go-command/commit/ed44d61fcd895fbd5ce1225a3b1e4d05a0c7c6c9))  - (goliatone)
+- Create fresh runner per item ([4a9d4df](https://github.com/goliatone/go-command/commit/4a9d4df0db6362c41a018432794d9ca540c7efef))  - (goliatone)
+- Separate comd/query mux. add: Reset to clear subscriptions ([e50d84a](https://github.com/goliatone/go-command/commit/e50d84ab8564dc0d40526d02ddd050e3aceaa6cf))  - (goliatone)
+- GetMessageType call Type on zero/nil pointers ([ab91c55](https://github.com/goliatone/go-command/commit/ab91c55d13b099363285d99b07150d5cf38d9dd9))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.13.0 ([5d18a02](https://github.com/goliatone/go-command/commit/5d18a0290edd5658cc940eea2e550dcad3099442))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 
-- Add REPL exposure metadata interface and helper for opt-in discovery. - (goliatone)
+- Expose commands for remote exec ([23c76e8](https://github.com/goliatone/go-command/commit/23c76e8368cc32dbbc856525a818c1958c05cab0))  - (goliatone)
 
 ## <!-- 3 -->📚 Documentation
 
-- Document resolver-based REPL exposure discovery and defaults. - (goliatone)
+- Update changelog for v0.12.0 ([ca700b4](https://github.com/goliatone/go-command/commit/ca700b4b870269e40bbe291e7b029ada5202cc73))  - (goliatone)
 
 ## <!-- 7 -->⚙️ Miscellaneous Tasks
 
-- Add exposure metadata tests. - (goliatone)
+- Update readme ([03b6c62](https://github.com/goliatone/go-command/commit/03b6c62cf44af31fa1f76806bb14d8b638eb5efd))  - (goliatone)
+- Update tests ([e66867e](https://github.com/goliatone/go-command/commit/e66867e567433be0ee4e0e685c3aad580987ff0d))  - (goliatone)
+- Update changelog ([9e8ad51](https://github.com/goliatone/go-command/commit/9e8ad5159f6468c26cfaa0fd5c0e4f79988c96f3))  - (goliatone)
+- Update docs ([f16e2ac](https://github.com/goliatone/go-command/commit/f16e2ac353cda2f5cdddaa794cf7f2b9c6330948))  - (goliatone)
 
 # [0.12.0](https://github.com/goliatone/go-command/compare/v0.11.0...v0.12.0) - (2026-01-05)
 
@@ -413,4 +427,5 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
+
 
