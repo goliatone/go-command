@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -384,4 +385,72 @@ func TestGlobalRegistryAddResolverAfterStart(t *testing.T) {
 		err = AddResolver("late", func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
 		assert.Error(t, err)
 	})
+}
+
+func TestGlobalRegistryConcurrentAccessRaceSafety(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+
+	const workers = 6
+	const iterations = 120
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		workerID := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+
+			for j := 0; j < iterations; j++ {
+				cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error { return nil })
+				qry := command.QueryFunc[TestMessage, TestResponse](func(ctx context.Context, msg TestMessage) (TestResponse, error) {
+					return TestResponse{Result: "ok"}, nil
+				})
+
+				switch j % 7 {
+				case 0:
+					_, _ = RegisterCommand(cmd)
+				case 1:
+					_, _ = RegisterQuery(qry)
+				case 2:
+					SetCronRegister(command.NilCronRegister)
+				case 3:
+					_ = Start(context.Background())
+				case 4:
+					_, _ = GetCLIOptions()
+				case 5:
+					_ = Stop(context.Background())
+				default:
+					key := fmt.Sprintf("resolver-%d-%d", workerID, j)
+					_ = AddResolver(key, func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
+					_ = HasResolver(key)
+				}
+			}
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+
+		for i := 0; i < iterations; i++ {
+			WithTestRegistry(func() {
+				cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error { return nil })
+				qry := command.QueryFunc[TestMessage, TestResponse](func(ctx context.Context, msg TestMessage) (TestResponse, error) {
+					return TestResponse{Result: "nested"}, nil
+				})
+				SetCronRegister(command.NilCronRegister)
+				_, _ = RegisterCommand(cmd)
+				_, _ = RegisterQuery(qry)
+				_ = Start(context.Background())
+				_, _ = GetCLIOptions()
+			})
+		}
+	}()
+
+	close(start)
+	wg.Wait()
 }
