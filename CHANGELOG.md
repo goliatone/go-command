@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.14.0](https://github.com/goliatone/go-command/compare/v0.13.0...v0.14.0) - (2026-02-17)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Date race in global registry ([3ab4064](https://github.com/goliatone/go-command/commit/3ab406426b055be8f14dc593a660b3ae7a8926c4))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.14.0 ([b883d88](https://github.com/goliatone/go-command/commit/b883d886e7d1456a29f46a61ada538a18d745cb7))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.13.0 ([d0f69d8](https://github.com/goliatone/go-command/commit/d0f69d8d9e0123b25eb3a890b45d7181217e405c))  - (goliatone)
+
 # [0.13.0](https://github.com/goliatone/go-command/compare/v0.12.0...v0.13.0) - (2026-01-16)
 
 ## <!-- 1 -->🐛 Bug Fixes
