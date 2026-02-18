@@ -101,6 +101,18 @@ func (m *mockCronRegister) register(opts command.HandlerConfig, handler any) err
 	return nil
 }
 
+type reentrantSubscription struct {
+	done chan struct{}
+}
+
+func (s *reentrantSubscription) Unsubscribe() {
+	// Exercise registry APIs from inside Unsubscribe to ensure Stop does not
+	// hold globalStateMu while invoking subscription callbacks.
+	SetCronRegister(command.NilCronRegister)
+	_ = HasResolver("reentrant-check")
+	close(s.done)
+}
+
 func TestRegisterCommand(t *testing.T) {
 	WithTestRegistry(func() {
 		cmd := &GlobalTestCommand{name: "test-cmd"}
@@ -385,6 +397,65 @@ func TestGlobalRegistryAddResolverAfterStart(t *testing.T) {
 		err = AddResolver("late", func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
 		assert.Error(t, err)
 	})
+}
+
+func TestStopUnsubscribeIsReentrantSafe(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+	_ = Stop(context.Background())
+
+	done := make(chan struct{})
+
+	globalStateMu.Lock()
+	globalSubs = append(globalSubs, &reentrantSubscription{done: done})
+	globalStateMu.Unlock()
+
+	stopDone := make(chan struct{})
+	go func() {
+		_ = Stop(context.Background())
+		close(stopDone)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unsubscribe callback blocked, Stop likely held global lock")
+	}
+
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not complete")
+	}
+}
+
+func TestWithTestRegistryRestoresStateAfterPanic(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+	_ = Stop(context.Background())
+
+	baseKey := "base-resolver"
+	panicKey := "panic-resolver"
+
+	err := AddResolver(baseKey, func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
+	require.NoError(t, err)
+	require.True(t, HasResolver(baseKey))
+
+	var recovered any
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+
+		WithTestRegistry(func() {
+			err := AddResolver(panicKey, func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
+			require.NoError(t, err)
+			require.True(t, HasResolver(panicKey))
+			panic("test panic")
+		})
+	}()
+
+	require.Equal(t, "test panic", recovered)
+	assert.True(t, HasResolver(baseKey))
+	assert.False(t, HasResolver(panicKey))
 }
 
 func TestGlobalRegistryConcurrentAccessRaceSafety(t *testing.T) {
