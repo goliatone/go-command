@@ -96,6 +96,14 @@ function dev:test {
     lgr exec -- go test ./...
 }
 
+function dev:test:race {
+    lgr exec -- go test ./... -race -count=1
+}
+
+function dev:test:race:registry {
+    lgr exec -- go test ./registry -race -count=1
+}
+
 # Run flow package tests
 function flow:test {
     lgr exec -- go test ./flow/...
