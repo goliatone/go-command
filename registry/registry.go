@@ -12,11 +12,12 @@ import (
 
 var globalRegistry = command.NewRegistry()
 var globalStateMu sync.Mutex
+var withTestRegistryMu sync.Mutex
 var globalSubs []dispatcher.Subscription
 
 func RegisterCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Option) (dispatcher.Subscription, error) {
-	sub := dispatcher.SubscribeCommand(cmd, runnerOpts...)
 	globalStateMu.Lock()
+	sub := dispatcher.SubscribeCommand(cmd, runnerOpts...)
 	err := globalRegistry.RegisterCommand(cmd)
 	if err == nil {
 		trackSubscriptionLocked(sub)
@@ -33,8 +34,8 @@ func RegisterCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Optio
 }
 
 func RegisterQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) (dispatcher.Subscription, error) {
-	sub := dispatcher.SubscribeQuery(qry, runnerOpts...)
 	globalStateMu.Lock()
+	sub := dispatcher.SubscribeQuery(qry, runnerOpts...)
 	err := globalRegistry.RegisterCommand(qry)
 	if err == nil {
 		trackSubscriptionLocked(sub)
@@ -94,15 +95,27 @@ func Stop(_ context.Context) error {
 }
 
 func WithTestRegistry(fn func()) {
+	withTestRegistryMu.Lock()
+	defer withTestRegistryMu.Unlock()
+
+	testRegistry := command.NewRegistry()
+
 	globalStateMu.Lock()
 	old := globalRegistry
 	oldSubs := globalSubs
-	globalRegistry = command.NewRegistry()
+	globalRegistry = testRegistry
 	globalSubs = nil
 	globalStateMu.Unlock()
 
 	defer func() {
 		globalStateMu.Lock()
+		// Another caller (eg. Stop) replaced the test registry while fn ran:
+		// do not overwrite that state during cleanup.
+		if globalRegistry != testRegistry {
+			globalStateMu.Unlock()
+			return
+		}
+
 		testSubs := globalSubs
 		globalSubs = nil
 		globalStateMu.Unlock()
@@ -110,8 +123,10 @@ func WithTestRegistry(fn func()) {
 		unsubscribeSubscriptions(testSubs)
 
 		globalStateMu.Lock()
-		globalRegistry = old
-		globalSubs = oldSubs
+		if globalRegistry == testRegistry {
+			globalRegistry = old
+			globalSubs = oldSubs
+		}
 		globalStateMu.Unlock()
 	}()
 
