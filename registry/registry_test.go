@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/dispatcher"
 )
 
 type TestMessage struct {
@@ -456,6 +457,173 @@ func TestWithTestRegistryRestoresStateAfterPanic(t *testing.T) {
 	require.Equal(t, "test panic", recovered)
 	assert.True(t, HasResolver(baseKey))
 	assert.False(t, HasResolver(panicKey))
+}
+
+func TestWithTestRegistryIsSerialized(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+	_ = Stop(context.Background())
+
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan struct{})
+
+	go func() {
+		WithTestRegistry(func() {
+			close(firstEntered)
+			<-releaseFirst
+		})
+		close(firstDone)
+	}()
+
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first WithTestRegistry did not start")
+	}
+
+	secondStarted := make(chan struct{})
+	secondEntered := make(chan struct{})
+	secondDone := make(chan struct{})
+
+	go func() {
+		close(secondStarted)
+		WithTestRegistry(func() {
+			close(secondEntered)
+		})
+		close(secondDone)
+	}()
+
+	<-secondStarted
+
+	select {
+	case <-secondEntered:
+		t.Fatal("second WithTestRegistry entered before first completed")
+	case <-time.After(100 * time.Millisecond):
+		// expected: blocked by withTestRegistryMu
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first WithTestRegistry did not complete")
+	}
+
+	select {
+	case <-secondEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second WithTestRegistry did not enter after first completed")
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second WithTestRegistry did not complete")
+	}
+}
+
+func TestWithTestRegistryDoesNotRestoreStaleStateAfterConcurrentStop(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+	_ = Stop(context.Background())
+
+	baseKey := "base-resolver"
+	testKey := "test-resolver"
+
+	err := AddResolver(baseKey, func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil })
+	require.NoError(t, err)
+	require.True(t, HasResolver(baseKey))
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+
+	go func() {
+		WithTestRegistry(func() {
+			if e := AddResolver(testKey, func(cmd any, meta command.CommandMeta, r *command.Registry) error { return nil }); e != nil {
+				errCh <- e
+				close(entered)
+				return
+			}
+			close(entered)
+			<-release
+		})
+		close(done)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WithTestRegistry did not enter")
+	}
+
+	err = Stop(context.Background())
+	require.NoError(t, err)
+
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WithTestRegistry did not complete")
+	}
+
+	select {
+	case e := <-errCh:
+		require.NoError(t, e)
+	default:
+	}
+
+	assert.False(t, HasResolver(baseKey))
+	assert.False(t, HasResolver(testKey))
+}
+
+func TestRegisterCommandDoesNotSubscribeBeforeGlobalStateLock(t *testing.T) {
+	t.Cleanup(func() { _ = Stop(context.Background()) })
+	_ = Stop(context.Background())
+
+	cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error { return nil })
+
+	globalStateMu.Lock()
+	started := make(chan struct{})
+	done := make(chan error, 1)
+
+	go func() {
+		close(started)
+		_, err := RegisterCommand(cmd)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		globalStateMu.Unlock()
+		t.Fatal("register goroutine did not start")
+	}
+
+	// RegisterCommand should not leak a dispatcher subscription while blocked
+	// on the global state lock.
+	for i := 0; i < 50; i++ {
+		err := dispatcher.Dispatch(context.Background(), TestMessage{Content: "locked-state"})
+		if err == nil {
+			globalStateMu.Unlock()
+			t.Fatal("subscription became visible before global state lock was released")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	globalStateMu.Unlock()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("RegisterCommand did not complete")
+	}
+
+	err := dispatcher.Dispatch(context.Background(), TestMessage{Content: "after-unlock"})
+	require.NoError(t, err)
 }
 
 func TestGlobalRegistryConcurrentAccessRaceSafety(t *testing.T) {
