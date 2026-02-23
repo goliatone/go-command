@@ -1,13 +1,13 @@
 # Go Command
 
-A Go package for implementing command and query patterns with support for multiple execution strategies including CLI, cron scheduling, message dispatching, and batch/parallel processing.
+A Go package for implementing command and query patterns with support for multiple execution strategies including CLI, cron scheduling, RPC methods, message dispatching, and batch/parallel processing.
 
 ## Overview
 
 `go-command` provides a framework for building applications inspired by the Command Query Responsibility Segregation (CQRS) pattern. It offers:
 
 - **Type-safe message handling** through Go generics
-- **Multiple execution strategies** (CLI, cron, dispatcher, batch, parallel)
+- **Multiple execution strategies** (CLI, cron, RPC, dispatcher, batch, parallel)
 - **Flexible error handling** with retry support
 - **Context-aware operations** with cancellation and timeouts
 - **Registry system** for automatic command/query discovery
@@ -102,7 +102,7 @@ user, err := dispatcher.Query[GetUserMessage, *User](context.Background(), GetUs
 })
 ```
 
-### 2. Registry System with CLI and Cron
+### 2. Registry System with CLI, Cron, and RPC
 
 The registry allows commands to be registered once and executed through multiple interfaces:
 
@@ -186,7 +186,7 @@ cliOptions, _ := registry.GetCLIOptions()
 
 #### Registry Resolvers
 
-Resolvers run during registry initialization for each registered command. CLI and cron are built-in resolvers (keys `"cli"` and `"cron"`), and you can add more with `AddResolver`:
+Resolvers run during registry initialization for each registered command. CLI, cron, and RPC are built-in resolvers (keys `"cli"`, `"cron"`, and `"rpc"`), and you can add more with `AddResolver`:
 
 ```go
 cmdRegistry := command.NewRegistry()
@@ -219,7 +219,7 @@ Migration notes:
 - When both resolver-based and direct registration are used, the queue layer should treat
   duplicate registrations as no-ops to avoid conflicts.
 
-See `REGISTRY_RESOLVERS.md` for a deeper guide.
+See `docs/GUIDE_RESOLVERS.md` for a deeper guide.
 
 ### 3. Batch Executor
 
@@ -344,6 +344,59 @@ id, err := scheduler.AddHandler(
 
 scheduler.Start(context.Background())
 ```
+
+### 7. RPC Method Adapter
+
+Expose commands and queries as RPC methods by implementing `command.RPCCommand`:
+
+```go
+type ApplyEventCommand struct{}
+
+func (c *ApplyEventCommand) Execute(ctx context.Context, msg ApplyEvent) error {
+    return nil
+}
+
+func (c *ApplyEventCommand) RPCHandler() any { return c }
+
+func (c *ApplyEventCommand) RPCOptions() command.RPCConfig {
+    return command.RPCConfig{
+        Method:      "fsm.apply_event",
+        Timeout:     5 * time.Second,
+        Idempotent:  false,
+        Permissions: []string{"fsm:write"},
+        Roles:       []string{"admin"},
+    }
+}
+```
+
+Wire the RPC server before registry initialization:
+
+```go
+import "github.com/goliatone/go-command/rpc"
+
+rpcServer := rpc.NewServer(
+    rpc.WithFailureMode(rpc.FailureModeRecover),
+    rpc.WithFailureLogger(func(ev rpc.FailureEvent) {
+        log.Printf("rpc failure stage=%s method=%s err=%v", ev.Stage, ev.Method, ev.Err)
+    }),
+)
+
+registry.SetRPCRegister(rpcServer.Register)
+_, _ = registry.RegisterCommand(&ApplyEventCommand{})
+_ = registry.Start(context.Background())
+```
+
+RPC handler signatures are strict:
+- Execute-style: `Execute(ctx, msg) error`
+- Query-style: `Query(ctx, msg) (result, error)`
+- Function handlers must use the same signatures.
+
+Failure handling modes:
+- `FailureModeReject` (default): registration errors return; invoke panics re-panic.
+- `FailureModeRecover`: registration errors return; invoke panics become errors.
+- `FailureModeLogAndContinue`: registration failures are skipped after logging; invoke panics return `(nil, nil)` after logging.
+
+Endpoint metadata returned by `Endpoint()` and `Endpoints()` is defensively copied, so caller mutations do not affect server state.
 
 ## Complete Example
 

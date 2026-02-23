@@ -291,9 +291,15 @@ req := flow.TransitionRequest[OrderMsg]{
   CurrentState: func(m OrderMsg) string { return m.State }, // fallback when store has no entry
 }
 sm, _ := flow.NewStateMachine(smCfg, store, req, guards, actions)
+result, err := sm.ApplyEvent(ctx, "approve", order)
+if err != nil {
+  // handle transition error
+}
+_ = result // TransitionResult{PreviousState, CurrentState, Effects}
 ```
 
 Helper: `flow.TransitionRequestFromState(idFn, stateFn, eventFn)` builds a request using ID/current state/event to reduce boilerplate. Option `flow.WithInitialFallback(true)` re-enables the legacy behavior of falling back to the initial state when both store and CurrentState are empty.
+`StateMachine` also implements `Execute(ctx, msg) error` for `command.Commander[T]` compatibility.
 
 ## Metrics/Tracing Decorators
 
@@ -348,6 +354,11 @@ guards.Register("is_admin", func(m OrderMsg) bool { return m.Admin })
 store := flow.NewInMemoryStateStore()
 req := flow.TransitionRequest[OrderMsg]{StateKey: func(m OrderMsg) string { return m.ID }, Event: func(m OrderMsg) string { return m.Event }}
 sm, _ := flow.NewStateMachine(smCfg, store, req, guards, nil)
+result, err := sm.ApplyEvent(ctx, "approve", order)
+if err != nil {
+  // handle transition error
+}
+_ = result
 ```
 
 ## Metrics/Tracing Decorators
