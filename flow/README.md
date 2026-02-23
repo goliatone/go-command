@@ -16,6 +16,131 @@ The Flow package provides execution patterns for the go-command framework, offer
 go get github.com/goliatone/go-command/flow
 ```
 
+## FSM v2 Quickstart
+
+The canonical FSM runtime API is envelope-based:
+
+- `ApplyEvent(ctx, ApplyEventRequest[T]) -> *ApplyEventResponse[T]`
+- `Snapshot(ctx, SnapshotRequest[T]) -> *Snapshot`
+- `Execute(ctx, msg)` is retained only as a compatibility wrapper.
+
+```go
+cfg := flow.StateMachineConfig{
+  Entity:          "order",
+  ExecutionPolicy: flow.ExecutionPolicyLightweight, // or flow.ExecutionPolicyOrchestrated
+  States: []flow.StateConfig{
+    {Name: "draft", Initial: true},
+    {Name: "approved"},
+  },
+  Transitions: []flow.TransitionConfig{
+    {Name: "approve", From: "draft", To: "approved", Action: "audit"},
+  },
+}
+
+req := flow.TransitionRequest[OrderMsg]{
+  StateKey:     func(m OrderMsg) string { return m.ID },
+  Event:        func(m OrderMsg) string { return m.Event },
+  CurrentState: func(m OrderMsg) string { return m.State },
+}
+
+actions := flow.NewActionRegistry[OrderMsg]()
+_ = actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil })
+
+sm, _ := flow.NewStateMachine(cfg, flow.NewInMemoryStateStore(), req, nil, actions)
+
+res, err := sm.ApplyEvent(context.Background(), flow.ApplyEventRequest[OrderMsg]{
+  EntityID: "order-1",
+  Event:    "approve",
+  Msg:      OrderMsg{ID: "order-1", Event: "approve", State: "draft"},
+  ExecCtx:  flow.ExecutionContext{ActorID: "user-1", Roles: []string{"admin"}, Tenant: "acme"},
+})
+if err != nil {
+  // handle runtime category: ErrInvalidTransition / ErrGuardRejected / ErrVersionConflict / ...
+}
+_ = res.Transition
+_ = res.Snapshot
+_ = res.Execution // nil for lightweight; set for orchestrated policy
+```
+
+Snapshot includes target metadata for static and dynamic transitions:
+
+```go
+snap, err := sm.Snapshot(context.Background(), flow.SnapshotRequest[OrderMsg]{
+  EntityID: "order-1",
+  Msg:      OrderMsg{ID: "order-1", State: "draft"},
+  ExecCtx:  flow.ExecutionContext{ActorID: "user-1"},
+})
+if err != nil {
+  // handle error
+}
+for _, tr := range snap.AllowedTransitions {
+  // tr.Target.Kind => "static" | "dynamic"
+  // tr.Target.To / tr.Target.Resolver / tr.Target.Resolved / tr.Target.ResolvedTo / tr.Target.Candidates
+}
+```
+
+## DSL and UI Schema
+
+```go
+def, err := flow.CompileDSL(`
+machine onboarding version v2 {
+    initial draft
+    state draft
+    state approved
+
+    transition approve {
+        from draft
+        to approved
+        step order.audit
+    }
+}`)
+if err != nil {
+  // dsl validation diagnostics
+}
+
+catalog := &flow.EditorCatalog{
+  Steps: []flow.CatalogItem{{ID: "order.audit", Label: "order.audit"}},
+}
+schema, diags := flow.GenerateMachineSchema(def, catalog, nil)
+ui := flow.GenerateMachineUISchema(schema)
+_ = diags
+_ = ui
+```
+
+## Orchestrator and RPC Surface
+
+- Execution policy is mandatory: `lightweight` or `orchestrated`.
+- Orchestrated mode exposes execution control:
+  - `ExecutionStatus(ctx, executionID)`
+  - `PauseExecution(ctx, executionID)`
+  - `ResumeExecution(ctx, executionID)`
+  - `StopExecution(ctx, executionID)`
+- RPC method family:
+  - `fsm.apply_event`
+  - `fsm.snapshot`
+  - `fsm.execution_status`
+  - `fsm.execution_pause`
+  - `fsm.execution_resume`
+  - `fsm.execution_stop`
+
+```go
+registry := command.NewRegistry()
+server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
+registry.SetRPCRegister(server.Register)
+_ = flow.RegisterFSMRPCCommands(registry, sm)
+```
+
+Transport helpers map runtime categories to protocol status surfaces:
+
+```go
+mapped := flow.MapRuntimeError(err) // HTTP/gRPC/RPC mapping
+rpcErr := flow.RPCErrorForError(err)
+_ = mapped
+_ = rpcErr
+```
+
+See migration guidance: `docs/FSM_V2_MIGRATION.md`.
+
 ## Usage Examples
 
 ### Serial Execution

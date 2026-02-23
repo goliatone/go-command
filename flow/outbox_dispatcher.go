@@ -26,9 +26,10 @@ type JobScheduler interface {
 
 // OutboxStore exposes lease/claim/retry operations for dispatch loops.
 type OutboxStore interface {
-	ClaimPending(ctx context.Context, workerID string, limit int, leaseUntil time.Time) ([]OutboxEntry, error)
-	MarkCompleted(ctx context.Context, id string) error
-	MarkFailed(ctx context.Context, id string, retryAt time.Time, reason string) error
+	ClaimPending(ctx context.Context, workerID string, limit int, leaseTTL time.Duration) ([]ClaimedOutboxEntry, error)
+	MarkCompleted(ctx context.Context, id, leaseToken string) error
+	MarkFailed(ctx context.Context, id, leaseToken string, retryAt time.Time, reason string) error
+	ExtendLease(ctx context.Context, id, leaseToken string, leaseTTL time.Duration) error
 }
 
 // OutboxDispatcher publishes pending outbox entries to a scheduler.
@@ -124,7 +125,7 @@ func (d *OutboxDispatcher) DispatchPending(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("job scheduler not configured")
 	}
 	now := d.now()
-	entries, err := d.store.ClaimPending(ctx, d.workerID, d.limit, now.Add(d.leaseDuration))
+	entries, err := d.store.ClaimPending(ctx, d.workerID, d.limit, d.leaseDuration)
 	if err != nil {
 		return 0, err
 	}
@@ -134,20 +135,22 @@ func (d *OutboxDispatcher) DispatchPending(ctx context.Context) (int, error) {
 
 	processed := 0
 	var dispatchErr error
-	for _, entry := range entries {
+	for _, claimed := range entries {
+		entry := claimed.OutboxEntry
 		fields := mergeFields(copyMap(entry.Metadata), map[string]any{
 			"outbox_id":     entry.ID,
 			"entity_id":     entry.EntityID,
 			"event":         entry.Event,
 			"transition_id": entry.TransitionID,
 			"execution_id":  entry.ExecutionID,
+			"lease_token":   claimed.LeaseToken,
 		})
 		logger := withLoggerFields(d.logger.WithContext(ctx), fields)
 
 		msg, msgErr := outboxEntryToExecutionMessage(entry)
 		if msgErr != nil {
 			logger.Error("outbox payload serialization failed: %v", msgErr)
-			_ = d.store.MarkFailed(ctx, entry.ID, now.Add(d.retryDelay), msgErr.Error())
+			_ = d.store.MarkFailed(ctx, entry.ID, claimed.LeaseToken, now.Add(d.retryDelay), msgErr.Error())
 			dispatchErr = msgErr
 			continue
 		}
@@ -155,11 +158,11 @@ func (d *OutboxDispatcher) DispatchPending(ctx context.Context) (int, error) {
 		enqueueErr := d.enqueueEntry(ctx, msg, entry)
 		if enqueueErr != nil {
 			logger.Warn("outbox enqueue failed: %v", enqueueErr)
-			_ = d.store.MarkFailed(ctx, entry.ID, now.Add(d.retryDelay), enqueueErr.Error())
+			_ = d.store.MarkFailed(ctx, entry.ID, claimed.LeaseToken, now.Add(d.retryDelay), enqueueErr.Error())
 			dispatchErr = enqueueErr
 			continue
 		}
-		if err := d.store.MarkCompleted(ctx, entry.ID); err != nil {
+		if err := d.store.MarkCompleted(ctx, entry.ID, claimed.LeaseToken); err != nil {
 			logger.Error("outbox mark completed failed: %v", err)
 			dispatchErr = err
 			continue

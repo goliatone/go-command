@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,11 +43,18 @@ type OutboxEntry struct {
 	Attempts     int
 	LeaseOwner   string
 	LeaseUntil   time.Time
+	LeaseToken   string
 	RetryAt      time.Time
 	CreatedAt    time.Time
 	ProcessedAt  *time.Time
 	LastError    string
 	Metadata     map[string]any
+}
+
+// ClaimedOutboxEntry carries a claimed entry and proof-of-ownership lease token.
+type ClaimedOutboxEntry struct {
+	OutboxEntry
+	LeaseToken string
 }
 
 // StateStore persists state records with optimistic locking and transactional outbox writes.
@@ -145,8 +153,8 @@ func (s *InMemoryStateStore) ClaimPending(
 	_ context.Context,
 	workerID string,
 	limit int,
-	leaseUntil time.Time,
-) ([]OutboxEntry, error) {
+	leaseTTL time.Duration,
+) ([]ClaimedOutboxEntry, error) {
 	if s == nil {
 		return nil, errors.New("in-memory store not configured")
 	}
@@ -157,28 +165,32 @@ func (s *InMemoryStateStore) ClaimPending(
 	if limit <= 0 {
 		limit = 100
 	}
-	if leaseUntil.IsZero() {
-		leaseUntil = time.Now().UTC().Add(30 * time.Second)
-	} else {
-		leaseUntil = leaseUntil.UTC()
+	if leaseTTL <= 0 {
+		leaseTTL = 30 * time.Second
 	}
 	now := time.Now().UTC()
+	leaseUntil := now.Add(leaseTTL)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	claimed := make([]OutboxEntry, 0, limit)
+	claimed := make([]ClaimedOutboxEntry, 0, limit)
 	for idx := range s.outbox {
 		entry := s.outbox[idx]
 		if !isClaimableOutboxEntry(entry, now) {
 			continue
 		}
+		leaseToken := nextLeaseToken(entry.ID, workerID)
 		entry.Status = "leased"
 		entry.LeaseOwner = workerID
 		entry.LeaseUntil = leaseUntil
+		entry.LeaseToken = leaseToken
 		entry.Attempts++
 		s.outbox[idx] = entry
-		claimed = append(claimed, cloneOutboxEntry(entry))
+		claimed = append(claimed, ClaimedOutboxEntry{
+			OutboxEntry: cloneOutboxEntry(entry),
+			LeaseToken:  leaseToken,
+		})
 		if len(claimed) >= limit {
 			break
 		}
@@ -187,13 +199,17 @@ func (s *InMemoryStateStore) ClaimPending(
 }
 
 // MarkCompleted marks an outbox entry as fully dispatched.
-func (s *InMemoryStateStore) MarkCompleted(_ context.Context, id string) error {
+func (s *InMemoryStateStore) MarkCompleted(_ context.Context, id, leaseToken string) error {
 	if s == nil {
 		return errors.New("in-memory store not configured")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
 	}
 	processedAt := time.Now().UTC()
 
@@ -203,9 +219,13 @@ func (s *InMemoryStateStore) MarkCompleted(_ context.Context, id string) error {
 		if s.outbox[idx].ID != id {
 			continue
 		}
+		if s.outbox[idx].LeaseToken != leaseToken {
+			return fmt.Errorf("outbox %s lease token mismatch", id)
+		}
 		s.outbox[idx].Status = "completed"
 		s.outbox[idx].LeaseOwner = ""
 		s.outbox[idx].LeaseUntil = time.Time{}
+		s.outbox[idx].LeaseToken = ""
 		s.outbox[idx].ProcessedAt = &processedAt
 		s.outbox[idx].RetryAt = time.Time{}
 		s.outbox[idx].LastError = ""
@@ -215,13 +235,17 @@ func (s *InMemoryStateStore) MarkCompleted(_ context.Context, id string) error {
 }
 
 // MarkFailed marks an outbox entry as failed and schedules retry.
-func (s *InMemoryStateStore) MarkFailed(_ context.Context, id string, retryAt time.Time, reason string) error {
+func (s *InMemoryStateStore) MarkFailed(_ context.Context, id, leaseToken string, retryAt time.Time, reason string) error {
 	if s == nil {
 		return errors.New("in-memory store not configured")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
 	}
 	retryAt = retryAt.UTC()
 
@@ -231,12 +255,52 @@ func (s *InMemoryStateStore) MarkFailed(_ context.Context, id string, retryAt ti
 		if s.outbox[idx].ID != id {
 			continue
 		}
+		if s.outbox[idx].LeaseToken != leaseToken {
+			return fmt.Errorf("outbox %s lease token mismatch", id)
+		}
 		s.outbox[idx].Status = "pending"
 		s.outbox[idx].LeaseOwner = ""
 		s.outbox[idx].LeaseUntil = time.Time{}
+		s.outbox[idx].LeaseToken = ""
 		s.outbox[idx].RetryAt = retryAt
 		s.outbox[idx].LastError = strings.TrimSpace(reason)
 		s.outbox[idx].ProcessedAt = nil
+		return nil
+	}
+	return fmt.Errorf("outbox %s not found", id)
+}
+
+// ExtendLease extends a claimed entry lease when token ownership matches.
+func (s *InMemoryStateStore) ExtendLease(_ context.Context, id, leaseToken string, leaseTTL time.Duration) error {
+	if s == nil {
+		return errors.New("in-memory store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	if leaseTTL <= 0 {
+		return errors.New("lease ttl required")
+	}
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for idx := range s.outbox {
+		if s.outbox[idx].ID != id {
+			continue
+		}
+		if s.outbox[idx].LeaseToken != leaseToken {
+			return fmt.Errorf("outbox %s lease token mismatch", id)
+		}
+		if strings.ToLower(strings.TrimSpace(s.outbox[idx].Status)) != "leased" {
+			return fmt.Errorf("outbox %s not leased", id)
+		}
+		s.outbox[idx].LeaseUntil = now.Add(leaseTTL)
 		return nil
 	}
 	return fmt.Errorf("outbox %s not found", id)
@@ -370,8 +434,8 @@ func (s *SQLiteStateStore) ClaimPending(
 	ctx context.Context,
 	workerID string,
 	limit int,
-	leaseUntil time.Time,
-) ([]OutboxEntry, error) {
+	leaseTTL time.Duration,
+) ([]ClaimedOutboxEntry, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("sqlite store not configured")
 	}
@@ -382,12 +446,11 @@ func (s *SQLiteStateStore) ClaimPending(
 	if limit <= 0 {
 		limit = 100
 	}
-	if leaseUntil.IsZero() {
-		leaseUntil = time.Now().UTC().Add(30 * time.Second)
-	} else {
-		leaseUntil = leaseUntil.UTC()
+	if leaseTTL <= 0 {
+		leaseTTL = 30 * time.Second
 	}
 	now := time.Now().UTC()
+	leaseUntil := now.Add(leaseTTL)
 
 	if err := s.ensureSchema(ctx, s.db); err != nil {
 		return nil, err
@@ -434,9 +497,9 @@ func (s *SQLiteStateStore) ClaimPending(
 	}
 	_ = rows.Close()
 
-	claimed := make([]OutboxEntry, 0, len(ids))
+	claimed := make([]ClaimedOutboxEntry, 0, len(ids))
 	update := fmt.Sprintf(`UPDATE %s
-		SET status='leased', lease_owner=?, lease_until=?, attempts=coalesce(attempts, 0)+1
+		SET status='leased', lease_owner=?, lease_until=?, lease_token=?, attempts=coalesce(attempts, 0)+1
 		WHERE id=?
 		AND lower(trim(coalesce(status, ''))) != 'completed'
 		AND (retry_at IS NULL OR retry_at = '' OR retry_at <= ?)
@@ -451,11 +514,13 @@ func (s *SQLiteStateStore) ClaimPending(
 		if id == "" {
 			continue
 		}
+		leaseToken := nextLeaseToken(id, workerID)
 		result, err := tx.ExecContext(
 			ctx,
 			update,
 			workerID,
 			leaseUntil.Format(time.RFC3339Nano),
+			leaseToken,
 			id,
 			now.Format(time.RFC3339Nano),
 			now.Format(time.RFC3339Nano),
@@ -472,7 +537,10 @@ func (s *SQLiteStateStore) ClaimPending(
 			return nil, err
 		}
 		if entry.ID != "" {
-			claimed = append(claimed, entry)
+			claimed = append(claimed, ClaimedOutboxEntry{
+				OutboxEntry: entry,
+				LeaseToken:  leaseToken,
+			})
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -483,7 +551,7 @@ func (s *SQLiteStateStore) ClaimPending(
 }
 
 // MarkCompleted marks one outbox entry as completed.
-func (s *SQLiteStateStore) MarkCompleted(ctx context.Context, id string) error {
+func (s *SQLiteStateStore) MarkCompleted(ctx context.Context, id, leaseToken string) error {
 	if s == nil || s.db == nil {
 		return errors.New("sqlite store not configured")
 	}
@@ -491,13 +559,17 @@ func (s *SQLiteStateStore) MarkCompleted(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("outbox id required")
 	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
 	if err := s.ensureSchema(ctx, s.db); err != nil {
 		return err
 	}
 	q := fmt.Sprintf(`UPDATE %s
-		SET status='completed', lease_owner='', lease_until='', processed_at=?, retry_at='', last_error=''
-		WHERE id=?`, s.outboxTable)
-	result, err := s.db.ExecContext(ctx, q, time.Now().UTC().Format(time.RFC3339Nano), id)
+		SET status='completed', lease_owner='', lease_until='', lease_token='', processed_at=?, retry_at='', last_error=''
+		WHERE id=? AND lease_token=? AND lower(trim(coalesce(status, '')))='leased'`, s.outboxTable)
+	result, err := s.db.ExecContext(ctx, q, time.Now().UTC().Format(time.RFC3339Nano), id, leaseToken)
 	if err != nil {
 		return err
 	}
@@ -509,7 +581,7 @@ func (s *SQLiteStateStore) MarkCompleted(ctx context.Context, id string) error {
 }
 
 // MarkFailed marks one outbox entry as pending retry.
-func (s *SQLiteStateStore) MarkFailed(ctx context.Context, id string, retryAt time.Time, reason string) error {
+func (s *SQLiteStateStore) MarkFailed(ctx context.Context, id, leaseToken string, retryAt time.Time, reason string) error {
 	if s == nil || s.db == nil {
 		return errors.New("sqlite store not configured")
 	}
@@ -517,14 +589,52 @@ func (s *SQLiteStateStore) MarkFailed(ctx context.Context, id string, retryAt ti
 	if id == "" {
 		return errors.New("outbox id required")
 	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
 	retryAt = retryAt.UTC()
 	if err := s.ensureSchema(ctx, s.db); err != nil {
 		return err
 	}
 	q := fmt.Sprintf(`UPDATE %s
-		SET status='pending', lease_owner='', lease_until='', retry_at=?, processed_at=NULL, last_error=?
-		WHERE id=?`, s.outboxTable)
-	result, err := s.db.ExecContext(ctx, q, retryAt.Format(time.RFC3339Nano), strings.TrimSpace(reason), id)
+		SET status='pending', lease_owner='', lease_until='', lease_token='', retry_at=?, processed_at=NULL, last_error=?
+		WHERE id=? AND lease_token=? AND lower(trim(coalesce(status, '')))='leased'`, s.outboxTable)
+	result, err := s.db.ExecContext(ctx, q, retryAt.Format(time.RFC3339Nano), strings.TrimSpace(reason), id, leaseToken)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("outbox %s not found", id)
+	}
+	return nil
+}
+
+// ExtendLease extends lease ownership for one claimed outbox entry.
+func (s *SQLiteStateStore) ExtendLease(ctx context.Context, id, leaseToken string, leaseTTL time.Duration) error {
+	if s == nil || s.db == nil {
+		return errors.New("sqlite store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	if leaseTTL <= 0 {
+		return errors.New("lease ttl required")
+	}
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return err
+	}
+	leaseUntil := time.Now().UTC().Add(leaseTTL).Format(time.RFC3339Nano)
+	q := fmt.Sprintf(`UPDATE %s
+		SET lease_until=?
+		WHERE id=? AND lease_token=? AND lower(trim(coalesce(status, '')))='leased'`, s.outboxTable)
+	result, err := s.db.ExecContext(ctx, q, leaseUntil, id, leaseToken)
 	if err != nil {
 		return err
 	}
@@ -604,8 +714,8 @@ func (s *sqliteTxStore) AppendOutbox(ctx context.Context, entry OutboxEntry) err
 	}
 	q := fmt.Sprintf(`INSERT INTO %s (
 		id, entity_id, transition_id, execution_id, event, topic, effect_type, payload,
-		status, attempts, lease_owner, lease_until, retry_at, processed_at, last_error, metadata, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.parent.outboxTable)
+		status, attempts, lease_owner, lease_until, lease_token, retry_at, processed_at, last_error, metadata, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.parent.outboxTable)
 	_, err = s.tx.ExecContext(ctx, q,
 		entry.ID,
 		entry.EntityID,
@@ -619,6 +729,7 @@ func (s *sqliteTxStore) AppendOutbox(ctx context.Context, entry OutboxEntry) err
 		entry.Attempts,
 		entry.LeaseOwner,
 		formatTimestamp(entry.LeaseUntil),
+		entry.LeaseToken,
 		formatTimestamp(entry.RetryAt),
 		processedAt,
 		entry.LastError,
@@ -723,6 +834,7 @@ func (s *SQLiteStateStore) ensureSchema(ctx context.Context, exec sqlExecContext
 		attempts INTEGER NOT NULL DEFAULT 0,
 		lease_owner TEXT,
 		lease_until TEXT,
+		lease_token TEXT,
 		retry_at TEXT,
 		processed_at TEXT,
 		last_error TEXT,
@@ -742,6 +854,7 @@ func (s *SQLiteStateStore) ensureOutboxColumns(ctx context.Context, exec sqlExec
 		"attempts INTEGER NOT NULL DEFAULT 0",
 		"lease_owner TEXT",
 		"lease_until TEXT",
+		"lease_token TEXT",
 		"retry_at TEXT",
 		"processed_at TEXT",
 		"last_error TEXT",
@@ -755,49 +868,95 @@ func (s *SQLiteStateStore) ensureOutboxColumns(ctx context.Context, exec sqlExec
 	return nil
 }
 
-// RedisStateStore persists state records via a minimal redis client contract.
+// RedisStateStore persists state and outbox records via Redis Lua scripts.
 type RedisStateStore struct {
 	client    RedisClient
 	ttl       time.Duration
 	keyPrefix string
-	mu        sync.Mutex
-	outbox    []OutboxEntry
+
+	scriptMu   sync.Mutex
+	scriptSHAs map[string]string
 }
 
-// RedisClient captures the minimal commands needed from a redis client.
+// RedisClient captures script primitives required for distributed-safe state/outbox operations.
 type RedisClient interface {
-	Get(ctx context.Context, key string) (string, error)
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	EvalSHA(ctx context.Context, sha string, keys []string, args ...any) (any, error)
+	Eval(ctx context.Context, script string, keys []string, args ...any) (any, error)
+	ScriptLoad(ctx context.Context, script string) (string, error)
 }
 
-// NewRedisStateStore builds a store using the provided client and TTL.
+// NewRedisStateStore builds a store using the provided script-capable redis client.
 func NewRedisStateStore(client RedisClient, ttl time.Duration) *RedisStateStore {
-	return &RedisStateStore{client: client, ttl: ttl, keyPrefix: "fsm_state:"}
+	return &RedisStateStore{
+		client:     client,
+		ttl:        ttl,
+		keyPrefix:  "fsm:{fsm}",
+		scriptSHAs: make(map[string]string),
+	}
 }
 
-// Load reads state from redis.
+// Load reads one state record from redis.
 func (s *RedisStateStore) Load(ctx context.Context, id string) (*StateRecord, error) {
 	if s == nil || s.client == nil {
 		return nil, errors.New("redis store not configured")
 	}
-	key := s.redisKey(id)
+	key := s.redisStateKey(id)
 	if key == "" {
 		return nil, nil
 	}
 	return s.loadByKey(ctx, key)
 }
 
-// SaveIfVersion performs optimistic-lock update using read/compare/write semantics.
+// SaveIfVersion performs optimistic compare-and-set using one Lua script.
 func (s *RedisStateStore) SaveIfVersion(ctx context.Context, rec *StateRecord, expectedVersion int) (int, error) {
 	if s == nil || s.client == nil {
 		return 0, errors.New("redis store not configured")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveIfVersionUnlocked(ctx, rec, expectedVersion)
+	rec = cloneStateRecord(rec)
+	if rec == nil {
+		return 0, errors.New("state record required")
+	}
+	rec.EntityID = strings.TrimSpace(rec.EntityID)
+	if rec.EntityID == "" {
+		return 0, errors.New("state record entity id required")
+	}
+	rec.State = normalizeState(rec.State)
+	if rec.State == "" {
+		return 0, errors.New("state record state required")
+	}
+	if expectedVersion < 0 {
+		expectedVersion = 0
+	}
+	if rec.UpdatedAt.IsZero() {
+		rec.UpdatedAt = time.Now().UTC()
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		return 0, err
+	}
+	out, err := s.evalScript(
+		ctx,
+		"save_if_version",
+		redisScriptSaveIfVersion,
+		[]string{s.redisStateKey(rec.EntityID)},
+		expectedVersion,
+		string(payload),
+		int64(s.ttl/time.Millisecond),
+	)
+	if err != nil {
+		if isRedisVersionConflictError(err) {
+			return 0, ErrStateVersionConflict
+		}
+		return 0, err
+	}
+	version, err := redisResultInt(out)
+	if err != nil {
+		return 0, err
+	}
+	return int(version), nil
 }
 
-// RunInTransaction stages changes and commits atomically for the current process.
+// RunInTransaction stages one state write + N outbox writes and commits atomically.
 func (s *RedisStateStore) RunInTransaction(ctx context.Context, fn func(TxStore) error) error {
 	if s == nil || s.client == nil {
 		return errors.New("redis store not configured")
@@ -805,34 +964,20 @@ func (s *RedisStateStore) RunInTransaction(ctx context.Context, fn func(TxStore)
 	if fn == nil {
 		return nil
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx := &redisTxStore{parent: s, writes: make(map[string]*StateRecord)}
+	tx := &redisTxStore{parent: s}
 	if err := fn(tx); err != nil {
 		return err
 	}
-	for key, rec := range tx.writes {
-		payload, err := json.Marshal(rec)
-		if err != nil {
-			return err
-		}
-		if err := s.client.Set(ctx, key, string(payload), s.ttl); err != nil {
-			return err
-		}
-	}
-	s.outbox = append(s.outbox, tx.outbox...)
-	return nil
+	return s.commitTx(ctx, tx)
 }
 
-// ClaimPending claims pending entries with a lease for the worker.
+// ClaimPending claims pending entries with leased ownership tokens.
 func (s *RedisStateStore) ClaimPending(
-	_ context.Context,
+	ctx context.Context,
 	workerID string,
 	limit int,
-	leaseUntil time.Time,
-) ([]OutboxEntry, error) {
+	leaseTTL time.Duration,
+) ([]ClaimedOutboxEntry, error) {
 	if s == nil || s.client == nil {
 		return nil, errors.New("redis store not configured")
 	}
@@ -843,104 +988,174 @@ func (s *RedisStateStore) ClaimPending(
 	if limit <= 0 {
 		limit = 100
 	}
-	if leaseUntil.IsZero() {
-		leaseUntil = time.Now().UTC().Add(30 * time.Second)
-	} else {
-		leaseUntil = leaseUntil.UTC()
+	if leaseTTL <= 0 {
+		leaseTTL = 30 * time.Second
 	}
-	now := time.Now().UTC()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	claimed := make([]OutboxEntry, 0, limit)
-	for idx := range s.outbox {
-		entry := s.outbox[idx]
-		if !isClaimableOutboxEntry(entry, now) {
-			continue
+	out, err := s.evalScript(
+		ctx,
+		"claim_pending",
+		redisScriptClaimPending,
+		[]string{s.redisOutboxPendingKey(), s.redisOutboxCounterKey(), s.redisOutboxKeyPrefix()},
+		int64(leaseTTL/time.Millisecond),
+		workerID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := redisResultList(out)
+	if err != nil {
+		return nil, err
+	}
+	claimed := make([]ClaimedOutboxEntry, 0, len(rows))
+	for _, row := range rows {
+		encoded := redisResultString(row)
+		entry, parseErr := parseClaimedOutboxJSON(encoded)
+		if parseErr != nil {
+			return nil, parseErr
 		}
-		entry.Status = "leased"
-		entry.LeaseOwner = workerID
-		entry.LeaseUntil = leaseUntil
-		entry.Attempts++
-		s.outbox[idx] = entry
-		claimed = append(claimed, cloneOutboxEntry(entry))
-		if len(claimed) >= limit {
-			break
-		}
+		claimed = append(claimed, entry)
 	}
 	return claimed, nil
 }
 
-// MarkCompleted marks one outbox entry as completed.
-func (s *RedisStateStore) MarkCompleted(_ context.Context, id string) error {
-	if s == nil || s.client == nil {
-		return errors.New("redis store not configured")
-	}
+// MarkCompleted marks one claimed entry as completed after verifying lease token ownership.
+func (s *RedisStateStore) MarkCompleted(ctx context.Context, id, leaseToken string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("outbox id required")
 	}
-	processedAt := time.Now().UTC()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for idx := range s.outbox {
-		if s.outbox[idx].ID != id {
-			continue
-		}
-		s.outbox[idx].Status = "completed"
-		s.outbox[idx].LeaseOwner = ""
-		s.outbox[idx].LeaseUntil = time.Time{}
-		s.outbox[idx].ProcessedAt = &processedAt
-		s.outbox[idx].RetryAt = time.Time{}
-		s.outbox[idx].LastError = ""
-		return nil
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
 	}
-	return fmt.Errorf("outbox %s not found", id)
+	out, err := s.evalScript(
+		ctx,
+		"mark_completed",
+		redisScriptMarkCompleted,
+		[]string{s.redisOutboxPendingKey(), s.redisOutboxKeyPrefix()},
+		id,
+		leaseToken,
+	)
+	if err != nil {
+		return err
+	}
+	status, err := redisResultInt(out)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case 1:
+		return nil
+	case -2:
+		return fmt.Errorf("outbox %s lease token mismatch", id)
+	case -3:
+		return fmt.Errorf("outbox %s not leased", id)
+	default:
+		return fmt.Errorf("outbox %s not found", id)
+	}
 }
 
-// MarkFailed marks one outbox entry as pending retry.
-func (s *RedisStateStore) MarkFailed(_ context.Context, id string, retryAt time.Time, reason string) error {
-	if s == nil || s.client == nil {
-		return errors.New("redis store not configured")
-	}
+// MarkFailed marks one claimed entry for retry after verifying lease token ownership.
+func (s *RedisStateStore) MarkFailed(ctx context.Context, id, leaseToken string, retryAt time.Time, reason string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("outbox id required")
 	}
-	retryAt = retryAt.UTC()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for idx := range s.outbox {
-		if s.outbox[idx].ID != id {
-			continue
-		}
-		s.outbox[idx].Status = "pending"
-		s.outbox[idx].LeaseOwner = ""
-		s.outbox[idx].LeaseUntil = time.Time{}
-		s.outbox[idx].RetryAt = retryAt
-		s.outbox[idx].LastError = strings.TrimSpace(reason)
-		s.outbox[idx].ProcessedAt = nil
-		return nil
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
 	}
-	return fmt.Errorf("outbox %s not found", id)
+	retryAt = retryAt.UTC()
+	out, err := s.evalScript(
+		ctx,
+		"mark_failed",
+		redisScriptMarkFailed,
+		[]string{s.redisOutboxPendingKey(), s.redisOutboxKeyPrefix()},
+		id,
+		leaseToken,
+		retryAt.UnixMilli(),
+		strings.TrimSpace(reason),
+	)
+	if err != nil {
+		return err
+	}
+	status, err := redisResultInt(out)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case 1:
+		return nil
+	case -2:
+		return fmt.Errorf("outbox %s lease token mismatch", id)
+	case -3:
+		return fmt.Errorf("outbox %s not leased", id)
+	default:
+		return fmt.Errorf("outbox %s not found", id)
+	}
+}
+
+// ExtendLease extends one claimed entry lease.
+func (s *RedisStateStore) ExtendLease(ctx context.Context, id, leaseToken string, leaseTTL time.Duration) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	if leaseTTL <= 0 {
+		return errors.New("lease ttl required")
+	}
+	out, err := s.evalScript(
+		ctx,
+		"extend_lease",
+		redisScriptExtendLease,
+		[]string{s.redisOutboxKeyPrefix()},
+		id,
+		leaseToken,
+		int64(leaseTTL/time.Millisecond),
+	)
+	if err != nil {
+		return err
+	}
+	status, err := redisResultInt(out)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case 1:
+		return nil
+	case -2:
+		return fmt.Errorf("outbox %s lease token mismatch", id)
+	case -3:
+		return fmt.Errorf("outbox %s not leased", id)
+	default:
+		return fmt.Errorf("outbox %s not found", id)
+	}
 }
 
 type redisTxStore struct {
 	parent *RedisStateStore
-	writes map[string]*StateRecord
+	write  *redisPendingStateWrite
 	outbox []OutboxEntry
 }
 
+type redisPendingStateWrite struct {
+	key             string
+	record          *StateRecord
+	expectedVersion int
+}
+
 func (tx *redisTxStore) Load(ctx context.Context, id string) (*StateRecord, error) {
-	key := tx.parent.redisKey(id)
+	key := tx.parent.redisStateKey(id)
 	if key == "" {
 		return nil, nil
 	}
-	if rec, ok := tx.writes[key]; ok {
-		return cloneStateRecord(rec), nil
+	if tx.write != nil && tx.write.key == key {
+		return cloneStateRecord(tx.write.record), nil
 	}
 	return tx.parent.loadByKey(ctx, key)
 }
@@ -950,13 +1165,16 @@ func (tx *redisTxStore) SaveIfVersion(ctx context.Context, rec *StateRecord, exp
 	if rec == nil {
 		return 0, errors.New("state record required")
 	}
-	key := tx.parent.redisKey(rec.EntityID)
+	key := tx.parent.redisStateKey(rec.EntityID)
 	if key == "" {
 		return 0, errors.New("state record entity id required")
 	}
+	if tx.write != nil && tx.write.key != key {
+		return 0, errors.New("redis tx supports one state record per transaction")
+	}
 	var current *StateRecord
-	if existing, ok := tx.writes[key]; ok {
-		current = cloneStateRecord(existing)
+	if tx.write != nil {
+		current = cloneStateRecord(tx.write.record)
 	} else {
 		loaded, err := tx.parent.loadByKey(ctx, key)
 		if err != nil {
@@ -968,7 +1186,11 @@ func (tx *redisTxStore) SaveIfVersion(ctx context.Context, rec *StateRecord, exp
 	if err != nil {
 		return 0, err
 	}
-	tx.writes[key] = rec
+	tx.write = &redisPendingStateWrite{
+		key:             key,
+		record:          rec,
+		expectedVersion: expectedVersion,
+	}
 	return version, nil
 }
 
@@ -978,11 +1200,12 @@ func (tx *redisTxStore) AppendOutbox(_ context.Context, entry OutboxEntry) error
 }
 
 func (s *RedisStateStore) loadByKey(ctx context.Context, key string) (*StateRecord, error) {
-	value, err := s.client.Get(ctx, key)
+	out, err := s.evalScript(ctx, "load_state", redisScriptLoadState, []string{key})
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(value) == "" {
+	value := strings.TrimSpace(redisResultString(out))
+	if value == "" {
 		return nil, nil
 	}
 	var rec StateRecord
@@ -992,44 +1215,540 @@ func (s *RedisStateStore) loadByKey(ctx context.Context, key string) (*StateReco
 	return &rec, nil
 }
 
-func (s *RedisStateStore) saveIfVersionUnlocked(ctx context.Context, rec *StateRecord, expectedVersion int) (int, error) {
-	rec = cloneStateRecord(rec)
-	if rec == nil {
-		return 0, errors.New("state record required")
+func (s *RedisStateStore) commitTx(ctx context.Context, tx *redisTxStore) error {
+	if tx == nil {
+		return nil
 	}
-	key := s.redisKey(rec.EntityID)
-	if key == "" {
-		return 0, errors.New("state record entity id required")
-	}
-	current, err := s.loadByKey(ctx, key)
+	now := time.Now().UTC()
+	outboxPayload, err := buildRedisOutboxPayload(now, tx.outbox)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	version, err := applyVersionedRecordUpdate(rec, current, expectedVersion)
+	outboxJSON, err := json.Marshal(outboxPayload)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	payload, err := json.Marshal(rec)
+
+	hasState := 0
+	expectedVersion := 0
+	stateKey := s.redisStateKey("__noop__")
+	stateJSON := "{}"
+	if tx.write != nil && tx.write.record != nil {
+		hasState = 1
+		expectedVersion = tx.write.expectedVersion
+		stateKey = tx.write.key
+		payload, err := json.Marshal(tx.write.record)
+		if err != nil {
+			return err
+		}
+		stateJSON = string(payload)
+	}
+
+	_, err = s.evalScript(
+		ctx,
+		"commit_tx",
+		redisScriptCommitTx,
+		[]string{s.redisOutboxPendingKey(), s.redisOutboxCounterKey(), s.redisOutboxKeyPrefix(), stateKey},
+		hasState,
+		expectedVersion,
+		stateJSON,
+		int64(s.ttl/time.Millisecond),
+		now.UnixMilli(),
+		string(outboxJSON),
+	)
 	if err != nil {
-		return 0, err
+		if isRedisVersionConflictError(err) {
+			return ErrStateVersionConflict
+		}
+		return err
 	}
-	if err := s.client.Set(ctx, key, string(payload), s.ttl); err != nil {
-		return 0, err
-	}
-	return version, nil
+	return nil
 }
 
-func (s *RedisStateStore) redisKey(id string) string {
+func (s *RedisStateStore) redisPrefix() string {
+	prefix := strings.TrimSpace(s.keyPrefix)
+	if prefix == "" {
+		prefix = "fsm:{fsm}"
+	}
+	return prefix
+}
+
+func (s *RedisStateStore) redisStateKey(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ""
 	}
-	prefix := s.keyPrefix
-	if prefix == "" {
-		prefix = "fsm_state:"
-	}
-	return prefix + id
+	return fmt.Sprintf("%s:state:%s", s.redisPrefix(), id)
 }
+
+func (s *RedisStateStore) redisOutboxKeyPrefix() string {
+	return fmt.Sprintf("%s:outbox:entry:", s.redisPrefix())
+}
+
+func (s *RedisStateStore) redisOutboxPendingKey() string {
+	return fmt.Sprintf("%s:outbox:pending", s.redisPrefix())
+}
+
+func (s *RedisStateStore) redisOutboxCounterKey() string {
+	return fmt.Sprintf("%s:outbox:counter", s.redisPrefix())
+}
+
+func (s *RedisStateStore) evalScript(
+	ctx context.Context,
+	name string,
+	script string,
+	keys []string,
+	args ...any,
+) (any, error) {
+	if s == nil || s.client == nil {
+		return nil, errors.New("redis store not configured")
+	}
+	sha := s.scriptSHA(name)
+	if sha == "" {
+		loaded, err := s.client.ScriptLoad(ctx, script)
+		if err == nil && strings.TrimSpace(loaded) != "" {
+			sha = strings.TrimSpace(loaded)
+			s.setScriptSHA(name, sha)
+		}
+	}
+	if sha != "" {
+		out, err := s.client.EvalSHA(ctx, sha, keys, args...)
+		if err == nil {
+			return out, nil
+		}
+		if !isRedisNoScriptError(err) {
+			return nil, err
+		}
+	}
+	out, err := s.client.Eval(ctx, script, keys, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *RedisStateStore) scriptSHA(name string) string {
+	if s == nil {
+		return ""
+	}
+	s.scriptMu.Lock()
+	defer s.scriptMu.Unlock()
+	return s.scriptSHAs[name]
+}
+
+func (s *RedisStateStore) setScriptSHA(name, sha string) {
+	if s == nil {
+		return
+	}
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return
+	}
+	s.scriptMu.Lock()
+	defer s.scriptMu.Unlock()
+	if s.scriptSHAs == nil {
+		s.scriptSHAs = make(map[string]string)
+	}
+	s.scriptSHAs[name] = sha
+}
+
+func isRedisNoScriptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(err.Error()), "NOSCRIPT")
+}
+
+func isRedisVersionConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(err.Error()), "FSM_VERSION_CONFLICT")
+}
+
+func redisResultString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func redisResultInt(value any) (int64, error) {
+	switch v := value.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case float64:
+		return int64(v), nil
+	case string:
+		i, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return i, nil
+	case []byte:
+		i, err := strconv.ParseInt(strings.TrimSpace(string(v)), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return i, nil
+	default:
+		return 0, fmt.Errorf("unsupported redis integer result %T", value)
+	}
+}
+
+func redisResultList(value any) ([]any, error) {
+	switch v := value.(type) {
+	case nil:
+		return nil, nil
+	case []any:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("unsupported redis list result %T", value)
+	}
+}
+
+type redisOutboxPayload struct {
+	ID           string `json:"id"`
+	EntityID     string `json:"entity_id"`
+	TransitionID string `json:"transition_id"`
+	ExecutionID  string `json:"execution_id"`
+	Event        string `json:"event"`
+	Topic        string `json:"topic"`
+	EffectType   string `json:"effect_type"`
+	Payload      string `json:"payload"`
+	MetadataJSON string `json:"metadata_json"`
+	CreatedAtMS  int64  `json:"created_at_ms"`
+	RetryAtMS    int64  `json:"retry_at_ms"`
+}
+
+func buildRedisOutboxPayload(now time.Time, entries []OutboxEntry) ([]redisOutboxPayload, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	out := make([]redisOutboxPayload, 0, len(entries))
+	for _, entry := range entries {
+		entry = normalizeOutboxEntry(entry)
+		effectType, payload, err := marshalEffect(entry.Effect)
+		if err != nil {
+			return nil, err
+		}
+		if len(entry.Payload) > 0 {
+			payload = append([]byte(nil), entry.Payload...)
+		}
+		if strings.TrimSpace(entry.Topic) == "" {
+			entry.Topic = inferOutboxTopic(entry.Effect)
+		}
+		metadataJSON, err := json.Marshal(entry.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		createdAt := entry.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		retryAtMS := int64(0)
+		if !entry.RetryAt.IsZero() {
+			retryAtMS = entry.RetryAt.UTC().UnixMilli()
+		}
+		out = append(out, redisOutboxPayload{
+			ID:           entry.ID,
+			EntityID:     entry.EntityID,
+			TransitionID: entry.TransitionID,
+			ExecutionID:  entry.ExecutionID,
+			Event:        entry.Event,
+			Topic:        entry.Topic,
+			EffectType:   effectType,
+			Payload:      string(payload),
+			MetadataJSON: string(metadataJSON),
+			CreatedAtMS:  createdAt.UTC().UnixMilli(),
+			RetryAtMS:    retryAtMS,
+		})
+	}
+	return out, nil
+}
+
+func parseClaimedOutboxJSON(encoded string) (ClaimedOutboxEntry, error) {
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return ClaimedOutboxEntry{}, fmt.Errorf("claimed outbox payload is empty")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(encoded), &raw); err != nil {
+		return ClaimedOutboxEntry{}, err
+	}
+	readString := func(key string) string {
+		if val, ok := raw[key]; ok {
+			return strings.TrimSpace(fmt.Sprintf("%v", val))
+		}
+		return ""
+	}
+	readInt := func(key string) int64 {
+		value := strings.TrimSpace(readString(key))
+		if value == "" {
+			return 0
+		}
+		i, _ := strconv.ParseInt(value, 10, 64)
+		return i
+	}
+
+	entry := OutboxEntry{
+		ID:           readString("id"),
+		EntityID:     readString("entity_id"),
+		TransitionID: readString("transition_id"),
+		ExecutionID:  readString("execution_id"),
+		Event:        normalizeEvent(readString("event")),
+		Topic:        readString("topic"),
+		Status:       strings.ToLower(readString("status")),
+		Attempts:     int(readInt("attempts")),
+		LeaseOwner:   readString("lease_owner"),
+		LeaseToken:   readString("lease_token"),
+		LastError:    readString("last_error"),
+	}
+
+	payload := []byte(readString("payload"))
+	entry.Payload = append([]byte(nil), payload...)
+	if effect, err := unmarshalEffect(readString("effect_type"), payload); err == nil {
+		entry.Effect = effect
+	}
+	if metadata := readString("metadata_json"); metadata != "" {
+		_ = json.Unmarshal([]byte(metadata), &entry.Metadata)
+	}
+	if ms := readInt("created_at_ms"); ms > 0 {
+		entry.CreatedAt = time.UnixMilli(ms).UTC()
+	}
+	if ms := readInt("retry_at_ms"); ms > 0 {
+		entry.RetryAt = time.UnixMilli(ms).UTC()
+	}
+	if ms := readInt("lease_until_ms"); ms > 0 {
+		entry.LeaseUntil = time.UnixMilli(ms).UTC()
+	}
+	if ms := readInt("processed_at_ms"); ms > 0 {
+		ts := time.UnixMilli(ms).UTC()
+		entry.ProcessedAt = &ts
+	}
+
+	return ClaimedOutboxEntry{
+		OutboxEntry: entry,
+		LeaseToken:  entry.LeaseToken,
+	}, nil
+}
+
+const redisScriptLoadState = `
+return redis.call('GET', KEYS[1])
+`
+
+const redisScriptSaveIfVersion = `
+local current = redis.call('GET', KEYS[1])
+local currentVersion = 0
+if current and current ~= '' then
+  local obj = cjson.decode(current)
+  currentVersion = tonumber(obj['Version'] or obj['version'] or 0)
+end
+local expected = tonumber(ARGV[1])
+if currentVersion ~= expected then
+  return {err='FSM_VERSION_CONFLICT'}
+end
+local nextObj = cjson.decode(ARGV[2])
+local nextVersion = currentVersion + 1
+nextObj['Version'] = nextVersion
+local encoded = cjson.encode(nextObj)
+local ttlMs = tonumber(ARGV[3] or '0')
+if ttlMs > 0 then
+  redis.call('PSETEX', KEYS[1], ttlMs, encoded)
+else
+  redis.call('SET', KEYS[1], encoded)
+end
+return tostring(nextVersion)
+`
+
+const redisScriptCommitTx = `
+local hasState = tonumber(ARGV[1] or '0')
+local expected = tonumber(ARGV[2] or '0')
+if hasState == 1 then
+  local current = redis.call('GET', KEYS[4])
+  local currentVersion = 0
+  if current and current ~= '' then
+    local obj = cjson.decode(current)
+    currentVersion = tonumber(obj['Version'] or obj['version'] or 0)
+  end
+  if currentVersion ~= expected then
+    return {err='FSM_VERSION_CONFLICT'}
+  end
+  local stateObj = cjson.decode(ARGV[3])
+  stateObj['Version'] = currentVersion + 1
+  local encoded = cjson.encode(stateObj)
+  local ttlMs = tonumber(ARGV[4] or '0')
+  if ttlMs > 0 then
+    redis.call('PSETEX', KEYS[4], ttlMs, encoded)
+  else
+    redis.call('SET', KEYS[4], encoded)
+  end
+end
+
+local nowMs = tonumber(ARGV[5] or '0')
+local outboxes = cjson.decode(ARGV[6] or '[]')
+for _, entry in ipairs(outboxes) do
+  local id = tostring(entry['id'] or '')
+  if id == '' then
+    id = 'outbox-' .. tostring(redis.call('INCR', KEYS[2]))
+  end
+  local hashKey = KEYS[3] .. id
+  local retryAtMs = tonumber(entry['retry_at_ms'] or '0')
+  local visibility = nowMs
+  if retryAtMs > 0 then
+    visibility = retryAtMs
+  end
+  redis.call('HSET', hashKey,
+    'id', id,
+    'entity_id', tostring(entry['entity_id'] or ''),
+    'transition_id', tostring(entry['transition_id'] or ''),
+    'execution_id', tostring(entry['execution_id'] or ''),
+    'event', tostring(entry['event'] or ''),
+    'topic', tostring(entry['topic'] or ''),
+    'effect_type', tostring(entry['effect_type'] or ''),
+    'payload', tostring(entry['payload'] or ''),
+    'status', 'pending',
+    'attempts', '0',
+    'lease_owner', '',
+    'lease_until_ms', '0',
+    'lease_token', '',
+    'retry_at_ms', tostring(visibility),
+    'processed_at_ms', '0',
+    'last_error', '',
+    'metadata_json', tostring(entry['metadata_json'] or '{}'),
+    'created_at_ms', tostring(entry['created_at_ms'] or nowMs)
+  )
+  redis.call('ZADD', KEYS[1], visibility, id)
+end
+return 'ok'
+`
+
+const redisScriptClaimPending = `
+local leaseTTL = tonumber(ARGV[1] or '0')
+local workerID = tostring(ARGV[2] or '')
+local limit = tonumber(ARGV[3] or '100')
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+local leaseUntilMs = nowMs + leaseTTL
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', nowMs, 'LIMIT', 0, limit)
+local claimed = {}
+for _, id in ipairs(ids) do
+  local hashKey = KEYS[3] .. id
+  if redis.call('EXISTS', hashKey) == 1 then
+    local status = tostring(redis.call('HGET', hashKey, 'status') or 'pending')
+    local leaseUntil = tonumber(redis.call('HGET', hashKey, 'lease_until_ms') or '0')
+    if status ~= 'completed' and (status ~= 'leased' or leaseUntil <= nowMs) then
+      local attempts = tonumber(redis.call('HGET', hashKey, 'attempts') or '0') + 1
+      local token = tostring(redis.call('INCR', KEYS[2])) .. ':' .. id .. ':' .. workerID
+      redis.call('HSET', hashKey,
+        'status', 'leased',
+        'lease_owner', workerID,
+        'lease_until_ms', tostring(leaseUntilMs),
+        'lease_token', token,
+        'attempts', tostring(attempts)
+      )
+      local raw = redis.call('HGETALL', hashKey)
+      local row = {}
+      for i = 1, #raw, 2 do
+        row[raw[i]] = raw[i + 1]
+      end
+      row['id'] = id
+      table.insert(claimed, cjson.encode(row))
+    end
+  end
+end
+return claimed
+`
+
+const redisScriptMarkCompleted = `
+local id = tostring(ARGV[1] or '')
+local token = tostring(ARGV[2] or '')
+local hashKey = KEYS[2] .. id
+if redis.call('EXISTS', hashKey) ~= 1 then
+  return -1
+end
+if tostring(redis.call('HGET', hashKey, 'lease_token') or '') ~= token then
+  return -2
+end
+if tostring(redis.call('HGET', hashKey, 'status') or '') ~= 'leased' then
+  return -3
+end
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('HSET', hashKey,
+  'status', 'completed',
+  'lease_owner', '',
+  'lease_until_ms', '0',
+  'lease_token', '',
+  'retry_at_ms', '0',
+  'processed_at_ms', tostring(nowMs),
+  'last_error', ''
+)
+redis.call('ZREM', KEYS[1], id)
+return 1
+`
+
+const redisScriptMarkFailed = `
+local id = tostring(ARGV[1] or '')
+local token = tostring(ARGV[2] or '')
+local retryAt = tonumber(ARGV[3] or '0')
+local reason = tostring(ARGV[4] or '')
+local hashKey = KEYS[2] .. id
+if redis.call('EXISTS', hashKey) ~= 1 then
+  return -1
+end
+if tostring(redis.call('HGET', hashKey, 'lease_token') or '') ~= token then
+  return -2
+end
+if tostring(redis.call('HGET', hashKey, 'status') or '') ~= 'leased' then
+  return -3
+end
+redis.call('HSET', hashKey,
+  'status', 'pending',
+  'lease_owner', '',
+  'lease_until_ms', '0',
+  'lease_token', '',
+  'retry_at_ms', tostring(retryAt),
+  'processed_at_ms', '0',
+  'last_error', reason
+)
+redis.call('ZADD', KEYS[1], retryAt, id)
+return 1
+`
+
+const redisScriptExtendLease = `
+local id = tostring(ARGV[1] or '')
+local token = tostring(ARGV[2] or '')
+local leaseTTL = tonumber(ARGV[3] or '0')
+local hashKey = KEYS[1] .. id
+if redis.call('EXISTS', hashKey) ~= 1 then
+  return -1
+end
+if tostring(redis.call('HGET', hashKey, 'lease_token') or '') ~= token then
+  return -2
+end
+if tostring(redis.call('HGET', hashKey, 'status') or '') ~= 'leased' then
+  return -3
+end
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('HSET', hashKey, 'lease_until_ms', tostring(nowMs + leaseTTL))
+return 1
+`
 
 func saveIfVersionUnlocked(state map[string]*StateRecord, rec *StateRecord, expectedVersion int) (int, error) {
 	rec = cloneStateRecord(rec)
@@ -1107,6 +1826,7 @@ func normalizeOutboxEntry(entry OutboxEntry) OutboxEntry {
 	entry.Topic = strings.TrimSpace(entry.Topic)
 	entry.Payload = append([]byte(nil), entry.Payload...)
 	entry.LeaseOwner = strings.TrimSpace(entry.LeaseOwner)
+	entry.LeaseToken = strings.TrimSpace(entry.LeaseToken)
 	entry.LastError = strings.TrimSpace(entry.LastError)
 	if entry.Status == "" {
 		entry.Status = "pending"
@@ -1254,7 +1974,7 @@ func loadSQLiteOutboxEntry(ctx context.Context, tx *sql.Tx, table, id string) (O
 	}
 	query := fmt.Sprintf(`SELECT
 		id, entity_id, transition_id, execution_id, event, topic,
-		effect_type, payload, status, attempts, lease_owner, lease_until,
+		effect_type, payload, status, attempts, lease_owner, lease_until, lease_token,
 		retry_at, processed_at, last_error, metadata, created_at
 		FROM %s WHERE id = ?`, table)
 	row := tx.QueryRowContext(ctx, query, id)
@@ -1282,6 +2002,7 @@ func decodeOutboxEntry(row sqlRowScanner) (OutboxEntry, error) {
 		attempts     sql.NullInt64
 		leaseOwner   sql.NullString
 		leaseUntil   sql.NullString
+		leaseToken   sql.NullString
 		retryAt      sql.NullString
 		processedAt  sql.NullString
 		lastError    sql.NullString
@@ -1301,6 +2022,7 @@ func decodeOutboxEntry(row sqlRowScanner) (OutboxEntry, error) {
 		&attempts,
 		&leaseOwner,
 		&leaseUntil,
+		&leaseToken,
 		&retryAt,
 		&processedAt,
 		&lastError,
@@ -1321,6 +2043,7 @@ func decodeOutboxEntry(row sqlRowScanner) (OutboxEntry, error) {
 		Status:       strings.TrimSpace(status.String),
 		Attempts:     int(attempts.Int64),
 		LeaseOwner:   strings.TrimSpace(leaseOwner.String),
+		LeaseToken:   strings.TrimSpace(leaseToken.String),
 		LastError:    strings.TrimSpace(lastError.String),
 	}
 	if ts, ok := parseTimestamp(createdAt.String); ok {
@@ -1375,6 +2098,18 @@ var outboxCounter atomic.Uint64
 func nextOutboxID() string {
 	n := outboxCounter.Add(1)
 	return fmt.Sprintf("outbox-%d-%d", time.Now().UTC().UnixNano(), n)
+}
+
+var leaseCounter atomic.Uint64
+
+func nextLeaseToken(outboxID, workerID string) string {
+	n := leaseCounter.Add(1)
+	return fmt.Sprintf("lease-%d-%s-%s-%d",
+		time.Now().UTC().UnixNano(),
+		strings.TrimSpace(outboxID),
+		strings.TrimSpace(workerID),
+		n,
+	)
 }
 
 type sqlExecContext interface {

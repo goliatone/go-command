@@ -21,7 +21,7 @@ func TestInMemoryOutboxClaimLeaseAndRetry(t *testing.T) {
 		t.Fatalf("append outbox failed: %v", err)
 	}
 
-	claimed, err := store.ClaimPending(context.Background(), "worker-a", 10, time.Now().UTC().Add(time.Minute))
+	claimed, err := store.ClaimPending(context.Background(), "worker-a", 10, time.Minute)
 	if err != nil {
 		t.Fatalf("claim pending failed: %v", err)
 	}
@@ -35,11 +35,11 @@ func TestInMemoryOutboxClaimLeaseAndRetry(t *testing.T) {
 		t.Fatalf("expected attempts=1, got %d", claimed[0].Attempts)
 	}
 
-	retryAt := time.Now().UTC().Add(2 * time.Minute)
-	if err := store.MarkFailed(context.Background(), "outbox-1", retryAt, "boom"); err != nil {
+	retryAt := time.Now().UTC().Add(20 * time.Millisecond)
+	if err := store.MarkFailed(context.Background(), "outbox-1", claimed[0].LeaseToken, retryAt, "boom"); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
-	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Now().UTC().Add(time.Minute))
+	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Minute)
 	if err != nil {
 		t.Fatalf("claim pending after failure: %v", err)
 	}
@@ -47,10 +47,8 @@ func TestInMemoryOutboxClaimLeaseAndRetry(t *testing.T) {
 		t.Fatalf("expected retry gate to block immediate re-claim")
 	}
 
-	if err := store.MarkFailed(context.Background(), "outbox-1", time.Now().UTC().Add(-time.Second), "retry-now"); err != nil {
-		t.Fatalf("mark failed for immediate retry: %v", err)
-	}
-	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Now().UTC().Add(time.Minute))
+	time.Sleep(30 * time.Millisecond)
+	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Minute)
 	if err != nil {
 		t.Fatalf("claim pending after retry window: %v", err)
 	}
@@ -58,10 +56,10 @@ func TestInMemoryOutboxClaimLeaseAndRetry(t *testing.T) {
 		t.Fatalf("expected one claimed retry entry, got %d", len(claimed))
 	}
 
-	if err := store.MarkCompleted(context.Background(), "outbox-1"); err != nil {
+	if err := store.MarkCompleted(context.Background(), "outbox-1", claimed[0].LeaseToken); err != nil {
 		t.Fatalf("mark completed failed: %v", err)
 	}
-	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Now().UTC().Add(time.Minute))
+	claimed, err = store.ClaimPending(context.Background(), "worker-a", 10, time.Minute)
 	if err != nil {
 		t.Fatalf("claim pending after completion: %v", err)
 	}
@@ -142,9 +140,7 @@ func TestOutboxDispatcherEnqueueAndRetry(t *testing.T) {
 		t.Fatalf("expected failed entry to remain pending for retry")
 	}
 
-	if err := store.MarkFailed(context.Background(), "outbox-fail", time.Now().UTC().Add(-time.Millisecond), "retry-now"); err != nil {
-		t.Fatalf("force retry window open: %v", err)
-	}
+	time.Sleep(60 * time.Millisecond)
 	processed, dispatchErr = dispatcher.DispatchPending(context.Background())
 	if dispatchErr != nil {
 		t.Fatalf("second dispatch should succeed: %v", dispatchErr)
