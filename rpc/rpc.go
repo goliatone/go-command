@@ -46,7 +46,7 @@ const (
 	// FailureModeRecover returns registration errors and converts invoke panics to errors.
 	FailureModeRecover
 	// FailureModeLogAndContinue suppresses failures after logging them.
-	// For register, the endpoint is skipped. For invoke panic, call returns (nil, nil).
+	// For register, the endpoint is skipped. For invoke panic, call returns an error.
 	FailureModeLogAndContinue
 )
 
@@ -219,7 +219,7 @@ func (s *Server) Invoke(ctx context.Context, method string, payload any) (any, e
 				case FailureModeLogAndContinue:
 					s.logFailure(event)
 					out = nil
-					err = nil
+					err = panErr
 				case FailureModeRecover:
 					s.logFailure(event)
 					out = nil
