@@ -62,8 +62,12 @@ func (b *ConditionalExecutor[T]) Execute(ctx context.Context, msg T) error {
 			if !ok {
 				return fmt.Errorf("conditional: guard %q not found", branch.Guard)
 			}
-			if guardFn(msg) {
+			err := guardFn(ctx, msg, ExecutionContext{})
+			if err == nil {
 				return branch.Handler(ctx, msg)
+			}
+			if !isGuardRejected(err) {
+				return fmt.Errorf("conditional: guard %q failed: %w", branch.Guard, err)
 			}
 		}
 	}
