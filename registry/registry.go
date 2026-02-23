@@ -57,6 +57,12 @@ func SetCronRegister(fn func(opts command.HandlerConfig, handler any) error) {
 	globalRegistry.SetCronRegister(fn)
 }
 
+func SetRPCRegister(fn func(opts command.RPCConfig, handler any, meta command.CommandMeta) error) {
+	globalStateMu.Lock()
+	defer globalStateMu.Unlock()
+	globalRegistry.SetRPCRegister(fn)
+}
+
 func AddResolver(key string, res command.Resolver) error {
 	globalStateMu.Lock()
 	defer globalStateMu.Unlock()
