@@ -48,8 +48,9 @@ func TestBuildFlowsStateMachineValidation(t *testing.T) {
 				ID:   "sm1",
 				Type: "state_machine",
 				StateMachine: &StateMachineConfig{
-					Entity: "order",
-					States: []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+					Entity:          "order",
+					ExecutionPolicy: ExecutionPolicyLightweight,
+					States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
 					Transitions: []TransitionConfig{
 						{Name: "approve", From: "draft", To: "approved"},
 					},

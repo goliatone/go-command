@@ -142,6 +142,20 @@ func (c *CronOnlyCommand) CronOptions() HandlerConfig {
 	}
 }
 
+type RPCOnlyCommand struct {
+	method string
+}
+
+func (c *RPCOnlyCommand) RPCHandler() any {
+	return c
+}
+
+func (c *RPCOnlyCommand) RPCOptions() RPCConfig {
+	return RPCConfig{
+		Method: c.method,
+	}
+}
+
 type mockCronRegister struct {
 	mu            sync.Mutex
 	registrations []HandlerConfig
@@ -169,6 +183,41 @@ func (m *mockCronRegister) getRegistrations() []HandlerConfig {
 	return result
 }
 
+type rpcRegistration struct {
+	config RPCConfig
+	meta   CommandMeta
+}
+
+type mockRPCRegister struct {
+	mu            sync.Mutex
+	registrations []rpcRegistration
+	shouldError   bool
+}
+
+func (m *mockRPCRegister) register(opts RPCConfig, _ any, meta CommandMeta) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.shouldError {
+		return errors.New("mock rpc registration error")
+	}
+
+	m.registrations = append(m.registrations, rpcRegistration{
+		config: opts,
+		meta:   meta,
+	})
+	return nil
+}
+
+func (m *mockRPCRegister) getRegistrations() []rpcRegistration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]rpcRegistration, len(m.registrations))
+	copy(result, m.registrations)
+	return result
+}
+
 func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
 
@@ -177,6 +226,7 @@ func TestNewRegistry(t *testing.T) {
 	assert.False(t, registry.initialized)
 	assert.Empty(t, registry.cliOptions)
 	assert.Nil(t, registry.cronRegisterFn)
+	assert.Nil(t, registry.rpcRegisterFn)
 }
 
 func TestRegistrySetCronRegister(t *testing.T) {
@@ -203,6 +253,32 @@ func TestRegistrySetCronRegisterAfterInitialize(t *testing.T) {
 	registry.SetCronRegister(NilCronRegister)
 
 	assert.Nil(t, registry.cronRegisterFn)
+}
+
+func TestRegistrySetRPCRegister(t *testing.T) {
+	registry := NewRegistry()
+	mockRPC := &mockRPCRegister{}
+
+	result := registry.SetRPCRegister(mockRPC.register)
+
+	assert.Same(t, registry, result)
+	assert.NotNil(t, registry.rpcRegisterFn)
+}
+
+func TestRegistrySetRPCRegisterAfterInitialize(t *testing.T) {
+	registry := NewRegistry()
+	registry.initializing = true
+
+	registry.SetRPCRegister(NilRPCRegister)
+
+	assert.Nil(t, registry.rpcRegisterFn)
+
+	registry.initializing = false
+	registry.initialized = true
+
+	registry.SetRPCRegister(NilRPCRegister)
+
+	assert.Nil(t, registry.rpcRegisterFn)
 }
 
 func TestRegisterCommand(t *testing.T) {
@@ -390,6 +466,35 @@ func TestRegisterWithCron(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cron scheduler not provided during initialization")
+	})
+}
+
+func TestRegisterWithRPC(t *testing.T) {
+	t.Run("successful registration", func(t *testing.T) {
+		registry := NewRegistry()
+		mockRPC := &mockRPCRegister{}
+		registry.SetRPCRegister(mockRPC.register)
+
+		cmd := &RPCOnlyCommand{method: "fsm.apply_event"}
+		meta := MessageTypeForCommand(cmd)
+
+		err := registry.registerWithRPC(cmd, meta)
+
+		assert.NoError(t, err)
+		rpcRegs := mockRPC.getRegistrations()
+		assert.Len(t, rpcRegs, 1)
+		assert.Equal(t, "fsm.apply_event", rpcRegs[0].config.Method)
+		assert.Equal(t, meta, rpcRegs[0].meta)
+	})
+
+	t.Run("no rpc register function", func(t *testing.T) {
+		registry := NewRegistry()
+		cmd := &RPCOnlyCommand{method: "fsm.apply_event"}
+
+		err := registry.registerWithRPC(cmd, CommandMeta{})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "rpc transport not provided during initialization")
 	})
 }
 
@@ -598,6 +703,7 @@ func TestRegistryResolverState(t *testing.T) {
 	registry := NewRegistry()
 	assert.True(t, registry.HasResolver("cli"))
 	assert.True(t, registry.HasResolver("cron"))
+	assert.True(t, registry.HasResolver("rpc"))
 	assert.False(t, registry.HasResolver("missing"))
 
 	require.NoError(t, registry.RegisterCommand(&struct{}{}))
