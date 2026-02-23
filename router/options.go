@@ -19,3 +19,9 @@ func WithMatcher(matcher func(pattern, topic string) bool) Option {
 		m.routeMatch = matcher
 	}
 }
+
+func WithMatchStrategy(strategy MatchStrategy) Option {
+	return func(m *Mux) {
+		m.strategy = strategy
+	}
+}
