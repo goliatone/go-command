@@ -105,3 +105,56 @@ func TestMux_ConcurrentAccess(t *testing.T) {
 	assert.Len(t, matched, 100)
 	assert.Equal(t, handler, matched[0].Handler)
 }
+
+func TestMux_GetAllMatches(t *testing.T) {
+	mux := NewMux(WithMatcher(func(pattern, topic string) bool {
+		return strings.HasPrefix(topic, pattern)
+	}))
+
+	h1 := "h1"
+	h2 := "h2"
+	h3 := "h3"
+	mux.Add("orders", h1)
+	mux.Add("orders.created", h2)
+	mux.Add("orders.created.eu", h3)
+
+	matched := mux.GetAllMatches("orders.created.eu")
+	assert.Len(t, matched, 3)
+	assert.Equal(t, "orders.created.eu", matched[0].Pattern())
+	assert.Equal(t, "orders", matched[1].Pattern())
+	assert.Equal(t, "orders.created", matched[2].Pattern())
+}
+
+func TestMux_GetWithMatchStrategyAll(t *testing.T) {
+	mux := NewMux(
+		WithMatcher(func(pattern, topic string) bool { return strings.HasPrefix(topic, pattern) }),
+		WithMatchStrategy(MatchStrategyAll),
+	)
+
+	mux.Add("orders", "h1")
+	mux.Add("orders.created", "h2")
+
+	matched := mux.Get("orders.created")
+	assert.Len(t, matched, 2)
+	assert.Equal(t, "orders.created", matched[0].Pattern())
+	assert.Equal(t, "orders", matched[1].Pattern())
+}
+
+func TestMux_GetWithMatchStrategySpecificity(t *testing.T) {
+	mux := NewMux(
+		WithMatcher(MakeRouteMatcher(MakeRouteMatcherOptions{
+			Separator: ".",
+		})),
+		WithMatchStrategy(MatchStrategySpecificity),
+	)
+
+	mux.Add("orders.#", "broad")
+	mux.Add("orders.*.created", "specific")
+	mux.Add("orders.us.created", "exact")
+
+	matched := mux.Get("orders.us.created")
+	assert.Len(t, matched, 3)
+	assert.Equal(t, "orders.us.created", matched[0].Pattern())
+	assert.Equal(t, "orders.*.created", matched[1].Pattern())
+	assert.Equal(t, "orders.#", matched[2].Pattern())
+}

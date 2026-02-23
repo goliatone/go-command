@@ -2,7 +2,6 @@ package cron
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,173 +9,153 @@ import (
 	"github.com/goliatone/go-command"
 )
 
-// Test message type
-type TestMessage struct{}
+func TestScheduleAfterCompletesAndReportsStatus(t *testing.T) {
+	scheduler := NewScheduler()
+	var count atomic.Int32
 
-func (m TestMessage) Type() string { return "test.message" }
+	handle, err := scheduler.ScheduleAfter(50*time.Millisecond, command.HandlerConfig{}, func() {
+		count.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("schedule after: %v", err)
+	}
 
-// Test command handler
-type TestCommandHandler struct {
-	executionCount int
-	mu             sync.Mutex
+	select {
+	case <-handle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected handle completion")
+	}
+
+	if got := count.Load(); got != 1 {
+		t.Fatalf("expected one execution, got %d", got)
+	}
+	if status := handle.Status(); status != ScheduleStatusCompleted {
+		t.Fatalf("expected completed status, got %s", status)
+	}
 }
 
-func (h *TestCommandHandler) Execute(ctx context.Context, msg command.Message) error {
-	h.mu.Lock()
-	h.executionCount++
-	h.mu.Unlock()
-	return nil
+func TestScheduleAtCancelPreventsExecution(t *testing.T) {
+	scheduler := NewScheduler()
+	var count atomic.Int32
+
+	handle, err := scheduler.ScheduleAt(time.Now().Add(250*time.Millisecond), command.HandlerConfig{}, func() {
+		count.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("schedule at: %v", err)
+	}
+
+	handle.Cancel()
+
+	select {
+	case <-handle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected canceled handle to close done channel")
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	if got := count.Load(); got != 0 {
+		t.Fatalf("expected zero executions after cancel, got %d", got)
+	}
+	if status := handle.Status(); status != ScheduleStatusCanceled {
+		t.Fatalf("expected canceled status, got %s", status)
+	}
 }
 
-func (h *TestCommandHandler) GetExecutionCount() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.executionCount
+func TestScheduleCronCancelableHandle(t *testing.T) {
+	scheduler := NewScheduler()
+	var count atomic.Int32
+
+	handle, err := scheduler.ScheduleCron(command.HandlerConfig{
+		Expression: "@every 1s",
+	}, func() {
+		count.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("schedule cron: %v", err)
+	}
+
+	if err := scheduler.Start(context.Background()); err != nil {
+		t.Fatalf("scheduler start: %v", err)
+	}
+	defer scheduler.Stop(context.Background())
+
+	deadline := time.After(2500 * time.Millisecond)
+	for count.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("expected at least one cron run")
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	handle.Cancel()
+	select {
+	case <-handle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected cancel to close handle done channel")
+	}
+
+	if status := handle.Status(); status != ScheduleStatusCanceled {
+		t.Fatalf("expected canceled status, got %s", status)
+	}
 }
 
-// Test query handler
-type TestQueryHandler struct {
-	queryCount int
-	mu         sync.Mutex
+func TestSchedulerStopMarksHandleStopped(t *testing.T) {
+	scheduler := NewScheduler()
+	handle, err := scheduler.ScheduleCron(command.HandlerConfig{
+		Expression: "@every 5s",
+	}, func() {})
+	if err != nil {
+		t.Fatalf("schedule cron: %v", err)
+	}
+
+	if err := scheduler.Start(context.Background()); err != nil {
+		t.Fatalf("scheduler start: %v", err)
+	}
+
+	if err := scheduler.Stop(context.Background()); err != nil {
+		t.Fatalf("scheduler stop: %v", err)
+	}
+
+	select {
+	case <-handle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected handle done on stop")
+	}
+
+	if status := handle.Status(); status != ScheduleStatusStopped {
+		t.Fatalf("expected stopped status, got %s", status)
+	}
 }
 
-func (h *TestQueryHandler) Query(ctx context.Context, msg command.Message) (any, error) {
-	h.mu.Lock()
-	h.queryCount++
-	count := h.queryCount
-	h.mu.Unlock()
-	return count, nil
+func TestAddHandlerCompatibility(t *testing.T) {
+	scheduler := NewScheduler()
+	sub, err := scheduler.AddHandler(command.HandlerConfig{
+		Expression: "@every 10s",
+	}, func() {})
+	if err != nil {
+		t.Fatalf("add handler: %v", err)
+	}
+
+	handle, ok := sub.(Handle)
+	if !ok {
+		t.Fatal("expected AddHandler subscription to implement Handle")
+	}
+	if handle.ID() == 0 {
+		t.Fatal("expected non-zero handle id")
+	}
 }
 
-func (h *TestQueryHandler) GetQueryCount() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.queryCount
-}
+func TestScheduleCronValidation(t *testing.T) {
+	scheduler := NewScheduler()
 
-func TestCronScheduler(t *testing.T) {
-	t.Run("command handler execution", func(t *testing.T) {
-		scheduler := NewScheduler()
-		handler := &TestCommandHandler{}
+	if _, err := scheduler.ScheduleCron(command.HandlerConfig{}, func() {}); err == nil {
+		t.Fatal("expected empty expression error")
+	}
 
-		// Schedule job to run every second
-		entryID, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "@every 1s",
-		}, func() {
-			handler.Execute(context.Background(), nil)
-		})
-
-		if err != nil {
-			t.Fatalf("Failed to add handler: %v", err)
-		}
-
-		ctx := context.Background()
-		scheduler.Start(ctx)
-		time.Sleep(1500 * time.Millisecond)
-		scheduler.Stop(ctx)
-
-		if count := handler.GetExecutionCount(); count == 0 {
-			t.Error("Command handler was not executed")
-		}
-		entryID.Unsubscribe()
-	})
-
-	t.Run("command handler execution", func(t *testing.T) {
-		scheduler := NewScheduler(WithParser(SecondsParser))
-		handler := &TestCommandHandler{}
-
-		// Schedule job to run every second
-		entryID, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "* * * * * *",
-		}, func() {
-			handler.Execute(context.Background(), nil)
-		})
-
-		if err != nil {
-			t.Fatalf("Failed to add handler: %v", err)
-		}
-
-		ctx := context.Background()
-		scheduler.Start(ctx)
-		time.Sleep(1500 * time.Millisecond)
-		scheduler.Stop(ctx)
-
-		if count := handler.GetExecutionCount(); count == 0 {
-			t.Error("Command handler was not executed")
-		}
-
-		entryID.Unsubscribe()
-	})
-
-	t.Run("function handler execution", func(t *testing.T) {
-		var count atomic.Int32
-		scheduler := NewScheduler()
-		handler := func() {
-			count.Add(1)
-		}
-
-		// Schedule job to run every second
-		entryID, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "@every 1s",
-		}, handler)
-
-		if err != nil {
-			t.Fatalf("Failed to add handler: %v", err)
-		}
-
-		ctx := context.Background()
-		scheduler.Start(ctx)
-		// Wait for at least one execution
-		time.Sleep(2 * time.Second)
-		scheduler.Stop(ctx)
-
-		if count.Load() == 0 {
-			t.Error("Query handler was not executed")
-		}
-
-		entryID.Unsubscribe()
-	})
-
-	t.Run("invalid cron expression", func(t *testing.T) {
-		scheduler := NewScheduler()
-		handler := &TestCommandHandler{}
-
-		_, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "invalid",
-		}, func() {
-			handler.Execute(context.Background(), nil)
-		})
-
-		if err == nil {
-			t.Error("Expected error for invalid cron expression")
-		}
-	})
-
-	t.Run("empty cron expression", func(t *testing.T) {
-		scheduler := NewScheduler()
-		handler := &TestCommandHandler{}
-
-		_, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "",
-		}, func() {
-			handler.Execute(context.Background(), nil)
-		})
-
-		if err == nil {
-			t.Error("Expected error for empty cron expression")
-		}
-	})
-
-	t.Run("invalid handler type", func(t *testing.T) {
-		scheduler := NewScheduler()
-		handler := struct{}{}
-
-		_, err := scheduler.AddHandler(command.HandlerConfig{
-			Expression: "* * * * *",
-		}, handler)
-
-		if err == nil {
-			t.Error("Expected error for invalid handler type")
-		}
-	})
+	if _, err := scheduler.ScheduleCron(command.HandlerConfig{Expression: "@every 1s"}, struct{}{}); err == nil {
+		t.Fatal("expected unsupported handler error")
+	}
 }

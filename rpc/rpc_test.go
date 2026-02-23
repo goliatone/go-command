@@ -321,7 +321,7 @@ func TestServerFailureModeLogAndContinueSkipsInvalidRegistration(t *testing.T) {
 	assert.Error(t, events[0].Err)
 }
 
-func TestServerFailureModeLogAndContinueSuppressesInvokePanic(t *testing.T) {
+func TestServerFailureModeLogAndContinueReturnsInvokePanicError(t *testing.T) {
 	var events []FailureEvent
 	s := NewServer(
 		WithFailureMode(FailureModeLogAndContinue),
@@ -335,11 +335,23 @@ func TestServerFailureModeLogAndContinueSuppressesInvokePanic(t *testing.T) {
 	require.NoError(t, s.Register(command.RPCConfig{Method: "panic.log"}, handler, command.CommandMeta{}))
 
 	out, err := s.Invoke(context.Background(), "panic.log", testMessage{})
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.Nil(t, out)
+	assert.Contains(t, err.Error(), "panic")
 	require.Len(t, events, 1)
 	assert.Equal(t, FailureStageInvoke, events[0].Stage)
 	assert.Equal(t, "panic.log", events[0].Method)
 	assert.Error(t, events[0].Err)
 	assert.Equal(t, "boom", events[0].Panic)
+}
+
+func TestServerRegisterRejectsFunctionWithInvalidContext(t *testing.T) {
+	s := NewServer()
+	invalidFn := func(_ string, _ testMessage) error {
+		return nil
+	}
+
+	err := s.Register(command.RPCConfig{Method: "bad.context"}, invalidFn, command.CommandMeta{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "context.Context")
 }

@@ -143,7 +143,7 @@ func (c *CronOnlyCommand) CronOptions() HandlerConfig {
 }
 
 type RPCOnlyCommand struct {
-	method string
+	config RPCConfig
 }
 
 func (c *RPCOnlyCommand) RPCHandler() any {
@@ -151,9 +151,7 @@ func (c *RPCOnlyCommand) RPCHandler() any {
 }
 
 func (c *RPCOnlyCommand) RPCOptions() RPCConfig {
-	return RPCConfig{
-		Method: c.method,
-	}
+	return c.config
 }
 
 type mockCronRegister struct {
@@ -475,7 +473,13 @@ func TestRegisterWithRPC(t *testing.T) {
 		mockRPC := &mockRPCRegister{}
 		registry.SetRPCRegister(mockRPC.register)
 
-		cmd := &RPCOnlyCommand{method: "fsm.apply_event"}
+		cmd := &RPCOnlyCommand{config: RPCConfig{
+			Method:      "fsm.apply_event",
+			Streaming:   true,
+			Idempotent:  true,
+			Permissions: []string{"fsm:write"},
+			Roles:       []string{"admin"},
+		}}
 		meta := MessageTypeForCommand(cmd)
 
 		err := registry.registerWithRPC(cmd, meta)
@@ -484,12 +488,16 @@ func TestRegisterWithRPC(t *testing.T) {
 		rpcRegs := mockRPC.getRegistrations()
 		assert.Len(t, rpcRegs, 1)
 		assert.Equal(t, "fsm.apply_event", rpcRegs[0].config.Method)
+		assert.True(t, rpcRegs[0].config.Streaming)
+		assert.True(t, rpcRegs[0].config.Idempotent)
+		assert.Equal(t, []string{"fsm:write"}, rpcRegs[0].config.Permissions)
+		assert.Equal(t, []string{"admin"}, rpcRegs[0].config.Roles)
 		assert.Equal(t, meta, rpcRegs[0].meta)
 	})
 
 	t.Run("no rpc register function", func(t *testing.T) {
 		registry := NewRegistry()
-		cmd := &RPCOnlyCommand{method: "fsm.apply_event"}
+		cmd := &RPCOnlyCommand{config: RPCConfig{Method: "fsm.apply_event"}}
 
 		err := registry.registerWithRPC(cmd, CommandMeta{})
 
