@@ -365,6 +365,176 @@ func (s *SQLiteStateStore) RunInTransaction(ctx context.Context, fn func(TxStore
 	return tx.Commit()
 }
 
+// ClaimPending claims pending outbox entries with a worker lease.
+func (s *SQLiteStateStore) ClaimPending(
+	ctx context.Context,
+	workerID string,
+	limit int,
+	leaseUntil time.Time,
+) ([]OutboxEntry, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("sqlite store not configured")
+	}
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return nil, errors.New("worker id required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if leaseUntil.IsZero() {
+		leaseUntil = time.Now().UTC().Add(30 * time.Second)
+	} else {
+		leaseUntil = leaseUntil.UTC()
+	}
+	now := time.Now().UTC()
+
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	query := fmt.Sprintf(`SELECT id FROM %s
+		WHERE lower(trim(coalesce(status, ''))) != 'completed'
+		AND (retry_at IS NULL OR retry_at = '' OR retry_at <= ?)
+		AND (
+			lower(trim(coalesce(status, ''))) IN ('', 'pending', 'failed')
+			OR (
+				lower(trim(coalesce(status, ''))) = 'leased'
+				AND (lease_until IS NULL OR lease_until = '' OR lease_until <= ?)
+			)
+		)
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?`, s.outboxTable)
+	rows, err := tx.QueryContext(ctx, query, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), limit)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, strings.TrimSpace(id))
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	claimed := make([]OutboxEntry, 0, len(ids))
+	update := fmt.Sprintf(`UPDATE %s
+		SET status='leased', lease_owner=?, lease_until=?, attempts=coalesce(attempts, 0)+1
+		WHERE id=?
+		AND lower(trim(coalesce(status, ''))) != 'completed'
+		AND (retry_at IS NULL OR retry_at = '' OR retry_at <= ?)
+		AND (
+			lower(trim(coalesce(status, ''))) IN ('', 'pending', 'failed')
+			OR (
+				lower(trim(coalesce(status, ''))) = 'leased'
+				AND (lease_until IS NULL OR lease_until = '' OR lease_until <= ?)
+			)
+		)`, s.outboxTable)
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		result, err := tx.ExecContext(
+			ctx,
+			update,
+			workerID,
+			leaseUntil.Format(time.RFC3339Nano),
+			id,
+			now.Format(time.RFC3339Nano),
+			now.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			return nil, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		entry, err := loadSQLiteOutboxEntry(ctx, tx, s.outboxTable, id)
+		if err != nil {
+			return nil, err
+		}
+		if entry.ID != "" {
+			claimed = append(claimed, entry)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	tx = nil
+	return claimed, nil
+}
+
+// MarkCompleted marks one outbox entry as completed.
+func (s *SQLiteStateStore) MarkCompleted(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return errors.New("sqlite store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return err
+	}
+	q := fmt.Sprintf(`UPDATE %s
+		SET status='completed', lease_owner='', lease_until='', processed_at=?, retry_at='', last_error=''
+		WHERE id=?`, s.outboxTable)
+	result, err := s.db.ExecContext(ctx, q, time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("outbox %s not found", id)
+	}
+	return nil
+}
+
+// MarkFailed marks one outbox entry as pending retry.
+func (s *SQLiteStateStore) MarkFailed(ctx context.Context, id string, retryAt time.Time, reason string) error {
+	if s == nil || s.db == nil {
+		return errors.New("sqlite store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	retryAt = retryAt.UTC()
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return err
+	}
+	q := fmt.Sprintf(`UPDATE %s
+		SET status='pending', lease_owner='', lease_until='', retry_at=?, processed_at=NULL, last_error=?
+		WHERE id=?`, s.outboxTable)
+	result, err := s.db.ExecContext(ctx, q, retryAt.Format(time.RFC3339Nano), strings.TrimSpace(reason), id)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("outbox %s not found", id)
+	}
+	return nil
+}
+
 type sqliteTxStore struct {
 	parent *SQLiteStateStore
 	tx     *sql.Tx
@@ -428,15 +598,30 @@ func (s *sqliteTxStore) AppendOutbox(ctx context.Context, entry OutboxEntry) err
 	if err != nil {
 		return err
 	}
-	q := fmt.Sprintf(`INSERT INTO %s (id, entity_id, transition_id, event, effect_type, payload, status, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.parent.outboxTable)
+	var processedAt any
+	if entry.ProcessedAt != nil {
+		processedAt = entry.ProcessedAt.UTC().Format(time.RFC3339Nano)
+	}
+	q := fmt.Sprintf(`INSERT INTO %s (
+		id, entity_id, transition_id, execution_id, event, topic, effect_type, payload,
+		status, attempts, lease_owner, lease_until, retry_at, processed_at, last_error, metadata, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.parent.outboxTable)
 	_, err = s.tx.ExecContext(ctx, q,
 		entry.ID,
 		entry.EntityID,
 		entry.TransitionID,
+		entry.ExecutionID,
 		entry.Event,
+		entry.Topic,
 		effectType,
 		string(payloadJSON),
 		entry.Status,
+		entry.Attempts,
+		entry.LeaseOwner,
+		formatTimestamp(entry.LeaseUntil),
+		formatTimestamp(entry.RetryAt),
+		processedAt,
+		entry.LastError,
 		string(metadataJSON),
 		entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	)
@@ -529,15 +714,43 @@ func (s *SQLiteStateStore) ensureSchema(ctx context.Context, exec sqlExecContext
 		id TEXT PRIMARY KEY,
 		entity_id TEXT NOT NULL,
 		transition_id TEXT,
+		execution_id TEXT,
 		event TEXT,
+		topic TEXT,
 		effect_type TEXT NOT NULL,
 		payload TEXT NOT NULL,
 		status TEXT NOT NULL,
+		attempts INTEGER NOT NULL DEFAULT 0,
+		lease_owner TEXT,
+		lease_until TEXT,
+		retry_at TEXT,
+		processed_at TEXT,
+		last_error TEXT,
 		metadata TEXT,
 		created_at TEXT NOT NULL
 	)`, s.outboxTable)
 	if _, err := exec.ExecContext(ctx, outboxDDL); err != nil {
 		return err
+	}
+	return s.ensureOutboxColumns(ctx, exec)
+}
+
+func (s *SQLiteStateStore) ensureOutboxColumns(ctx context.Context, exec sqlExecContext) error {
+	columns := []string{
+		"execution_id TEXT",
+		"topic TEXT",
+		"attempts INTEGER NOT NULL DEFAULT 0",
+		"lease_owner TEXT",
+		"lease_until TEXT",
+		"retry_at TEXT",
+		"processed_at TEXT",
+		"last_error TEXT",
+	}
+	for _, column := range columns {
+		alter := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s`, s.outboxTable, column)
+		if _, err := exec.ExecContext(ctx, alter); err != nil && !isSQLiteDuplicateColumnError(err) {
+			return err
+		}
 	}
 	return nil
 }
@@ -611,6 +824,108 @@ func (s *RedisStateStore) RunInTransaction(ctx context.Context, fn func(TxStore)
 	}
 	s.outbox = append(s.outbox, tx.outbox...)
 	return nil
+}
+
+// ClaimPending claims pending entries with a lease for the worker.
+func (s *RedisStateStore) ClaimPending(
+	_ context.Context,
+	workerID string,
+	limit int,
+	leaseUntil time.Time,
+) ([]OutboxEntry, error) {
+	if s == nil || s.client == nil {
+		return nil, errors.New("redis store not configured")
+	}
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return nil, errors.New("worker id required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if leaseUntil.IsZero() {
+		leaseUntil = time.Now().UTC().Add(30 * time.Second)
+	} else {
+		leaseUntil = leaseUntil.UTC()
+	}
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	claimed := make([]OutboxEntry, 0, limit)
+	for idx := range s.outbox {
+		entry := s.outbox[idx]
+		if !isClaimableOutboxEntry(entry, now) {
+			continue
+		}
+		entry.Status = "leased"
+		entry.LeaseOwner = workerID
+		entry.LeaseUntil = leaseUntil
+		entry.Attempts++
+		s.outbox[idx] = entry
+		claimed = append(claimed, cloneOutboxEntry(entry))
+		if len(claimed) >= limit {
+			break
+		}
+	}
+	return claimed, nil
+}
+
+// MarkCompleted marks one outbox entry as completed.
+func (s *RedisStateStore) MarkCompleted(_ context.Context, id string) error {
+	if s == nil || s.client == nil {
+		return errors.New("redis store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	processedAt := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for idx := range s.outbox {
+		if s.outbox[idx].ID != id {
+			continue
+		}
+		s.outbox[idx].Status = "completed"
+		s.outbox[idx].LeaseOwner = ""
+		s.outbox[idx].LeaseUntil = time.Time{}
+		s.outbox[idx].ProcessedAt = &processedAt
+		s.outbox[idx].RetryAt = time.Time{}
+		s.outbox[idx].LastError = ""
+		return nil
+	}
+	return fmt.Errorf("outbox %s not found", id)
+}
+
+// MarkFailed marks one outbox entry as pending retry.
+func (s *RedisStateStore) MarkFailed(_ context.Context, id string, retryAt time.Time, reason string) error {
+	if s == nil || s.client == nil {
+		return errors.New("redis store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	retryAt = retryAt.UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for idx := range s.outbox {
+		if s.outbox[idx].ID != id {
+			continue
+		}
+		s.outbox[idx].Status = "pending"
+		s.outbox[idx].LeaseOwner = ""
+		s.outbox[idx].LeaseUntil = time.Time{}
+		s.outbox[idx].RetryAt = retryAt
+		s.outbox[idx].LastError = strings.TrimSpace(reason)
+		s.outbox[idx].ProcessedAt = nil
+		return nil
+	}
+	return fmt.Errorf("outbox %s not found", id)
 }
 
 type redisTxStore struct {
@@ -902,6 +1217,157 @@ func marshalEffect(effect Effect) (string, []byte, error) {
 		b, err := json.Marshal(v)
 		return "unknown", b, err
 	}
+}
+
+func unmarshalEffect(effectType string, payload []byte) (Effect, error) {
+	kind := strings.ToLower(strings.TrimSpace(effectType))
+	if len(payload) == 0 {
+		payload = []byte("null")
+	}
+	switch kind {
+	case "", "none":
+		return nil, nil
+	case "command":
+		var effect CommandEffect
+		if err := json.Unmarshal(payload, &effect); err != nil {
+			return nil, err
+		}
+		return effect, nil
+	case "event":
+		var effect EmitEvent
+		if err := json.Unmarshal(payload, &effect); err != nil {
+			return nil, err
+		}
+		return effect, nil
+	default:
+		var raw any
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			return nil, err
+		}
+		return raw, nil
+	}
+}
+
+func loadSQLiteOutboxEntry(ctx context.Context, tx *sql.Tx, table, id string) (OutboxEntry, error) {
+	if tx == nil {
+		return OutboxEntry{}, errors.New("sqlite tx store not configured")
+	}
+	query := fmt.Sprintf(`SELECT
+		id, entity_id, transition_id, execution_id, event, topic,
+		effect_type, payload, status, attempts, lease_owner, lease_until,
+		retry_at, processed_at, last_error, metadata, created_at
+		FROM %s WHERE id = ?`, table)
+	row := tx.QueryRowContext(ctx, query, id)
+	entry, err := decodeOutboxEntry(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OutboxEntry{}, nil
+	}
+	return entry, err
+}
+
+type sqlRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func decodeOutboxEntry(row sqlRowScanner) (OutboxEntry, error) {
+	var (
+		id, entityID string
+		effectType   string
+		payloadJSON  string
+		transitionID sql.NullString
+		executionID  sql.NullString
+		event        sql.NullString
+		topic        sql.NullString
+		status       sql.NullString
+		attempts     sql.NullInt64
+		leaseOwner   sql.NullString
+		leaseUntil   sql.NullString
+		retryAt      sql.NullString
+		processedAt  sql.NullString
+		lastError    sql.NullString
+		metadataJSON sql.NullString
+		createdAt    sql.NullString
+	)
+	if err := row.Scan(
+		&id,
+		&entityID,
+		&transitionID,
+		&executionID,
+		&event,
+		&topic,
+		&effectType,
+		&payloadJSON,
+		&status,
+		&attempts,
+		&leaseOwner,
+		&leaseUntil,
+		&retryAt,
+		&processedAt,
+		&lastError,
+		&metadataJSON,
+		&createdAt,
+	); err != nil {
+		return OutboxEntry{}, err
+	}
+
+	entry := OutboxEntry{
+		ID:           strings.TrimSpace(id),
+		EntityID:     strings.TrimSpace(entityID),
+		TransitionID: strings.TrimSpace(transitionID.String),
+		ExecutionID:  strings.TrimSpace(executionID.String),
+		Event:        normalizeEvent(event.String),
+		Topic:        strings.TrimSpace(topic.String),
+		Payload:      []byte(payloadJSON),
+		Status:       strings.TrimSpace(status.String),
+		Attempts:     int(attempts.Int64),
+		LeaseOwner:   strings.TrimSpace(leaseOwner.String),
+		LastError:    strings.TrimSpace(lastError.String),
+	}
+	if ts, ok := parseTimestamp(createdAt.String); ok {
+		entry.CreatedAt = ts
+	}
+	if ts, ok := parseTimestamp(leaseUntil.String); ok {
+		entry.LeaseUntil = ts
+	}
+	if ts, ok := parseTimestamp(retryAt.String); ok {
+		entry.RetryAt = ts
+	}
+	if ts, ok := parseTimestamp(processedAt.String); ok {
+		entry.ProcessedAt = &ts
+	}
+	if strings.TrimSpace(metadataJSON.String) != "" {
+		_ = json.Unmarshal([]byte(metadataJSON.String), &entry.Metadata)
+	}
+	if effect, err := unmarshalEffect(effectType, entry.Payload); err == nil {
+		entry.Effect = effect
+	}
+	return entry, nil
+}
+
+func parseTimestamp(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts.UTC(), true
+}
+
+func formatTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
 
 var outboxCounter atomic.Uint64

@@ -18,6 +18,7 @@ const (
 	ExecutionStatePaused    = "paused"
 	ExecutionStateStopped   = "stopped"
 	ExecutionStateCompleted = "completed"
+	ExecutionStateDegraded  = "degraded"
 	ExecutionStateFailed    = "failed"
 )
 

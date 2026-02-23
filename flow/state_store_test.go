@@ -5,6 +5,13 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
+)
+
+var (
+	_ OutboxStore = (*InMemoryStateStore)(nil)
+	_ OutboxStore = (*SQLiteStateStore)(nil)
+	_ OutboxStore = (*RedisStateStore)(nil)
 )
 
 func TestInMemoryStateStoreSaveIfVersionAndConflict(t *testing.T) {
@@ -94,4 +101,93 @@ func TestInMemoryStateStoreConcurrentCompareAndSet(t *testing.T) {
 	if success != 1 || conflicts != 1 {
 		t.Fatalf("expected one success and one conflict, success=%d conflicts=%d", success, conflicts)
 	}
+}
+
+func TestRedisStateStoreOutboxClaimLeaseAndRetry(t *testing.T) {
+	store := NewRedisStateStore(newMockRedisClient(), time.Minute)
+	err := store.RunInTransaction(context.Background(), func(tx TxStore) error {
+		return tx.AppendOutbox(context.Background(), OutboxEntry{
+			ID:       "outbox-redis-1",
+			EntityID: "1",
+			Event:    "approve",
+			Effect:   CommandEffect{ActionID: "mark"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("append outbox failed: %v", err)
+	}
+
+	claimed, err := store.ClaimPending(context.Background(), "worker-r", 10, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("claim pending failed: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("expected one claimed entry, got %d", len(claimed))
+	}
+	if claimed[0].Status != "leased" {
+		t.Fatalf("expected leased status, got %s", claimed[0].Status)
+	}
+
+	retryAt := time.Now().UTC().Add(30 * time.Second)
+	if err := store.MarkFailed(context.Background(), "outbox-redis-1", retryAt, "boom"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	claimed, err = store.ClaimPending(context.Background(), "worker-r", 10, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("claim pending after failure failed: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("expected retry gate to block immediate claim")
+	}
+
+	if err := store.MarkFailed(context.Background(), "outbox-redis-1", time.Now().UTC().Add(-time.Second), "retry-now"); err != nil {
+		t.Fatalf("mark failed retry-now: %v", err)
+	}
+	claimed, err = store.ClaimPending(context.Background(), "worker-r", 10, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("claim pending retry window failed: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("expected one re-claimed entry, got %d", len(claimed))
+	}
+
+	if err := store.MarkCompleted(context.Background(), "outbox-redis-1"); err != nil {
+		t.Fatalf("mark completed failed: %v", err)
+	}
+	claimed, err = store.ClaimPending(context.Background(), "worker-r", 10, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("claim after completion failed: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("expected completed outbox to be excluded")
+	}
+}
+
+type mockRedisClient struct {
+	mu    sync.RWMutex
+	store map[string]string
+}
+
+func newMockRedisClient() *mockRedisClient {
+	return &mockRedisClient{store: make(map[string]string)}
+}
+
+func (m *mockRedisClient) Get(_ context.Context, key string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.store[key], nil
+}
+
+func (m *mockRedisClient) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if value == nil {
+		delete(m.store, key)
+		return nil
+	}
+	if str, ok := value.(string); ok {
+		m.store[key] = str
+		return nil
+	}
+	return errors.New("mock redis expects string value")
 }

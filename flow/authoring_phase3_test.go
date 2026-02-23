@@ -229,6 +229,40 @@ func TestScopedValidationSupport(t *testing.T) {
 	}
 }
 
+func TestScopedValidationDetectsDuplicateTransitionAgainstUnscopedNodes(t *testing.T) {
+	def := &MachineDefinition{
+		ID:      "orders",
+		Version: "v2",
+		States:  []StateDefinition{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions: []TransitionDefinition{
+			{
+				ID:    "approve_primary",
+				Event: "approve",
+				From:  "draft",
+				To:    "approved",
+				Workflow: TransitionWorkflowDefinition{Nodes: []WorkflowNodeDefinition{
+					{ID: "n1", Kind: "step", Step: &StepDefinition{ActionID: "known"}},
+				}},
+			},
+			{
+				ID:    "approve_duplicate",
+				Event: "approve",
+				From:  "draft",
+				To:    "approved",
+				Workflow: TransitionWorkflowDefinition{Nodes: []WorkflowNodeDefinition{
+					{ID: "n2", Kind: "step", Step: &StepDefinition{ActionID: "known"}},
+				}},
+			},
+		},
+	}
+	catalog := &EditorCatalog{Steps: []CatalogItem{{ID: "known", Label: "known"}}}
+
+	diags := ValidateMachineDefinitionScoped(def, catalog, &ValidationScope{NodeIDs: []string{"approve_duplicate"}})
+	if !diagCodes(diags)[DiagCodeDuplicateTransition] {
+		t.Fatalf("expected duplicate transition diagnostic in scoped validation")
+	}
+}
+
 func TestNodeBuilderCompatibilityGeneratedDefinitionsRunUnchanged(t *testing.T) {
 	def := &MachineDefinition{
 		ID:      "orders",

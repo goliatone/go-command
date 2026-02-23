@@ -377,10 +377,12 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		nextVersion = newVersion
 
 		effects = s.compileEffects(req.Msg, tr)
-		entries := effectsToOutbox(entityID, tr.ID, event, effects, fields)
-		for _, entry := range entries {
-			if err := tx.AppendOutbox(ctx, entry); err != nil {
-				return err
+		if s.shouldPersistOutboxEffects() {
+			entries := effectsToOutbox(entityID, tr.ID, event, effects, fields)
+			for _, entry := range entries {
+				if err := tx.AppendOutbox(ctx, entry); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -434,11 +436,10 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	}
 	handle, orchestrationErr := s.orchestrator.Start(ctx, startReq)
 	if orchestrationErr != nil {
-		outErr := cloneRuntimeError(ErrPreconditionFailed, "failed to start orchestrator", orchestrationErr, fields)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseRejected, outErr)); lifecycleErr != nil {
-			return nil, lifecycleErr
-		}
-		return nil, outErr
+		logger.Warn("orchestrator start failed after commit: %v", orchestrationErr)
+		fields["orchestration_start_error"] = orchestrationErr.Error()
+		fields["orchestration_degraded"] = true
+		handle = s.newDegradedExecutionHandle(executionID, fields)
 	}
 	if handle != nil && strings.TrimSpace(handle.ExecutionID) != "" {
 		executionID = strings.TrimSpace(handle.ExecutionID)
@@ -446,7 +447,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		logger = withLoggerFields(logger, map[string]any{"execution_id": executionID})
 	}
 	if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseCommitted, nil)); err != nil {
-		return nil, err
+		logger.Warn("committed lifecycle dispatch failed post-commit: %v", err)
 	}
 
 	return &ApplyEventResponse[T]{
@@ -869,6 +870,23 @@ func (s *StateMachine[T]) machineVersion() string {
 		return ""
 	}
 	return strings.TrimSpace(s.machine.Version)
+}
+
+func (s *StateMachine[T]) shouldPersistOutboxEffects() bool {
+	return normalizeExecutionPolicy(s.policy) == ExecutionPolicyOrchestrated
+}
+
+func (s *StateMachine[T]) newDegradedExecutionHandle(executionID string, metadata map[string]any) *ExecutionHandle {
+	policy := strings.TrimSpace(string(normalizeExecutionPolicy(s.policy)))
+	if policy == "" {
+		policy = strings.TrimSpace(string(s.policy))
+	}
+	return &ExecutionHandle{
+		ExecutionID: strings.TrimSpace(executionID),
+		Policy:      policy,
+		Status:      ExecutionStateDegraded,
+		Metadata:    copyMap(metadata),
+	}
 }
 
 func (s *StateMachine[T]) controlExecution(

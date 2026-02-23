@@ -3,6 +3,7 @@ package flow
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -455,6 +456,156 @@ func TestStateMachineConcurrentVersionConflict(t *testing.T) {
 	}
 }
 
+func TestStateMachineLightweightDoesNotPersistOutbox(t *testing.T) {
+	cfg := StateMachineConfig{
+		Entity:          "order",
+		ExecutionPolicy: ExecutionPolicyLightweight,
+		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions: []TransitionConfig{
+			{Name: "approve", From: "draft", To: "approved", Action: "mark"},
+		},
+	}
+	store := NewInMemoryStateStore()
+	actions := NewActionRegistry[smMsg]()
+	called := false
+	if err := actions.Register("mark", func(context.Context, smMsg) error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("register action: %v", err)
+	}
+	req := TransitionRequest[smMsg]{
+		StateKey:     func(m smMsg) string { return m.ID },
+		Event:        func(m smMsg) string { return m.Event },
+		CurrentState: func(m smMsg) string { return m.State },
+	}
+	sm, err := NewStateMachine(cfg, store, req, nil, actions)
+	if err != nil {
+		t.Fatalf("build state machine: %v", err)
+	}
+
+	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
+		EntityID: "1",
+		Event:    "approve",
+		Msg:      smMsg{ID: "1", Event: "approve", State: "draft"},
+	})
+	if err != nil {
+		t.Fatalf("apply event failed: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected lightweight action execution")
+	}
+	if res == nil || res.Transition == nil || len(res.Transition.Effects) != 1 {
+		t.Fatalf("expected one transition effect descriptor")
+	}
+	if len(store.OutboxEntries()) != 0 {
+		t.Fatalf("expected no outbox writes for lightweight policy")
+	}
+}
+
+func TestStateMachinePostCommitOrchestratorStartFailureReturnsSuccess(t *testing.T) {
+	cfg := StateMachineConfig{
+		Entity:          "order",
+		ExecutionPolicy: ExecutionPolicyOrchestrated,
+		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions: []TransitionConfig{
+			{Name: "approve", From: "draft", To: "approved", Action: "mark"},
+		},
+	}
+	store := NewInMemoryStateStore()
+	actions := NewActionRegistry[smMsg]()
+	if err := actions.Register("mark", func(context.Context, smMsg) error { return nil }); err != nil {
+		t.Fatalf("register action: %v", err)
+	}
+	req := TransitionRequest[smMsg]{
+		StateKey:     func(m smMsg) string { return m.ID },
+		Event:        func(m smMsg) string { return m.Event },
+		CurrentState: func(m smMsg) string { return m.State },
+	}
+	sm, err := NewStateMachine(
+		cfg,
+		store,
+		req,
+		nil,
+		actions,
+		WithOrchestrator[smMsg](&startFailOrchestrator{err: errors.New("scheduler unavailable")}),
+	)
+	if err != nil {
+		t.Fatalf("build state machine: %v", err)
+	}
+
+	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
+		EntityID: "1",
+		Event:    "approve",
+		Msg:      smMsg{ID: "1", Event: "approve", State: "draft"},
+	})
+	if err != nil {
+		t.Fatalf("expected success despite post-commit orchestrator failure, got %v", err)
+	}
+	if res == nil || res.Execution == nil {
+		t.Fatalf("expected execution handle")
+	}
+	if res.Execution.Status != ExecutionStateDegraded {
+		t.Fatalf("expected degraded execution status, got %s", res.Execution.Status)
+	}
+
+	rec, loadErr := store.Load(context.Background(), "1")
+	if loadErr != nil {
+		t.Fatalf("load state failed: %v", loadErr)
+	}
+	if rec == nil || rec.State != "approved" {
+		t.Fatalf("expected committed approved state")
+	}
+	if len(store.OutboxEntries()) != 1 {
+		t.Fatalf("expected outbox entry to persist despite orchestrator start failure")
+	}
+}
+
+func TestStateMachineCommittedLifecycleFailureDoesNotFailAfterCommit(t *testing.T) {
+	cfg := StateMachineConfig{
+		Entity:          "order",
+		ExecutionPolicy: ExecutionPolicyLightweight,
+		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
+	}
+	store := NewInMemoryStateStore()
+	req := TransitionRequest[smMsg]{
+		StateKey:     func(m smMsg) string { return m.ID },
+		Event:        func(m smMsg) string { return m.Event },
+		CurrentState: func(m smMsg) string { return m.State },
+	}
+	hook := lifecycleHookFunc[smMsg](func(_ context.Context, evt TransitionLifecycleEvent[smMsg]) error {
+		if evt.Phase == TransitionPhaseCommitted {
+			return errors.New("commit hook failed")
+		}
+		return nil
+	})
+	sm, err := NewStateMachine(
+		cfg,
+		store,
+		req,
+		nil,
+		nil,
+		WithLifecycleHooks[smMsg](hook),
+		WithHookFailureMode[smMsg](HookFailureModeFailClosed),
+	)
+	if err != nil {
+		t.Fatalf("build state machine: %v", err)
+	}
+
+	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
+		EntityID: "1",
+		Event:    "approve",
+		Msg:      smMsg{ID: "1", Event: "approve", State: "draft"},
+	})
+	if err != nil {
+		t.Fatalf("expected post-commit hook failure to be non-fatal, got %v", err)
+	}
+	if res == nil || res.Transition == nil || res.Transition.CurrentState != "approved" {
+		t.Fatalf("expected committed approved transition result")
+	}
+}
+
 func TestRuntimeErrorCodesAreStable(t *testing.T) {
 	if ErrInvalidTransition.TextCode != ErrCodeInvalidTransition {
 		t.Fatalf("unexpected invalid transition code: %s", ErrInvalidTransition.TextCode)
@@ -471,6 +622,24 @@ func TestRuntimeErrorCodesAreStable(t *testing.T) {
 	if ErrPreconditionFailed.TextCode != ErrCodePreconditionFailed {
 		t.Fatalf("unexpected precondition failed code: %s", ErrPreconditionFailed.TextCode)
 	}
+}
+
+type startFailOrchestrator struct {
+	err error
+}
+
+func (o *startFailOrchestrator) Start(context.Context, StartRequest[smMsg]) (*ExecutionHandle, error) {
+	if o == nil || o.err == nil {
+		return nil, errors.New("orchestrator start failed")
+	}
+	return nil, o.err
+}
+
+func (o *startFailOrchestrator) Pause(context.Context, string) error  { return nil }
+func (o *startFailOrchestrator) Resume(context.Context, string) error { return nil }
+func (o *startFailOrchestrator) Stop(context.Context, string) error   { return nil }
+func (o *startFailOrchestrator) Status(context.Context, string) (*ExecutionStatus, error) {
+	return nil, errors.New("execution not found")
 }
 
 func TestWithLoggerAndFmtLoggerFallback(t *testing.T) {
