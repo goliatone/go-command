@@ -24,6 +24,7 @@ type Registry struct {
 	initialized        bool
 	initializing       bool
 	cronRegisterFn     func(opts HandlerConfig, handler any) error
+	rpcRegisterFn      func(opts RPCConfig, handler any, meta CommandMeta) error
 	cliRoot            *cliNode
 	cliOptions         []kong.Option
 	resolvers          map[string]Resolver
@@ -54,6 +55,14 @@ func NewRegistry() *Registry {
 		return r.registerWithCron(cronCmd)
 	})
 
+	_ = registry.AddResolver("rpc", func(cmd any, meta CommandMeta, r *Registry) error {
+		rpcCmd, ok := cmd.(RPCCommand)
+		if !ok {
+			return nil
+		}
+		return r.registerWithRPC(rpcCmd, meta)
+	})
+
 	return registry
 }
 
@@ -64,6 +73,16 @@ func (r *Registry) SetCronRegister(fn func(opts HandlerConfig, handler any) erro
 		return r
 	}
 	r.cronRegisterFn = fn
+	return r
+}
+
+func (r *Registry) SetRPCRegister(fn func(opts RPCConfig, handler any, meta CommandMeta) error) *Registry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.initialized || r.initializing {
+		return r
+	}
+	r.rpcRegisterFn = fn
 	return r
 }
 
@@ -156,6 +175,27 @@ func (r *Registry) registerWithCron(cronCmd CronCommand) error {
 			WithTextCode("CRON_REGISTRATION_FAILED").
 			WithMetadata(map[string]any{
 				"config": config,
+			})
+	}
+
+	return nil
+}
+
+func (r *Registry) registerWithRPC(rpcCmd RPCCommand, meta CommandMeta) error {
+	if r.rpcRegisterFn == nil {
+		return errors.New("rpc transport not provided during initialization", errors.CategoryBadInput).
+			WithTextCode("RPC_TRANSPORT_NOT_SET")
+	}
+
+	handler := rpcCmd.RPCHandler()
+	config := rpcCmd.RPCOptions()
+
+	if err := r.rpcRegisterFn(config, handler, meta); err != nil {
+		return errors.Wrap(err, errors.CategoryExternal, "rpc transport registration failed").
+			WithTextCode("RPC_REGISTRATION_FAILED").
+			WithMetadata(map[string]any{
+				"config": config,
+				"meta":   meta,
 			})
 	}
 
