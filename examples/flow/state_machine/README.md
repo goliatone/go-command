@@ -68,3 +68,28 @@ Then open http://localhost:8080 in your browser.
 - **State Persistence**: Using an in-memory state store
 - **Message-Driven Transitions**: OrderMsg drives state changes
 - **Normalization**: States and events are normalized to lowercase internally
+
+## FSM v2 Notes
+
+The canonical API is `ApplyEvent` with envelope requests/responses:
+
+```go
+res, err := sm.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
+    EntityID: orderID,
+    Event:    "approve",
+    Msg:      msg,
+    ExecCtx:  flow.ExecutionContext{ActorID: "admin-ui"},
+})
+```
+
+Snapshot introspection is also envelope-based:
+
+```go
+snap, err := sm.Snapshot(ctx, flow.SnapshotRequest[OrderMsg]{
+    EntityID: orderID,
+    Msg:      msg,
+    ExecCtx:  flow.ExecutionContext{ActorID: "admin-ui"},
+})
+```
+
+`Execute(ctx, msg)` is preserved for backward compatibility only.

@@ -32,6 +32,7 @@ type Message interface {
 ```
 
 Example:
+
 ```go
 type CreateUserCommand struct {
     Email string
@@ -214,6 +215,7 @@ metadata is treated as empty and resolvers that rely on `MessageType` will skip 
 For the global registry helpers, use `registry.AddResolver` and `registry.HasResolver`.
 
 Migration notes:
+
 - If you switch to resolver-based queue registration, you must attach the queue resolver
   or queue registration will not happen.
 - When both resolver-based and direct registration are used, the queue layer should treat
@@ -252,6 +254,7 @@ err = flow.ExecuteBatch(
 ```
 
 The batch executor:
+
 - Splits messages into batches of specified size
 - Processes batches concurrently with configurable parallelism
 - Supports error handling with optional stop-on-error behavior
@@ -292,6 +295,7 @@ err = flow.ParallelExecute(
 ```
 
 The parallel executor:
+
 - Runs all handlers concurrently
 - Supports context cancellation
 - Can stop all handlers on first error (configurable)
@@ -315,6 +319,7 @@ err := runner.RunCommand(ctx, handler, cmd, msg)
 ```
 
 The runner supports custom retry logic through error interfaces:
+
 - `IsRetryable() bool` - Control whether an error should trigger a retry
 - `RetryDelay(attempt int) time.Duration` - Custom retry delay calculation
 
@@ -387,14 +392,16 @@ _ = registry.Start(context.Background())
 ```
 
 RPC handler signatures are strict:
+
 - Execute-style: `Execute(ctx, msg) error`
 - Query-style: `Query(ctx, msg) (result, error)`
 - Function handlers must use the same signatures.
 
 Failure handling modes:
+
 - `FailureModeReject` (default): registration errors return; invoke panics re-panic.
 - `FailureModeRecover`: registration errors return; invoke panics become errors.
-- `FailureModeLogAndContinue`: registration failures are skipped after logging; invoke panics return `(nil, nil)` after logging.
+- `FailureModeLogAndContinue`: registration failures are skipped after logging; invoke panics return errors after logging.
 
 Endpoint metadata returned by `Endpoint()` and `Endpoints()` is defensively copied, so caller mutations do not affect server state.
 
@@ -534,6 +541,26 @@ func (e RetryableError) RetryDelay(attempt int) time.Duration {
 }
 ```
 
+## FSM
+
+`flow` exposes a canonical envelope contract:
+
+- `ApplyEvent(ctx, ApplyEventRequest[T]) -> *ApplyEventResponse[T]`
+- `Snapshot(ctx, SnapshotRequest[T]) -> *Snapshot`
+- `Execute(ctx, msg)` remains only as a compatibility wrapper.
+
+Additional surfaces include:
+
+- Authoring: `CompileDSL`, `MachineDefinition.ToDSL()`
+- UI schema: `GenerateMachineSchema`, `GenerateMachineUISchema`
+- Orchestration: mandatory execution policy (`lightweight` or `orchestrated`)
+- RPC method family: `fsm.apply_event`, `fsm.snapshot`, `fsm.execution_status`, `fsm.execution_pause`, `fsm.execution_resume`, `fsm.execution_stop`
+- Transport/runtime error mapping: `MapRuntimeError`, `RPCErrorForError`
+
+See:
+
+- `flow/README.md` for API examples.
+
 ## Testing
 
 The package provides utilities for testing:
@@ -562,6 +589,7 @@ func TestCommand(t *testing.T) {
 ### Message Type Resolution
 
 Messages can implement custom type resolution:
+
 ```go
 func (m MyMessage) Type() string {
     return "custom.message.type"
@@ -573,6 +601,7 @@ Or rely on automatic type detection based on struct name.
 ### Context Propagation
 
 All operations support context for:
+
 - Cancellation
 - Deadlines
 - Value propagation
