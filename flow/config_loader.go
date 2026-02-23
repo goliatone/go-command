@@ -98,7 +98,13 @@ func buildFlow[T command.Message](ctx context.Context, defaults FlowOptions, def
 		if req.StateKey == nil || req.Event == nil {
 			return nil, fmt.Errorf("state_machine requires StateKey and Event extractors")
 		}
-		sm, err := NewStateMachine(*def.StateMachine, bctx.Store, req, bctx.Guards, bctx.Actions)
+		smOpts := []StateMachineOption[T]{
+			WithExecutionPolicy[T](def.StateMachine.ExecutionPolicy),
+		}
+		if mode := strings.TrimSpace(string(def.StateMachine.HookFailureMode)); mode != "" {
+			smOpts = append(smOpts, WithHookFailureMode[T](def.StateMachine.HookFailureMode))
+		}
+		sm, err := NewStateMachine(*def.StateMachine, bctx.Store, req, bctx.Guards, bctx.Actions, smOpts...)
 		if err != nil {
 			return nil, err
 		}
