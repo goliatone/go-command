@@ -32,6 +32,7 @@ type Handler struct {
 	errorHandler  func(error)
 	doneHandler   func(r *Handler)
 	retryStrategy RetryStrategy
+	control       ExecutionControl
 	middleware    []Middleware
 
 	EntryID        int
@@ -59,6 +60,7 @@ func NewHandler(opts ...Option) *Handler {
 			log.Printf("runner done: %d\n", r.EntryID)
 		},
 		retryStrategy: NoDelayStrategy{},
+		control:       noopExecutionControl{},
 		panicHandler:  command.MakePanicHandler(command.DefaultPanicLogger),
 		panicContextBuilder: func(ctx context.Context, m map[string]any) {
 			if requestID, ok := ctx.Value("request_id").(string); ok {
@@ -114,8 +116,13 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 
 	maxRetries := h.maxRetries
 	strategy := h.retryStrategy
+	control := h.control
 	middleware := h.middleware
 	h.mu.Unlock()
+
+	if control == nil {
+		control = noopExecutionControl{}
+	}
 
 	ctx, cancel := h.contextWithSettings(ctx)
 	defer cancel()
@@ -126,9 +133,19 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	}
 
 	var finalErr error
+	interruptedByControl := false
 	executionStart := time.Now()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if err := h.waitIfPausedOrCanceled(ctx, control); err != nil {
+			return errors.Wrap(err, errors.CategoryExternal, "execution paused/canceled").
+				WithTextCode("HANDLER_EXECUTION_CONTROLLED").
+				WithMetadata(map[string]any{
+					"attempt":     attempt + 1,
+					"max_retries": maxRetries,
+				})
+		}
+
 		if ctx.Err() != nil {
 			return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled during handler execution").
 				WithTextCode("HANDLER_CONTEXT_CANCELLED").
@@ -152,7 +169,8 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 
 		finalErr = err
 
-		if !h.shouldRetryError(err, attempt, maxRetries) {
+		decision := h.retryDecision(err, attempt, maxRetries, strategy)
+		if !decision.ShouldRetry {
 			break
 		}
 
@@ -168,12 +186,17 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 					"max_attempts":     maxRetries + 1,
 					"attempt_duration": attemptDuration,
 					"retry_strategy":   fmt.Sprintf("%T", strategy),
+					"retry_decision":   decision.Metadata,
 				})
 
 			h.handleError(retryErr)
 
-			if delay := h.getRetryDelay(err, attempt, strategy); delay > 0 {
-				time.Sleep(delay)
+			if delay := decision.Delay; delay > 0 {
+				if waitErr := waitRetryDelay(ctx, control, delay); waitErr != nil {
+					finalErr = waitErr
+					interruptedByControl = true
+					break
+				}
 			}
 		}
 	}
@@ -187,6 +210,11 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	if finalErr == nil {
 		h.successfulRuns++
 	} else {
+		if interruptedByControl {
+			h.handleError(finalErr)
+			return finalErr
+		}
+
 		finalErr = errors.Wrap(
 			finalErr,
 			errors.CategoryInternal,
@@ -218,8 +246,12 @@ func (h *Handler) shouldRetryError(err error, attempt int, maxRetries int) bool 
 		return false
 	}
 
+	if attempt >= maxRetries {
+		return false
+	}
+
 	if retryable, ok := err.(interface{ IsRetryable() bool }); ok {
-		return retryable.IsRetryable() && attempt < maxRetries
+		return retryable.IsRetryable()
 	}
 
 	return !h.isUnretryableError(err)
@@ -247,6 +279,34 @@ func (h *Handler) getRetryDelay(err error, attempt int, defaultStrategy RetryStr
 	}
 
 	return 0
+}
+
+func (h *Handler) retryDecision(err error, attempt int, maxRetries int, strategy RetryStrategy) RetryDecision {
+	decision := RetryDecision{
+		ShouldRetry: h.shouldRetryError(err, attempt, maxRetries),
+		Delay:       h.getRetryDelay(err, attempt, strategy),
+		Metadata: map[string]any{
+			"attempt":     attempt + 1,
+			"max_retries": maxRetries,
+		},
+	}
+	if !decision.ShouldRetry {
+		return decision
+	}
+
+	fromStrategy := DecideRetry(strategy, attempt, err)
+	if fromStrategy.Metadata != nil {
+		for key, value := range fromStrategy.Metadata {
+			decision.Metadata[key] = value
+		}
+	}
+	if fromStrategy.Delay > 0 {
+		decision.Delay = fromStrategy.Delay
+	}
+	if !fromStrategy.ShouldRetry {
+		decision.ShouldRetry = false
+	}
+	return decision
 }
 
 func (h *Handler) getSuccessfulRuns() int {
@@ -293,7 +353,13 @@ func (h *Handler) contextWithSettings(parent context.Context) (context.Context, 
 }
 
 func RunCommand[T any](ctx context.Context, h *Handler, c command.Commander[T], msg T) error {
+	if h == nil {
+		return fmt.Errorf("handler cannot be nil")
+	}
 	return h.Run(ctx, func(ctx context.Context) error {
+		if controlled, ok := any(c).(ControlAwareCommander[T]); ok {
+			return controlled.ExecuteWithControl(ctx, msg, h.getControl())
+		}
 		return c.Execute(ctx, msg)
 	})
 }
@@ -311,4 +377,77 @@ func RunQuery[T any, R any](ctx context.Context, h *Handler, q command.Querier[T
 	}
 
 	return result, nil
+}
+
+func (h *Handler) getControl() ExecutionControl {
+	if h == nil {
+		return noopExecutionControl{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.control == nil {
+		h.control = noopExecutionControl{}
+	}
+	return h.control
+}
+
+func (h *Handler) waitIfPausedOrCanceled(ctx context.Context, control ExecutionControl) error {
+	if control == nil {
+		return ctx.Err()
+	}
+	if err := control.WaitIfPaused(ctx); err != nil {
+		return err
+	}
+	done := control.Done()
+	if done == nil {
+		return ctx.Err()
+	}
+	select {
+	case <-done:
+		if cause := control.CancelCause(); cause != nil {
+			return cause
+		}
+		return context.Canceled
+	default:
+		return ctx.Err()
+	}
+}
+
+func waitRetryDelay(ctx context.Context, control ExecutionControl, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	if control == nil {
+		control = noopExecutionControl{}
+	}
+	const maxStep = 100 * time.Millisecond
+
+	remaining := delay
+	for remaining > 0 {
+		if err := control.WaitIfPaused(ctx); err != nil {
+			return err
+		}
+
+		step := remaining
+		if step > maxStep {
+			step = maxStep
+		}
+		timer := time.NewTimer(step)
+		done := control.Done()
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-done:
+			timer.Stop()
+			if cause := control.CancelCause(); cause != nil {
+				return cause
+			}
+			return context.Canceled
+		case <-timer.C:
+		}
+		remaining -= step
+	}
+	return nil
 }

@@ -98,3 +98,14 @@ func WithExitOnError(exit bool) Option {
 		h.exitOnError = exit
 	}
 }
+
+// WithExecutionControl configures cooperative execution control for a handler.
+func WithExecutionControl(control ExecutionControl) Option {
+	return func(h *Handler) {
+		if control == nil {
+			h.control = noopExecutionControl{}
+			return
+		}
+		h.control = control
+	}
+}

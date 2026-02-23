@@ -346,3 +346,131 @@ func (cf *countingFunc) fn(_ context.Context) error {
 	}
 	return nil
 }
+
+type controlAwareCommander struct {
+	calledWithControl bool
+}
+
+func (c *controlAwareCommander) Execute(_ context.Context, _ testMessage) error {
+	return nil
+}
+
+func (c *controlAwareCommander) ExecuteWithControl(_ context.Context, _ testMessage, ctl ExecutionControl) error {
+	c.calledWithControl = ctl != nil
+	return nil
+}
+
+type fixedDecisionStrategy struct {
+	decision RetryDecision
+}
+
+func (s fixedDecisionStrategy) SleepDuration(_ int, _ error) time.Duration {
+	return 0
+}
+
+func (s fixedDecisionStrategy) Decide(_ int, _ error) RetryDecision {
+	return s.decision
+}
+
+func TestRunCommandUsesControlAwareCommander(t *testing.T) {
+	cmd := &controlAwareCommander{}
+	handler := NewHandler()
+
+	err := RunCommand(context.Background(), handler, cmd, testMessage{name: "controlled"})
+	if err != nil {
+		t.Fatalf("run command failed: %v", err)
+	}
+	if !cmd.calledWithControl {
+		t.Fatal("expected ExecuteWithControl to receive control")
+	}
+}
+
+func TestHandlerWaitsIfPausedAndResumes(t *testing.T) {
+	control := NewManualExecutionControl()
+	control.Pause()
+
+	handler := NewHandler(WithExecutionControl(control))
+	started := make(chan struct{})
+	done := make(chan error, 1)
+
+	go func() {
+		done <- handler.Run(context.Background(), func(ctx context.Context) error {
+			close(started)
+			return nil
+		})
+	}()
+
+	select {
+	case <-started:
+		t.Fatal("handler should not run while paused")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	control.Resume()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handler failed after resume: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handler did not resume")
+	}
+}
+
+func TestHandlerStopsRetryWaitOnControlCancel(t *testing.T) {
+	control := NewManualExecutionControl()
+	handler := NewHandler(
+		WithExecutionControl(control),
+		WithMaxRetries(2),
+		WithRetryStrategy(fixedDecisionStrategy{
+			decision: RetryDecision{
+				ShouldRetry: true,
+				Delay:       time.Second,
+			},
+		}),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- handler.Run(context.Background(), func(ctx context.Context) error {
+			return fmt.Errorf("retry me")
+		})
+	}()
+
+	time.Sleep(120 * time.Millisecond)
+	control.Cancel(errors.New("manual stop"))
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected cancel error")
+		}
+		if err.Error() != "manual stop" {
+			t.Fatalf("expected manual stop, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not stop on control cancel")
+	}
+}
+
+func TestHandlerRetryDecisionCanDisableRetry(t *testing.T) {
+	handler := NewHandler(
+		WithMaxRetries(3),
+		WithRetryStrategy(fixedDecisionStrategy{
+			decision: RetryDecision{
+				ShouldRetry: false,
+			},
+		}),
+	)
+
+	calls := atomic.Int32{}
+	_ = handler.Run(context.Background(), func(ctx context.Context) error {
+		calls.Add(1)
+		return fmt.Errorf("fail")
+	})
+
+	if calls.Load() != 1 {
+		t.Fatalf("expected single attempt when strategy disables retry, got %d", calls.Load())
+	}
+}
