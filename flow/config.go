@@ -143,16 +143,26 @@ type StateConfig struct {
 }
 
 type StateMachineConfig struct {
-	Entity      string             `json:"entity" yaml:"entity"`
-	States      []StateConfig      `json:"states" yaml:"states"`
-	Transitions []TransitionConfig `json:"transitions" yaml:"transitions"`
-	PersistWith string             `json:"persist_with,omitempty" yaml:"persist_with,omitempty"`
+	Entity          string             `json:"entity" yaml:"entity"`
+	ExecutionPolicy ExecutionPolicy    `json:"execution_policy" yaml:"execution_policy"`
+	HookFailureMode HookFailureMode    `json:"hook_failure_mode,omitempty" yaml:"hook_failure_mode,omitempty"`
+	States          []StateConfig      `json:"states" yaml:"states"`
+	Transitions     []TransitionConfig `json:"transitions" yaml:"transitions"`
+	PersistWith     string             `json:"persist_with,omitempty" yaml:"persist_with,omitempty"`
 }
 
 // Validate ensures the state machine definition is well formed.
 func (s StateMachineConfig) Validate() error {
 	if s.Entity == "" {
 		return fmt.Errorf("state machine entity required")
+	}
+	if !isValidExecutionPolicy(s.ExecutionPolicy) {
+		return fmt.Errorf("state machine %s requires execution_policy (%s|%s)", s.Entity, ExecutionPolicyLightweight, ExecutionPolicyOrchestrated)
+	}
+	if mode := strings.TrimSpace(string(s.HookFailureMode)); mode != "" {
+		if !isValidHookFailureMode(s.HookFailureMode) {
+			return fmt.Errorf("state machine %s invalid hook_failure_mode %q", s.Entity, s.HookFailureMode)
+		}
 	}
 	if len(s.States) == 0 {
 		return fmt.Errorf("state machine %s requires at least one state", s.Entity)
@@ -176,8 +186,10 @@ func (s StateMachineConfig) Validate() error {
 	if initialCount > 1 {
 		return fmt.Errorf("state machine %s has multiple initial states", s.Entity)
 	}
+	transitionSet := make(map[string]struct{}, len(s.Transitions))
 	for _, tr := range s.Transitions {
-		if strings.TrimSpace(tr.Name) == "" {
+		event := strings.ToLower(strings.TrimSpace(tr.Name))
+		if event == "" {
 			return fmt.Errorf("state machine %s transition missing name", s.Entity)
 		}
 		from := strings.ToLower(strings.TrimSpace(tr.From))
@@ -185,6 +197,11 @@ func (s StateMachineConfig) Validate() error {
 		if from == "" || to == "" {
 			return fmt.Errorf("state machine %s transition %s missing from/to", s.Entity, tr.Name)
 		}
+		key := from + "::" + event
+		if _, exists := transitionSet[key]; exists {
+			return fmt.Errorf("state machine %s duplicate transition for from=%s event=%s", s.Entity, tr.From, tr.Name)
+		}
+		transitionSet[key] = struct{}{}
 		if _, ok := stateSet[from]; !ok {
 			return fmt.Errorf("state machine %s transition %s references unknown from state %s", s.Entity, tr.Name, tr.From)
 		}
