@@ -7,9 +7,9 @@ what to do when your command message is an interface type.
 
 Resolvers run during `Registry.Initialize()` for every registered command.
 
-- Built in resolvers: `cli` and `cron`
-- Order: insertion order (`cli`, `cron`, then your custom resolvers)
-- Mutations: you cannot call `AddResolver`, `RegisterCommand`, or `SetCronRegister` after initialization
+- Built in resolvers: `cli`, `cron`, and `rpc`
+- Order: insertion order (`cli`, `cron`, `rpc`, then your custom resolvers)
+- Mutations: you cannot call `AddResolver`, `RegisterCommand`, `SetCronRegister`, or `SetRPCRegister` after initialization
 
 ## Wiring a Custom Resolver (Local Registry)
 
@@ -104,6 +104,38 @@ Exposure defaults:
 - `Mutates=false` means read-only.
 - If `Permissions` is empty, consumers should derive permissions from `Mutates`
   (read-only vs execute). If `Permissions` is set, enforce them explicitly.
+
+## RPC Resolver and Transport Hook
+
+RPC registration is built in and runs through `SetRPCRegister(...)`.
+Commands opt in by implementing `command.RPCCommand`.
+
+```go
+rpcServer := rpc.NewServer(
+    rpc.WithFailureMode(rpc.FailureModeRecover),
+    rpc.WithFailureLogger(func(ev rpc.FailureEvent) {
+        log.Printf("rpc failure stage=%s method=%s err=%v", ev.Stage, ev.Method, ev.Err)
+    }),
+)
+
+cmdRegistry := command.NewRegistry()
+cmdRegistry.SetRPCRegister(rpcServer.Register)
+```
+
+Required handler signatures are strict:
+
+- Execute-style: `Execute(ctx, msg) error`
+- Query-style: `Query(ctx, msg) (result, error)`
+- Function handlers must use the same signatures.
+
+If signatures are invalid, registration fails (or is handled by your configured
+failure mode).
+
+Failure mode summary:
+
+- `FailureModeReject` (default): return registration errors; invoke panic re-panics.
+- `FailureModeRecover`: return registration errors; convert invoke panic to error.
+- `FailureModeLogAndContinue`: skip registration failure after logging; invoke panic returns `(nil, nil)` after logging.
 
 ## Message Metadata and MessageFactory
 
