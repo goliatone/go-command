@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 // ActionRegistry stores named actions executed during transitions.
@@ -57,4 +58,17 @@ func (r *ActionRegistry[T]) Lookup(name string) (func(context.Context, T) error,
 	}
 	act, ok := r.actions[name]
 	return act, ok
+}
+
+// IDs returns sorted action IDs for deterministic catalog generation.
+func (r *ActionRegistry[T]) IDs() []string {
+	if r == nil || len(r.actions) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(r.actions))
+	for id := range r.actions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
