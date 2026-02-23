@@ -93,7 +93,11 @@ func (a *App) TransitionOrder(c router.Context) error {
 
 	// Verify state is in sync
 	ctx := c.Context()
-	storeState, _ := a.StateStore.Load(ctx, id)
+	rec, _ := a.StateStore.Load(ctx, id)
+	storeState := ""
+	if rec != nil {
+		storeState = rec.State
+	}
 	if storeState != order.State {
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error": "state desync: order.State=" + order.State + " store=" + storeState,

@@ -24,14 +24,12 @@ func main() {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS states (k TEXT PRIMARY KEY, v TEXT)`); err != nil {
-		panic(err)
-	}
 	store := flow.NewSQLiteStateStore(db, "states")
 
 	cfg := flow.StateMachineConfig{
-		Entity: "order",
-		States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Entity:          "order",
+		ExecutionPolicy: flow.ExecutionPolicyLightweight,
+		States:          []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
 		Transitions: []flow.TransitionConfig{
 			{Name: "approve", From: "draft", To: "approved"},
 		},
@@ -53,9 +51,12 @@ func main() {
 		panic(err)
 	}
 
-	state, err := store.Load(ctx, msg.ID)
+	rec, err := store.Load(ctx, msg.ID)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("persisted state in sqlite: %s\n", state)
+	if rec == nil {
+		panic("expected persisted state record")
+	}
+	fmt.Printf("persisted state in sqlite: %s (version=%d)\n", rec.State, rec.Version)
 }

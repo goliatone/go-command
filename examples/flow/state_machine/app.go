@@ -40,7 +40,8 @@ type App struct {
 func NewApp(ctx context.Context) (*App, error) {
 	// Define a simple workflow: draft -> approved -> fulfilled
 	cfg := flow.StateMachineConfig{
-		Entity: "order",
+		Entity:          "order",
+		ExecutionPolicy: flow.ExecutionPolicyLightweight,
 		States: []flow.StateConfig{
 			{Name: "draft", Initial: true},
 			{Name: "approved"},
@@ -149,7 +150,11 @@ func (a *App) CreateOrder(id string) (*Order, error) {
 	a.mu.Unlock()
 
 	ctx := context.Background()
-	if err := a.StateStore.Save(ctx, id, "draft"); err != nil {
+	_, err := a.StateStore.SaveIfVersion(ctx, &flow.StateRecord{
+		EntityID: id,
+		State:    "draft",
+	}, 0)
+	if err != nil {
 		a.mu.Lock()
 		delete(a.Orders, id)
 		a.mu.Unlock()
@@ -183,7 +188,11 @@ func (a *App) Transition(id, event string, admin bool) error {
 	ctx := context.Background()
 
 	// Check store state before
-	storeBefore, _ := a.StateStore.Load(ctx, id)
+	storeBeforeRec, _ := a.StateStore.Load(ctx, id)
+	storeBefore := ""
+	if storeBeforeRec != nil {
+		storeBefore = storeBeforeRec.State
+	}
 	fmt.Printf("[DEBUG] Store state before Execute: %s (store ptr=%p)\n", storeBefore, a.StateStore)
 
 	if err := a.StateMachine.Execute(ctx, msg); err != nil {
@@ -191,18 +200,20 @@ func (a *App) Transition(id, event string, admin bool) error {
 		return err
 	}
 
-	state, err := a.StateStore.Load(ctx, id)
+	rec, err := a.StateStore.Load(ctx, id)
 	if err != nil {
 		fmt.Printf("[DEBUG] Load failed: %v\n", err)
 		return err
 	}
+	if rec == nil {
+		return fmt.Errorf("state record missing for %s", id)
+	}
+	state := rec.State
 
 	fmt.Printf("[DEBUG] Store state after Execute: %s\n", state)
 
 	a.mu.Lock()
 	order.State = state
-	// persist the synced state back into the store to ensure consistency
-	_ = a.StateStore.Save(ctx, id, state)
 	a.mu.Unlock()
 
 	fmt.Printf("[DEBUG] Updated order.State to: %s\n", state)
@@ -230,7 +241,7 @@ func (a *App) GetAvailableTransitions(orderID string, admin bool) []string {
 			if t.Guard != "" {
 				msg := OrderMsg{ID: orderID, Admin: admin}
 				guard, ok := a.Guards.Lookup(t.Guard)
-				if !ok || guard == nil || !guard(msg) {
+				if !ok || guard == nil || guard(context.Background(), msg, flow.ExecutionContext{}) != nil {
 					continue
 				}
 			}
