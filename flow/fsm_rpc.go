@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/goliatone/go-command"
+	cmdrpc "github.com/goliatone/go-command/rpc"
 )
 
 const (
@@ -17,33 +18,25 @@ const (
 	FSMRPCMethodExecutionStop   = "fsm.execution_stop"
 )
 
-// FSMApplyEventRequest is the RPC transport request for fsm.apply_event.
+// FSMApplyEventRequest is the RPC request data for fsm.apply_event.
 type FSMApplyEventRequest[T command.Message] struct {
-	EntityID        string
-	Event           string
-	Msg             T
-	ExecCtx         ExecutionContext
-	ExpectedState   string
-	ExpectedVersion int
+	EntityID        string `json:"entityId"`
+	Event           string `json:"event"`
+	Msg             T      `json:"msg"`
+	ExpectedState   string `json:"expectedState,omitempty"`
+	ExpectedVersion int    `json:"expectedVersion,omitempty"`
 }
 
-func (FSMApplyEventRequest[T]) Type() string { return "fsm.apply_event.request" }
-
-// FSMSnapshotRequest is the RPC transport request for fsm.snapshot.
+// FSMSnapshotRequest is the RPC request data for fsm.snapshot.
 type FSMSnapshotRequest[T command.Message] struct {
-	EntityID string
-	Msg      T
-	ExecCtx  ExecutionContext
+	EntityID string `json:"entityId"`
+	Msg      T      `json:"msg"`
 }
 
-func (FSMSnapshotRequest[T]) Type() string { return "fsm.snapshot.request" }
-
-// FSMExecutionControlRequest is the RPC request for execution control/status methods.
+// FSMExecutionControlRequest is the RPC request data for execution control/status methods.
 type FSMExecutionControlRequest struct {
-	ExecutionID string
+	ExecutionID string `json:"executionId"`
 }
-
-func (FSMExecutionControlRequest) Type() string { return "fsm.execution.request" }
 
 // FSMApplyEventRPCCommand provides the fsm.apply_event method over command.RPCCommand.
 type FSMApplyEventRPCCommand[T command.Message] struct {
@@ -60,20 +53,36 @@ func NewFSMApplyEventRPCCommand[T command.Message](machine *StateMachine[T]) *FS
 	}
 }
 
-func (c *FSMApplyEventRPCCommand[T]) Query(ctx context.Context, req FSMApplyEventRequest[T]) (*ApplyEventResponse[T], error) {
+func (c *FSMApplyEventRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMApplyEventRequest[T]],
+) (cmdrpc.ResponseEnvelope[*ApplyEventResponse[T]], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ApplyEventResponse[T]]{}, err
 	}
 	applyReq := ApplyEventRequest[T]{
-		EntityID:        strings.TrimSpace(req.EntityID),
-		Event:           req.Event,
-		Msg:             req.Msg,
-		ExecCtx:         req.ExecCtx,
-		ExpectedState:   req.ExpectedState,
-		ExpectedVersion: req.ExpectedVersion,
+		EntityID:        strings.TrimSpace(req.Data.EntityID),
+		Event:           req.Data.Event,
+		Msg:             req.Data.Msg,
+		ExecCtx:         executionContextFromRPCMeta(req.Meta),
+		ExpectedState:   req.Data.ExpectedState,
+		ExpectedVersion: req.Data.ExpectedVersion,
 	}
-	return machine.ApplyEvent(ctx, applyReq)
+	result, err := machine.ApplyEvent(ctx, applyReq)
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*ApplyEventResponse[T]]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*ApplyEventResponse[T]]{Data: result}, nil
+}
+
+func (c *FSMApplyEventRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMApplyEventRequest[T], *ApplyEventResponse[T]](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMApplyEventRPCCommand[T]) RPCHandler() any {
@@ -100,16 +109,32 @@ func NewFSMSnapshotRPCCommand[T command.Message](machine *StateMachine[T]) *FSMS
 	}
 }
 
-func (c *FSMSnapshotRPCCommand[T]) Query(ctx context.Context, req FSMSnapshotRequest[T]) (*Snapshot, error) {
+func (c *FSMSnapshotRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMSnapshotRequest[T]],
+) (cmdrpc.ResponseEnvelope[*Snapshot], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*Snapshot]{}, err
 	}
-	return machine.Snapshot(ctx, SnapshotRequest[T]{
-		EntityID: strings.TrimSpace(req.EntityID),
-		Msg:      req.Msg,
-		ExecCtx:  req.ExecCtx,
+	out, err := machine.Snapshot(ctx, SnapshotRequest[T]{
+		EntityID: strings.TrimSpace(req.Data.EntityID),
+		Msg:      req.Data.Msg,
+		ExecCtx:  executionContextFromRPCMeta(req.Meta),
 	})
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*Snapshot]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*Snapshot]{Data: out}, nil
+}
+
+func (c *FSMSnapshotRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMSnapshotRequest[T], *Snapshot](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMSnapshotRPCCommand[T]) RPCHandler() any {
@@ -136,12 +161,28 @@ func NewFSMExecutionStatusRPCCommand[T command.Message](machine *StateMachine[T]
 	}
 }
 
-func (c *FSMExecutionStatusRPCCommand[T]) Query(ctx context.Context, req FSMExecutionControlRequest) (*ExecutionStatus, error) {
+func (c *FSMExecutionStatusRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMExecutionControlRequest],
+) (cmdrpc.ResponseEnvelope[*ExecutionStatus], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	return machine.ExecutionStatus(ctx, strings.TrimSpace(req.ExecutionID))
+	out, err := machine.ExecutionStatus(ctx, strings.TrimSpace(req.Data.ExecutionID))
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*ExecutionStatus]{Data: out}, nil
+}
+
+func (c *FSMExecutionStatusRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMExecutionStatusRPCCommand[T]) RPCHandler() any {
@@ -167,16 +208,32 @@ func NewFSMExecutionPauseRPCCommand[T command.Message](machine *StateMachine[T])
 	}
 }
 
-func (c *FSMExecutionPauseRPCCommand[T]) Query(ctx context.Context, req FSMExecutionControlRequest) (*ExecutionStatus, error) {
+func (c *FSMExecutionPauseRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMExecutionControlRequest],
+) (cmdrpc.ResponseEnvelope[*ExecutionStatus], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	executionID := strings.TrimSpace(req.ExecutionID)
+	executionID := strings.TrimSpace(req.Data.ExecutionID)
 	if err := machine.PauseExecution(ctx, executionID); err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	return machine.ExecutionStatus(ctx, executionID)
+	out, err := machine.ExecutionStatus(ctx, executionID)
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*ExecutionStatus]{Data: out}, nil
+}
+
+func (c *FSMExecutionPauseRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMExecutionPauseRPCCommand[T]) RPCHandler() any {
@@ -202,16 +259,32 @@ func NewFSMExecutionResumeRPCCommand[T command.Message](machine *StateMachine[T]
 	}
 }
 
-func (c *FSMExecutionResumeRPCCommand[T]) Query(ctx context.Context, req FSMExecutionControlRequest) (*ExecutionStatus, error) {
+func (c *FSMExecutionResumeRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMExecutionControlRequest],
+) (cmdrpc.ResponseEnvelope[*ExecutionStatus], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	executionID := strings.TrimSpace(req.ExecutionID)
+	executionID := strings.TrimSpace(req.Data.ExecutionID)
 	if err := machine.ResumeExecution(ctx, executionID); err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	return machine.ExecutionStatus(ctx, executionID)
+	out, err := machine.ExecutionStatus(ctx, executionID)
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*ExecutionStatus]{Data: out}, nil
+}
+
+func (c *FSMExecutionResumeRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMExecutionResumeRPCCommand[T]) RPCHandler() any {
@@ -237,16 +310,32 @@ func NewFSMExecutionStopRPCCommand[T command.Message](machine *StateMachine[T]) 
 	}
 }
 
-func (c *FSMExecutionStopRPCCommand[T]) Query(ctx context.Context, req FSMExecutionControlRequest) (*ExecutionStatus, error) {
+func (c *FSMExecutionStopRPCCommand[T]) Query(
+	ctx context.Context,
+	req cmdrpc.RequestEnvelope[FSMExecutionControlRequest],
+) (cmdrpc.ResponseEnvelope[*ExecutionStatus], error) {
 	machine, err := c.stateMachine()
 	if err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	executionID := strings.TrimSpace(req.ExecutionID)
+	executionID := strings.TrimSpace(req.Data.ExecutionID)
 	if err := machine.StopExecution(ctx, executionID); err != nil {
-		return nil, err
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
 	}
-	return machine.ExecutionStatus(ctx, executionID)
+	out, err := machine.ExecutionStatus(ctx, executionID)
+	if err != nil {
+		return cmdrpc.ResponseEnvelope[*ExecutionStatus]{}, err
+	}
+	return cmdrpc.ResponseEnvelope[*ExecutionStatus]{Data: out}, nil
+}
+
+func (c *FSMExecutionStopRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
+			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			c.Query,
+		),
+	}
 }
 
 func (c *FSMExecutionStopRPCCommand[T]) RPCHandler() any {
@@ -288,6 +377,31 @@ func normalizeFSMRPCConfig(cfg command.RPCConfig, method string) command.RPCConf
 		cfg.Method = method
 	}
 	return cfg
+}
+
+func fsmEndpointSpec(cfg command.RPCConfig, kind cmdrpc.MethodKind) cmdrpc.EndpointSpec {
+	return cmdrpc.EndpointSpec{
+		Method:      cfg.Method,
+		Kind:        kind,
+		Timeout:     cfg.Timeout,
+		Streaming:   cfg.Streaming,
+		Idempotent:  cfg.Idempotent,
+		Permissions: append([]string(nil), cfg.Permissions...),
+		Roles:       append([]string(nil), cfg.Roles...),
+		Summary:     cfg.Summary,
+		Description: cfg.Description,
+		Tags:        append([]string(nil), cfg.Tags...),
+		Deprecated:  cfg.Deprecated,
+		Since:       cfg.Since,
+	}
+}
+
+func executionContextFromRPCMeta(meta cmdrpc.RequestMeta) ExecutionContext {
+	return ExecutionContext{
+		ActorID: strings.TrimSpace(meta.ActorID),
+		Roles:   append([]string(nil), meta.Roles...),
+		Tenant:  strings.TrimSpace(meta.Tenant),
+	}
 }
 
 func (c *FSMApplyEventRPCCommand[T]) stateMachine() (*StateMachine[T], error) {

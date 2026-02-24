@@ -40,12 +40,28 @@ func TestFSMRPCMethodFamilyRegistration(t *testing.T) {
 
 	apply, ok := server.Endpoint(FSMRPCMethodApplyEvent)
 	require.True(t, ok)
-	assert.Equal(t, "fsm.apply_event.request", apply.MessageType)
+	require.NotNil(t, apply.RequestType)
+	assert.Contains(t, apply.RequestType.GoType, "RequestEnvelope")
 
 	snapshot, ok := server.Endpoint(FSMRPCMethodSnapshot)
 	require.True(t, ok)
-	assert.Equal(t, "fsm.snapshot.request", snapshot.MessageType)
+	require.NotNil(t, snapshot.RequestType)
+	assert.Contains(t, snapshot.RequestType.GoType, "RequestEnvelope")
 	assert.True(t, snapshot.Idempotent)
+}
+
+func TestFSMRPCMethodFamilyRegistrationWithExplicitResolver(t *testing.T) {
+	sm := buildFSMRPCStateMachine(t, nil)
+	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
+	registry := command.NewRegistry()
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
+
+	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
+	require.NoError(t, registry.Initialize())
+
+	endpoints := server.Endpoints()
+	require.Len(t, endpoints, 6)
 }
 
 func TestFSMRPCApplyEventEnvelopeAndExecutionControls(t *testing.T) {
@@ -56,15 +72,17 @@ func TestFSMRPCApplyEventEnvelopeAndExecutionControls(t *testing.T) {
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
-	out, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, FSMApplyEventRequest[smMsg]{
-		EntityID: "entity-1",
-		Event:    "approve",
-		Msg: smMsg{
-			ID:    "entity-1",
-			State: "draft",
-			Event: "approve",
+	out, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, rpc.RequestEnvelope[FSMApplyEventRequest[smMsg]]{
+		Data: FSMApplyEventRequest[smMsg]{
+			EntityID: "entity-1",
+			Event:    "approve",
+			Msg: smMsg{
+				ID:    "entity-1",
+				State: "draft",
+				Event: "approve",
+			},
 		},
-		ExecCtx: ExecutionContext{
+		Meta: rpc.RequestMeta{
 			ActorID: "user-1",
 			Roles:   []string{"admin"},
 			Tenant:  "acme",
@@ -72,8 +90,9 @@ func TestFSMRPCApplyEventEnvelopeAndExecutionControls(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	res, ok := out.(*ApplyEventResponse[smMsg])
+	resEnvelope, ok := out.(rpc.ResponseEnvelope[*ApplyEventResponse[smMsg]])
 	require.True(t, ok)
+	res := resEnvelope.Data
 	require.NotNil(t, res)
 	require.NotNil(t, res.Transition)
 	require.NotNil(t, res.Snapshot)
@@ -85,36 +104,48 @@ func TestFSMRPCApplyEventEnvelopeAndExecutionControls(t *testing.T) {
 	assert.Equal(t, ExecutionStateRunning, res.Execution.Status)
 	require.NotEmpty(t, res.Execution.ExecutionID)
 
-	statusOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionStatus, FSMExecutionControlRequest{
-		ExecutionID: res.Execution.ExecutionID,
+	statusOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionStatus, rpc.RequestEnvelope[FSMExecutionControlRequest]{
+		Data: FSMExecutionControlRequest{
+			ExecutionID: res.Execution.ExecutionID,
+		},
 	})
 	require.NoError(t, err)
-	status, ok := statusOut.(*ExecutionStatus)
+	statusEnvelope, ok := statusOut.(rpc.ResponseEnvelope[*ExecutionStatus])
 	require.True(t, ok)
+	status := statusEnvelope.Data
 	assert.Equal(t, ExecutionStateRunning, status.Status)
 
-	pausedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionPause, FSMExecutionControlRequest{
-		ExecutionID: res.Execution.ExecutionID,
+	pausedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionPause, rpc.RequestEnvelope[FSMExecutionControlRequest]{
+		Data: FSMExecutionControlRequest{
+			ExecutionID: res.Execution.ExecutionID,
+		},
 	})
 	require.NoError(t, err)
-	paused, ok := pausedOut.(*ExecutionStatus)
+	pausedEnvelope, ok := pausedOut.(rpc.ResponseEnvelope[*ExecutionStatus])
 	require.True(t, ok)
+	paused := pausedEnvelope.Data
 	assert.Equal(t, ExecutionStatePaused, paused.Status)
 
-	resumedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionResume, FSMExecutionControlRequest{
-		ExecutionID: res.Execution.ExecutionID,
+	resumedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionResume, rpc.RequestEnvelope[FSMExecutionControlRequest]{
+		Data: FSMExecutionControlRequest{
+			ExecutionID: res.Execution.ExecutionID,
+		},
 	})
 	require.NoError(t, err)
-	resumed, ok := resumedOut.(*ExecutionStatus)
+	resumedEnvelope, ok := resumedOut.(rpc.ResponseEnvelope[*ExecutionStatus])
 	require.True(t, ok)
+	resumed := resumedEnvelope.Data
 	assert.Equal(t, ExecutionStateRunning, resumed.Status)
 
-	stoppedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionStop, FSMExecutionControlRequest{
-		ExecutionID: res.Execution.ExecutionID,
+	stoppedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionStop, rpc.RequestEnvelope[FSMExecutionControlRequest]{
+		Data: FSMExecutionControlRequest{
+			ExecutionID: res.Execution.ExecutionID,
+		},
 	})
 	require.NoError(t, err)
-	stopped, ok := stoppedOut.(*ExecutionStatus)
+	stoppedEnvelope, ok := stoppedOut.(rpc.ResponseEnvelope[*ExecutionStatus])
 	require.True(t, ok)
+	stopped := stoppedEnvelope.Data
 	assert.Equal(t, ExecutionStateStopped, stopped.Status)
 }
 
@@ -133,15 +164,17 @@ func TestFSMRPCApplyEventBuildsCanonicalRequestWithEntityAndExecutionContext(t *
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
-	_, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, FSMApplyEventRequest[smMsg]{
-		EntityID: " entity-2 ",
-		Event:    "approve",
-		Msg: smMsg{
-			ID:    "entity-2",
-			State: "draft",
-			Event: "approve",
+	_, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, rpc.RequestEnvelope[FSMApplyEventRequest[smMsg]]{
+		Data: FSMApplyEventRequest[smMsg]{
+			EntityID: " entity-2 ",
+			Event:    "approve",
+			Msg: smMsg{
+				ID:    "entity-2",
+				State: "draft",
+				Event: "approve",
+			},
 		},
-		ExecCtx: ExecutionContext{
+		Meta: rpc.RequestMeta{
 			ActorID: "actor-1",
 			Roles:   []string{"reviewer"},
 			Tenant:  "tenant-1",
@@ -161,13 +194,15 @@ func TestFSMRPCErrorMappingParity(t *testing.T) {
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
-	_, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, FSMApplyEventRequest[smMsg]{
-		EntityID: "entity-3",
-		Event:    "missing-transition",
-		Msg: smMsg{
-			ID:    "entity-3",
-			State: "draft",
-			Event: "missing-transition",
+	_, err := server.Invoke(context.Background(), FSMRPCMethodApplyEvent, rpc.RequestEnvelope[FSMApplyEventRequest[smMsg]]{
+		Data: FSMApplyEventRequest[smMsg]{
+			EntityID: "entity-3",
+			Event:    "missing-transition",
+			Msg: smMsg{
+				ID:    "entity-3",
+				State: "draft",
+				Event: "missing-transition",
+			},
 		},
 	})
 	require.Error(t, err)

@@ -126,8 +126,9 @@ _ = ui
 ```go
 registry := command.NewRegistry()
 server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
-registry.SetRPCRegister(server.Register)
+_ = registry.AddResolver("rpc-explicit", rpc.Resolver(server))
 _ = flow.RegisterFSMRPCCommands(registry, sm)
+_ = registry.Initialize()
 ```
 
 Transport helpers map runtime categories to protocol status surfaces:
