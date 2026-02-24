@@ -68,8 +68,10 @@ describe("fsm transports", () => {
     expect(invokeSpy).toHaveBeenCalledTimes(1);
     const [method, params] = invokeSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(method).toBe("fsm.apply_event");
-    expect(params.EntityID).toBe("order-99");
-    expect((params.ExecCtx as { ActorID: string }).ActorID).toBe("rpc-user");
+    const data = params.data as Record<string, unknown>;
+    const meta = params.meta as Record<string, unknown>;
+    expect(data.entityId).toBe("order-99");
+    expect(meta.actorId).toBe("rpc-user");
     expect(response.transition.currentState).toBe("approved");
   });
 

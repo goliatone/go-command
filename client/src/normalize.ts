@@ -11,6 +11,9 @@ import type {
   TransitionInfo,
   TransitionResult,
   WireApplyEventRequest,
+  WireRPCApplyEventData,
+  WireRPCRequestEnvelope,
+  WireRPCRequestMeta,
   WireExecutionContext
 } from "./types";
 
@@ -86,6 +89,14 @@ export function toWireExecutionContext(execCtx: ExecutionContext): WireExecution
   };
 }
 
+export function toWireRPCRequestMeta(execCtx: ExecutionContext): WireRPCRequestMeta {
+  return {
+    actorId: execCtx.actorId,
+    roles: [...execCtx.roles],
+    tenant: execCtx.tenant
+  };
+}
+
 export function toWireApplyEventRequest(input: {
   entityId: string;
   event: string;
@@ -109,6 +120,33 @@ export function toWireApplyEventRequest(input: {
   }
 
   return request;
+}
+
+export function toWireRPCApplyEventRequest(input: {
+  entityId: string;
+  event: string;
+  payload: unknown;
+  execCtx: ExecutionContext;
+  expectedState?: string;
+  expectedVersion?: number;
+}): WireRPCRequestEnvelope<WireRPCApplyEventData> {
+  const data: WireRPCApplyEventData = {
+    entityId: input.entityId,
+    event: input.event,
+    msg: input.payload
+  };
+
+  if (input.expectedState !== undefined) {
+    data.expectedState = input.expectedState;
+  }
+  if (input.expectedVersion !== undefined) {
+    data.expectedVersion = input.expectedVersion;
+  }
+
+  return {
+    data,
+    meta: toWireRPCRequestMeta(input.execCtx)
+  };
 }
 
 export function normalizeExecutionContext(raw: unknown): ExecutionContext {
@@ -219,7 +257,14 @@ export function normalizeExecutionHandle(raw: unknown): ExecutionHandle {
 }
 
 export function normalizeApplyEventResponse(raw: unknown): ApplyEventResponse {
-  const record = asRecord(raw);
+  const outerRecord = asRecord(raw);
+  if (outerRecord && (outerRecord.error ?? outerRecord.Error)) {
+    throw new Error("rpc apply event response contains error envelope");
+  }
+  const maybeDataEnvelope = outerRecord
+    ? asRecord(outerRecord.data ?? outerRecord.Data)
+    : null;
+  const record = maybeDataEnvelope ?? outerRecord;
   if (!record) {
     throw new Error("invalid apply event response: expected object envelope");
   }

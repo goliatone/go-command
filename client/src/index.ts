@@ -9,6 +9,8 @@ export {
   normalizeTransitionInfo,
   normalizeTransitionResult,
   toWireApplyEventRequest,
+  toWireRPCApplyEventRequest,
+  toWireRPCRequestMeta,
   toWireExecutionContext
 } from "./normalize";
 export { RESTTransport } from "./rest_transport";
@@ -49,6 +51,9 @@ export type {
   TransitionResult,
   Transport,
   WireApplyEventRequest,
+  WireRPCApplyEventData,
+  WireRPCRequestEnvelope,
+  WireRPCRequestMeta,
   WireExecutionContext
 } from "./types";
 export { DEFAULT_EXECUTION_CONTEXT } from "./types";

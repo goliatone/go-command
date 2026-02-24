@@ -1,4 +1,4 @@
-import { normalizeApplyEventResponse, toWireApplyEventRequest } from "./normalize";
+import { normalizeApplyEventResponse, toWireRPCApplyEventRequest } from "./normalize";
 import type { RPCClient } from "./rpc_client";
 import type { ApplyEventOptions, ApplyEventResponse, ExecutionContext, Transport } from "./types";
 
@@ -25,7 +25,7 @@ export class RPCTransport implements Transport {
     options: ApplyEventOptions = {},
   ): Promise<ApplyEventResponse> {
     const method = typeof this.method === "function" ? this.method(machine) : this.method;
-    const request = toWireApplyEventRequest({
+    const request = toWireRPCApplyEventRequest({
       entityId,
       event,
       payload,

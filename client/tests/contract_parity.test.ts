@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeApplyEventResponse,
   normalizeSnapshot,
-  toWireApplyEventRequest
+  toWireApplyEventRequest,
+  toWireRPCApplyEventRequest
 } from "../src";
 import { loadServerFixture } from "./fixtures";
 
@@ -80,6 +81,36 @@ describe("contract parity", () => {
       },
       ExpectedState: "draft",
       ExpectedVersion: 9
+    });
+  });
+
+  it("serializes canonical RPC envelope request", () => {
+    const request = toWireRPCApplyEventRequest({
+      entityId: "order-8",
+      event: "approve",
+      payload: { amount: 101 },
+      execCtx: {
+        actorId: "admin-2",
+        roles: ["admin"],
+        tenant: "acme"
+      },
+      expectedState: "draft",
+      expectedVersion: 10
+    });
+
+    expect(request).toEqual({
+      data: {
+        entityId: "order-8",
+        event: "approve",
+        msg: { amount: 101 },
+        expectedState: "draft",
+        expectedVersion: 10
+      },
+      meta: {
+        actorId: "admin-2",
+        roles: ["admin"],
+        tenant: "acme"
+      }
     });
   });
 });

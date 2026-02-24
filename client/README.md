@@ -130,6 +130,23 @@ await fsm.dispatch("approve", { amount: 99 }, {
 console.log(fsm.state);
 ```
 
+`RPCTransport` sends canonical RPC envelopes:
+
+```json
+{
+  "data": {
+    "entityId": "order-1",
+    "event": "approve",
+    "msg": { "amount": 99 }
+  },
+  "meta": {
+    "actorId": "admin-1",
+    "roles": ["admin"],
+    "tenant": "acme"
+  }
+}
+```
+
 `RPCTransport` can also derive method name from machine:
 
 ```ts
@@ -244,5 +261,21 @@ For payload normalization and wire conversion:
 - `normalizeExecutionHandle`
 - `toWireExecutionContext`
 - `toWireApplyEventRequest`
+- `toWireRPCRequestMeta`
+- `toWireRPCApplyEventRequest`
 
 Normalizers accept both Go-style fields (`EntityID`) and camelCase (`entityId`).
+
+## Contract generation scaffold
+
+This repository includes a scaffold generator at `cmd/rpc-tsgen` for endpoint-metadata-driven TS contracts.
+
+Example:
+
+```bash
+go run ./cmd/rpc-tsgen \
+  -manifest .tmp/rpc-endpoints.json \
+  -out client/src/gen/rpc-contract.ts
+```
+
+You can wire this into `go generate` in your app repository once you have a manifest export step.

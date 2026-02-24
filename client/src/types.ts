@@ -98,6 +98,27 @@ export interface WireApplyEventRequest {
   ExpectedVersion?: number;
 }
 
+export interface WireRPCRequestMeta {
+  actorId?: string;
+  roles?: string[];
+  tenant?: string;
+  requestId?: string;
+  correlationId?: string;
+}
+
+export interface WireRPCRequestEnvelope<TData = unknown> {
+  data: TData;
+  meta?: WireRPCRequestMeta;
+}
+
+export interface WireRPCApplyEventData {
+  entityId: string;
+  event: string;
+  msg: unknown;
+  expectedState?: string;
+  expectedVersion?: number;
+}
+
 export const DEFAULT_EXECUTION_CONTEXT: ExecutionContext = {
   actorId: "anonymous",
   roles: [],
