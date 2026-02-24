@@ -17,12 +17,37 @@ type RPCConfig struct {
 	Permissions []string
 	// Roles allowed to invoke this method.
 	Roles []string
+	// Summary is a short endpoint description for docs/discovery.
+	Summary string
+	// Description is a longer endpoint description for docs/discovery.
+	Description string
+	// Tags groups endpoint in generated clients/docs.
+	Tags []string
+	// Deprecated marks endpoint for phased removal.
+	Deprecated bool
+	// Since captures the version this endpoint was introduced.
+	Since string
 }
 
 // RPCCommand allows commands/queries to opt into RPC registration.
 type RPCCommand interface {
 	RPCHandler() any
 	RPCOptions() RPCConfig
+}
+
+// RPCDescription carries optional endpoint documentation metadata.
+type RPCDescription struct {
+	Summary     string
+	Description string
+	Tags        []string
+	Deprecated  bool
+	Since       string
+}
+
+// RPCDescriber allows commands to expose richer endpoint metadata for docs/codegen.
+// This is optional and only used by RPC resolver paths.
+type RPCDescriber interface {
+	RPCDescription() RPCDescription
 }
 
 // NilRPCRegister is a noop RPC registration function.
