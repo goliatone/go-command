@@ -14,20 +14,44 @@ import (
 
 // Endpoint describes a registered RPC method.
 type Endpoint struct {
-	Method      string
-	MessageType string
-	Timeout     time.Duration
-	Streaming   bool
-	Idempotent  bool
-	Permissions []string
-	Roles       []string
+	Method       string        `json:"method"`
+	MessageType  string        `json:"messageType"`
+	HandlerKind  string        `json:"handlerKind"`
+	RequestType  *TypeRef      `json:"requestType,omitempty"`
+	ResponseType *TypeRef      `json:"responseType,omitempty"`
+	Timeout      time.Duration `json:"timeout"`
+	Streaming    bool          `json:"streaming"`
+	Idempotent   bool          `json:"idempotent"`
+	Permissions  []string      `json:"permissions,omitempty"`
+	Roles        []string      `json:"roles,omitempty"`
+	Summary      string        `json:"summary,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	Tags         []string      `json:"tags,omitempty"`
+	Deprecated   bool          `json:"deprecated,omitempty"`
+	Since        string        `json:"since,omitempty"`
 }
 
 type endpointEntry struct {
 	endpoint Endpoint
 	msgType  reflect.Type
+	resType  reflect.Type
+	newReq   func() any
 	invoke   func(context.Context, any) (any, error)
 }
+
+// TypeRef describes a Go type in endpoint metadata for codegen/doc discovery.
+type TypeRef struct {
+	GoType  string `json:"goType"`
+	PkgPath string `json:"pkgPath,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Pointer bool   `json:"pointer,omitempty"`
+}
+
+const (
+	HandlerKindExecute = "execute"
+	HandlerKindQuery   = "query"
+)
 
 // FailureStage identifies where a failure happened.
 type FailureStage string
@@ -99,12 +123,20 @@ type Server struct {
 	failureLogger   FailureLogger
 }
 
-// Resolver returns a command.Resolver that registers commands implementing
-// command.RPCCommand into this server.
+// Resolver returns a command.Resolver that registers explicit endpoint providers
+// and legacy command.RPCCommand handlers into this server.
 func Resolver(server *Server) command.Resolver {
 	return func(cmd any, meta command.CommandMeta, _ *command.Registry) error {
 		if server == nil {
 			return fmt.Errorf("rpc server not configured")
+		}
+		if provider, ok := cmd.(EndpointsProvider); ok {
+			for _, endpoint := range provider.RPCEndpoints() {
+				if err := server.RegisterEndpoint(endpoint); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		rpcCmd, ok := cmd.(command.RPCCommand)
 		if !ok {
@@ -130,6 +162,71 @@ func NewServer(opts ...Option) *Server {
 	return server
 }
 
+// RegisterEndpoint stores an explicit endpoint definition.
+func (s *Server) RegisterEndpoint(def EndpointDefinition) error {
+	if s == nil {
+		return fmt.Errorf("rpc server not configured")
+	}
+	if def == nil {
+		return fmt.Errorf("rpc endpoint definition required")
+	}
+
+	spec := def.Spec()
+	if spec.Method == "" {
+		return fmt.Errorf("rpc method required")
+	}
+
+	reqType := def.RequestType()
+	resType := def.ResponseType()
+	handlerKind := string(spec.Kind)
+	if handlerKind == "" {
+		handlerKind = HandlerKindQuery
+	}
+
+	msgName := spec.MessageType
+	if msgName == "" {
+		msgName = messageTypeName(reqType)
+	}
+
+	entry := endpointEntry{
+		endpoint: Endpoint{
+			Method:       spec.Method,
+			MessageType:  msgName,
+			HandlerKind:  handlerKind,
+			RequestType:  typeRef(reqType),
+			ResponseType: typeRef(resType),
+			Timeout:      spec.Timeout,
+			Streaming:    spec.Streaming,
+			Idempotent:   spec.Idempotent,
+			Permissions:  cloneStrings(spec.Permissions),
+			Roles:        cloneStrings(spec.Roles),
+			Summary:      spec.Summary,
+			Description:  spec.Description,
+			Tags:         cloneStrings(spec.Tags),
+			Deprecated:   spec.Deprecated,
+			Since:        spec.Since,
+		},
+		msgType: reqType,
+		resType: resType,
+		newReq: func() any {
+			return def.NewRequest()
+		},
+		invoke: def.Invoke,
+	}
+
+	return s.registerEndpointEntry(spec.Method, entry)
+}
+
+// RegisterEndpoints stores explicit endpoint definitions in registration order.
+func (s *Server) RegisterEndpoints(defs ...EndpointDefinition) error {
+	for _, def := range defs {
+		if err := s.RegisterEndpoint(def); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Register stores an RPC endpoint and binds it to an invoker generated from handler.
 // The expected registration path is Registry.Initialize() + command.RPCCommand.
 func (s *Server) Register(opts command.RPCConfig, handler any, meta command.CommandMeta) error {
@@ -146,7 +243,7 @@ func (s *Server) Register(opts command.RPCConfig, handler any, meta command.Comm
 		return fmt.Errorf("rpc handler cannot be nil")
 	}
 
-	msgType, invoker, err := buildInvoker(handler, meta)
+	msgType, resType, handlerKind, invoker, err := buildInvoker(handler, meta)
 	if err != nil {
 		return s.handleRegisterFailure(opts.Method, err)
 	}
@@ -158,25 +255,31 @@ func (s *Server) Register(opts command.RPCConfig, handler any, meta command.Comm
 
 	entry := endpointEntry{
 		endpoint: Endpoint{
-			Method:      opts.Method,
-			MessageType: msgName,
-			Timeout:     opts.Timeout,
-			Streaming:   opts.Streaming,
-			Idempotent:  opts.Idempotent,
-			Permissions: cloneStrings(opts.Permissions),
-			Roles:       cloneStrings(opts.Roles),
+			Method:       opts.Method,
+			MessageType:  msgName,
+			HandlerKind:  handlerKind,
+			RequestType:  typeRef(msgType),
+			ResponseType: typeRef(resType),
+			Timeout:      opts.Timeout,
+			Streaming:    opts.Streaming,
+			Idempotent:   opts.Idempotent,
+			Permissions:  cloneStrings(opts.Permissions),
+			Roles:        cloneStrings(opts.Roles),
+			Summary:      opts.Summary,
+			Description:  opts.Description,
+			Tags:         cloneStrings(opts.Tags),
+			Deprecated:   opts.Deprecated,
+			Since:        opts.Since,
 		},
 		msgType: msgType,
-		invoke:  invoker,
+		resType: resType,
+		newReq: func() any {
+			return messageValue(msgType)
+		},
+		invoke: invoker,
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.endpoints[opts.Method]; exists {
-		return fmt.Errorf("rpc method %q already registered", opts.Method)
-	}
-	s.endpoints[opts.Method] = entry
-	return nil
+	return s.registerEndpointEntry(opts.Method, entry)
 }
 
 // Invoke executes a registered RPC method using the provided payload.
@@ -251,6 +354,11 @@ func (s *Server) Endpoint(method string) (Endpoint, bool) {
 	return cloneEndpoint(entry.endpoint), true
 }
 
+// EndpointMeta returns enriched endpoint metadata for the method.
+func (s *Server) EndpointMeta(method string) (Endpoint, bool) {
+	return s.Endpoint(method)
+}
+
 // Endpoints returns all endpoint metadata sorted by method.
 func (s *Server) Endpoints() []Endpoint {
 	if s == nil {
@@ -268,6 +376,11 @@ func (s *Server) Endpoints() []Endpoint {
 	return out
 }
 
+// EndpointsMeta returns enriched metadata for all endpoints sorted by method.
+func (s *Server) EndpointsMeta() []Endpoint {
+	return s.Endpoints()
+}
+
 // NewMessageForMethod creates a zero-value message instance for transport decoding.
 func (s *Server) NewMessageForMethod(method string) (any, error) {
 	if s == nil {
@@ -283,13 +396,21 @@ func (s *Server) NewMessageForMethod(method string) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("rpc method %q not found", method)
 	}
+	if entry.newReq != nil {
+		return entry.newReq(), nil
+	}
 	return messageValue(entry.msgType), nil
 }
 
-func buildInvoker(handler any, meta command.CommandMeta) (reflect.Type, func(context.Context, any) (any, error), error) {
+// NewRequestForMethod creates a zero-value request envelope instance for transport decoding.
+func (s *Server) NewRequestForMethod(method string) (any, error) {
+	return s.NewMessageForMethod(method)
+}
+
+func buildInvoker(handler any, meta command.CommandMeta) (reflect.Type, reflect.Type, string, func(context.Context, any) (any, error), error) {
 	value := reflect.ValueOf(handler)
 	if !value.IsValid() {
-		return nil, nil, fmt.Errorf("invalid rpc handler")
+		return nil, nil, "", nil, fmt.Errorf("invalid rpc handler")
 	}
 
 	if value.Kind() == reflect.Func {
@@ -303,61 +424,61 @@ func buildInvoker(handler any, meta command.CommandMeta) (reflect.Type, func(con
 		return buildMethodInvoker(method, meta, false)
 	}
 
-	return nil, nil, fmt.Errorf("rpc handler must expose Query or Execute")
+	return nil, nil, "", nil, fmt.Errorf("rpc handler must expose Query or Execute")
 }
 
-func buildMethodInvoker(method reflect.Value, meta command.CommandMeta, query bool) (reflect.Type, func(context.Context, any) (any, error), error) {
+func buildMethodInvoker(method reflect.Value, meta command.CommandMeta, query bool) (reflect.Type, reflect.Type, string, func(context.Context, any) (any, error), error) {
 	mt := method.Type()
 	if mt.NumIn() != 2 {
 		if query {
-			return nil, nil, fmt.Errorf("Query signature must be Query(ctx, msg)")
+			return nil, nil, "", nil, fmt.Errorf("Query signature must be Query(ctx, msg)")
 		}
-		return nil, nil, fmt.Errorf("Execute signature must be Execute(ctx, msg)")
+		return nil, nil, "", nil, fmt.Errorf("Execute signature must be Execute(ctx, msg)")
 	}
 
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	errType := reflect.TypeOf((*error)(nil)).Elem()
 	if !ctxType.AssignableTo(mt.In(0)) {
-		return nil, nil, fmt.Errorf("handler must accept context.Context")
+		return nil, nil, "", nil, fmt.Errorf("handler must accept context.Context")
 	}
 
 	msgType := mt.In(1)
 	if meta.MessageTypeValue != nil {
 		if !meta.MessageTypeValue.AssignableTo(msgType) {
-			return nil, nil, fmt.Errorf("rpc message type mismatch")
+			return nil, nil, "", nil, fmt.Errorf("rpc message type mismatch")
 		}
 		msgType = meta.MessageTypeValue
 	}
 
 	if query {
 		if mt.NumOut() != 2 || mt.Out(1) != errType {
-			return nil, nil, fmt.Errorf("Query signature must return (result, error)")
+			return nil, nil, "", nil, fmt.Errorf("Query signature must return (result, error)")
 		}
-		return msgType, makeQueryInvoker(method, msgType), nil
+		return msgType, mt.Out(0), HandlerKindQuery, makeQueryInvoker(method, msgType), nil
 	}
 
 	if mt.NumOut() != 1 || mt.Out(0) != errType {
-		return nil, nil, fmt.Errorf("Execute signature must return error")
+		return nil, nil, "", nil, fmt.Errorf("Execute signature must return error")
 	}
-	return msgType, makeExecuteInvoker(method, msgType), nil
+	return msgType, nil, HandlerKindExecute, makeExecuteInvoker(method, msgType), nil
 }
 
-func buildFuncInvoker(fn reflect.Value, meta command.CommandMeta) (reflect.Type, func(context.Context, any) (any, error), error) {
+func buildFuncInvoker(fn reflect.Value, meta command.CommandMeta) (reflect.Type, reflect.Type, string, func(context.Context, any) (any, error), error) {
 	ft := fn.Type()
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	errType := reflect.TypeOf((*error)(nil)).Elem()
 
 	if ft.NumIn() != 2 {
-		return nil, nil, fmt.Errorf("rpc function must accept (ctx, msg)")
+		return nil, nil, "", nil, fmt.Errorf("rpc function must accept (ctx, msg)")
 	}
 	if !ctxType.AssignableTo(ft.In(0)) {
-		return nil, nil, fmt.Errorf("rpc function must accept context.Context")
+		return nil, nil, "", nil, fmt.Errorf("rpc function must accept context.Context")
 	}
 
 	msgType := ft.In(1)
 	if meta.MessageTypeValue != nil {
 		if !meta.MessageTypeValue.AssignableTo(msgType) {
-			return nil, nil, fmt.Errorf("rpc message type mismatch")
+			return nil, nil, "", nil, fmt.Errorf("rpc message type mismatch")
 		}
 		msgType = meta.MessageTypeValue
 	}
@@ -365,16 +486,16 @@ func buildFuncInvoker(fn reflect.Value, meta command.CommandMeta) (reflect.Type,
 	switch ft.NumOut() {
 	case 1:
 		if ft.Out(0) != errType {
-			return nil, nil, fmt.Errorf("rpc function Execute-style signature must return error")
+			return nil, nil, "", nil, fmt.Errorf("rpc function Execute-style signature must return error")
 		}
-		return msgType, makeExecuteInvoker(fn, msgType), nil
+		return msgType, nil, HandlerKindExecute, makeExecuteInvoker(fn, msgType), nil
 	case 2:
 		if ft.Out(1) != errType {
-			return nil, nil, fmt.Errorf("rpc function Query-style signature must return (result, error)")
+			return nil, nil, "", nil, fmt.Errorf("rpc function Query-style signature must return (result, error)")
 		}
-		return msgType, makeQueryInvoker(fn, msgType), nil
+		return msgType, ft.Out(0), HandlerKindQuery, makeQueryInvoker(fn, msgType), nil
 	default:
-		return nil, nil, fmt.Errorf("rpc function must be Execute-style or Query-style")
+		return nil, nil, "", nil, fmt.Errorf("rpc function must be Execute-style or Query-style")
 	}
 }
 
@@ -462,6 +583,25 @@ func messageTypeName(msgType reflect.Type) string {
 	return command.GetMessageType(messageValue(msgType))
 }
 
+func typeRef(t reflect.Type) *TypeRef {
+	if t == nil {
+		return nil
+	}
+	base := t
+	pointer := false
+	if base.Kind() == reflect.Ptr {
+		base = base.Elem()
+		pointer = true
+	}
+	return &TypeRef{
+		GoType:  t.String(),
+		PkgPath: base.PkgPath(),
+		Name:    base.Name(),
+		Kind:    t.Kind().String(),
+		Pointer: pointer,
+	}
+}
+
 func cloneStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -472,7 +612,18 @@ func cloneStrings(values []string) []string {
 func cloneEndpoint(endpoint Endpoint) Endpoint {
 	endpoint.Permissions = cloneStrings(endpoint.Permissions)
 	endpoint.Roles = cloneStrings(endpoint.Roles)
+	endpoint.Tags = cloneStrings(endpoint.Tags)
+	endpoint.RequestType = cloneTypeRef(endpoint.RequestType)
+	endpoint.ResponseType = cloneTypeRef(endpoint.ResponseType)
 	return endpoint
+}
+
+func cloneTypeRef(ref *TypeRef) *TypeRef {
+	if ref == nil {
+		return nil
+	}
+	copyRef := *ref
+	return &copyRef
 }
 
 func isTypedNil(value any) bool {
@@ -515,4 +666,14 @@ func (s *Server) logFailure(event FailureEvent) {
 		return
 	}
 	s.failureLogger(event)
+}
+
+func (s *Server) registerEndpointEntry(method string, entry endpointEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.endpoints[method]; exists {
+		return fmt.Errorf("rpc method %q already registered", method)
+	}
+	s.endpoints[method] = entry
+	return nil
 }

@@ -56,6 +56,32 @@ func (c *exposedExecuteCommand) RPCOptions() command.RPCConfig {
 	return command.RPCConfig{Method: c.method}
 }
 
+type explicitRequest struct {
+	Name string `json:"name"`
+}
+
+type explicitProvider struct{}
+
+func (p *explicitProvider) RPCEndpoints() []EndpointDefinition {
+	return []EndpointDefinition{
+		NewEndpoint[explicitRequest, string](
+			EndpointSpec{
+				Method:      "explicit.echo",
+				Kind:        MethodKindQuery,
+				Summary:     "Echo",
+				Description: "Echoes the request name",
+				Tags:        []string{"explicit"},
+				Idempotent:  true,
+			},
+			func(_ context.Context, req RequestEnvelope[explicitRequest]) (ResponseEnvelope[string], error) {
+				return ResponseEnvelope[string]{
+					Data: "echo:" + req.Data.Name,
+				}, nil
+			},
+		),
+	}
+}
+
 func TestServerRegisterAndInvokeExecute(t *testing.T) {
 	s := NewServer()
 	cmd := &executeCommand{}
@@ -67,6 +93,10 @@ func TestServerRegisterAndInvokeExecute(t *testing.T) {
 		Idempotent:  true,
 		Permissions: []string{"fsm:write"},
 		Roles:       []string{"admin"},
+		Summary:     "Apply event",
+		Description: "Apply FSM event to entity",
+		Tags:        []string{"fsm", "write"},
+		Since:       "v2.0.0",
 	}, cmd, meta)
 	require.NoError(t, err)
 
@@ -79,10 +109,18 @@ func TestServerRegisterAndInvokeExecute(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "fsm.apply_event", endpoint.Method)
 	assert.Equal(t, "rpc::test_message", endpoint.MessageType)
+	assert.Equal(t, HandlerKindExecute, endpoint.HandlerKind)
+	require.NotNil(t, endpoint.RequestType)
+	assert.Contains(t, endpoint.RequestType.GoType, "testMessage")
+	assert.Nil(t, endpoint.ResponseType)
 	assert.Equal(t, time.Second, endpoint.Timeout)
 	assert.True(t, endpoint.Idempotent)
 	assert.Equal(t, []string{"fsm:write"}, endpoint.Permissions)
 	assert.Equal(t, []string{"admin"}, endpoint.Roles)
+	assert.Equal(t, "Apply event", endpoint.Summary)
+	assert.Equal(t, "Apply FSM event to entity", endpoint.Description)
+	assert.Equal(t, []string{"fsm", "write"}, endpoint.Tags)
+	assert.Equal(t, "v2.0.0", endpoint.Since)
 }
 
 func TestServerRegisterAndInvokeQuery(t *testing.T) {
@@ -97,6 +135,12 @@ func TestServerRegisterAndInvokeQuery(t *testing.T) {
 	out, err := s.Invoke(context.Background(), "fsm.snapshot", testMessage{Name: "world"})
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", out)
+
+	endpoint, ok := s.Endpoint("fsm.snapshot")
+	require.True(t, ok)
+	assert.Equal(t, HandlerKindQuery, endpoint.HandlerKind)
+	require.NotNil(t, endpoint.ResponseType)
+	assert.Equal(t, "string", endpoint.ResponseType.GoType)
 }
 
 func TestServerInvokeErrors(t *testing.T) {
@@ -180,17 +224,25 @@ func TestEndpointReturnsDefensiveCopy(t *testing.T) {
 		Method:      "copy.single",
 		Permissions: []string{"fsm:write"},
 		Roles:       []string{"admin"},
+		Tags:        []string{"fsm"},
 	}, cmd, meta))
 
 	endpoint, ok := s.Endpoint("copy.single")
 	require.True(t, ok)
 	endpoint.Permissions[0] = "mutated"
 	endpoint.Roles[0] = "guest"
+	endpoint.Tags[0] = "mutated"
+	if endpoint.RequestType != nil {
+		endpoint.RequestType.Name = "changed"
+	}
 
 	current, ok := s.Endpoint("copy.single")
 	require.True(t, ok)
 	assert.Equal(t, []string{"fsm:write"}, current.Permissions)
 	assert.Equal(t, []string{"admin"}, current.Roles)
+	assert.Equal(t, []string{"fsm"}, current.Tags)
+	require.NotNil(t, current.RequestType)
+	assert.Equal(t, "testMessage", current.RequestType.Name)
 }
 
 func TestEndpointsReturnsDefensiveCopies(t *testing.T) {
@@ -201,17 +253,42 @@ func TestEndpointsReturnsDefensiveCopies(t *testing.T) {
 		Method:      "copy.list",
 		Permissions: []string{"fsm:write"},
 		Roles:       []string{"admin"},
+		Tags:        []string{"fsm"},
 	}, cmd, meta))
 
 	endpoints := s.Endpoints()
 	require.Len(t, endpoints, 1)
 	endpoints[0].Permissions[0] = "mutated"
 	endpoints[0].Roles[0] = "guest"
+	endpoints[0].Tags[0] = "mutated"
+	if endpoints[0].RequestType != nil {
+		endpoints[0].RequestType.Name = "changed"
+	}
 
 	current, ok := s.Endpoint("copy.list")
 	require.True(t, ok)
 	assert.Equal(t, []string{"fsm:write"}, current.Permissions)
 	assert.Equal(t, []string{"admin"}, current.Roles)
+	assert.Equal(t, []string{"fsm"}, current.Tags)
+	require.NotNil(t, current.RequestType)
+	assert.Equal(t, "testMessage", current.RequestType.Name)
+}
+
+func TestEndpointMetaAliases(t *testing.T) {
+	s := NewServer()
+	cmd := &executeCommand{}
+	meta := command.MessageTypeForCommand(cmd)
+	require.NoError(t, s.Register(command.RPCConfig{Method: "meta.alias"}, cmd, meta))
+
+	ep1, ok1 := s.Endpoint("meta.alias")
+	ep2, ok2 := s.EndpointMeta("meta.alias")
+	require.True(t, ok1)
+	require.True(t, ok2)
+	assert.Equal(t, ep1, ep2)
+
+	all1 := s.Endpoints()
+	all2 := s.EndpointsMeta()
+	assert.Equal(t, all1, all2)
 }
 
 func TestResolver(t *testing.T) {
@@ -226,6 +303,49 @@ func TestResolver(t *testing.T) {
 	_, invokeErr := s.Invoke(context.Background(), "fsm.apply_event", testMessage{Name: "bob"})
 	require.NoError(t, invokeErr)
 	assert.Equal(t, "bob", cmd.got.Name)
+}
+
+func TestResolverRegistersExplicitEndpointsProvider(t *testing.T) {
+	s := NewServer()
+	resolver := Resolver(s)
+	provider := &explicitProvider{}
+
+	err := resolver(provider, command.CommandMeta{}, nil)
+	require.NoError(t, err)
+
+	endpoint, ok := s.Endpoint("explicit.echo")
+	require.True(t, ok)
+	assert.Equal(t, HandlerKindQuery, endpoint.HandlerKind)
+	assert.Equal(t, "Echo", endpoint.Summary)
+	assert.Equal(t, []string{"explicit"}, endpoint.Tags)
+
+	out, err := s.Invoke(context.Background(), "explicit.echo", RequestEnvelope[explicitRequest]{
+		Data: explicitRequest{Name: "alice"},
+	})
+	require.NoError(t, err)
+	res, ok := out.(ResponseEnvelope[string])
+	require.True(t, ok)
+	assert.Equal(t, "echo:alice", res.Data)
+}
+
+func TestServerRegisterEndpointAndNewRequestForMethod(t *testing.T) {
+	s := NewServer()
+	err := s.RegisterEndpoint(NewEndpoint[explicitRequest, string](
+		EndpointSpec{
+			Method: "explicit.new_request",
+			Kind:   MethodKindQuery,
+		},
+		func(_ context.Context, req RequestEnvelope[explicitRequest]) (ResponseEnvelope[string], error) {
+			return ResponseEnvelope[string]{Data: req.Data.Name}, nil
+		},
+	))
+	require.NoError(t, err)
+
+	msg, err := s.NewRequestForMethod("explicit.new_request")
+	require.NoError(t, err)
+	typed, ok := msg.(*RequestEnvelope[explicitRequest])
+	require.True(t, ok)
+	require.NotNil(t, typed)
 }
 
 func TestResolverMissingServer(t *testing.T) {
