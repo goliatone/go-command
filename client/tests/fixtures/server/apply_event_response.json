@@ -1,0 +1,73 @@
+{
+  "Transition": {
+    "PreviousState": "draft",
+    "CurrentState": "approved",
+    "Effects": [
+      {
+        "ActionID": "audit.log",
+        "Payload": {
+          "orderId": "ord-1"
+        },
+        "Async": true,
+        "Delay": 250000000,
+        "Timeout": 5000000000,
+        "Metadata": {
+          "retry": 1
+        }
+      },
+      {
+        "Event": "notify.order.approved",
+        "Msg": {
+          "orderId": "ord-1"
+        },
+        "Metadata": {
+          "source": "fsm"
+        }
+      }
+    ]
+  },
+  "Snapshot": {
+    "EntityID": "ord-1",
+    "CurrentState": "approved",
+    "AllowedTransitions": [
+      {
+        "ID": "fulfill",
+        "Event": "fulfill",
+        "Target": {
+          "Kind": "static",
+          "To": "fulfilled",
+          "Resolved": false
+        },
+        "Metadata": {
+          "label": "Fulfill order"
+        }
+      },
+      {
+        "ID": "route",
+        "Event": "route",
+        "Target": {
+          "Kind": "dynamic",
+          "Resolver": "pick_target",
+          "Resolved": true,
+          "ResolvedTo": "review",
+          "Candidates": ["review", "approved"]
+        },
+        "Metadata": {
+          "label": "Route order"
+        }
+      }
+    ],
+    "Metadata": {
+      "machine": "orders",
+      "version": "v2"
+    }
+  },
+  "Execution": {
+    "ExecutionID": "exec-1",
+    "Policy": "orchestrated",
+    "Status": "running",
+    "Metadata": {
+      "attempt": 1
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "EntityID": "ord-1",
+  "CurrentState": "draft",
+  "AllowedTransitions": [
+    {
+      "ID": "route",
+      "Event": "route",
+      "Target": {
+        "Kind": "dynamic",
+        "Resolver": "pick_target",
+        "Resolved": false,
+        "Candidates": ["review", "approved"]
+      },
+      "Metadata": {
+        "label": "Route"
+      }
+    }
+  ],
+  "Metadata": {
+    "machine": "orders"
+  }
+}
