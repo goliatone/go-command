@@ -6,10 +6,10 @@ A Go package for implementing command and query patterns with support for multip
 
 `go-command` provides a framework for building applications inspired by the Command Query Responsibility Segregation (CQRS) pattern. It offers:
 
-- **Type-safe message handling** through Go generics
+- **Type safe message handling** through Go generics
 - **Multiple execution strategies** (CLI, cron, RPC, dispatcher, batch, parallel)
 - **Flexible error handling** with retry support
-- **Context-aware operations** with cancellation and timeouts
+- **Context aware operations** with cancellation and timeouts
 - **Registry system** for automatic command/query discovery
 - **Integration with popular frameworks** (Kong for CLI, cron for scheduling)
 
@@ -209,17 +209,14 @@ func (c *EventCommand) Execute(ctx context.Context, msg Event) error { return ni
 func (c *EventCommand) MessageValue() any { return &UserCreated{} }
 ```
 
-`MessageValue()` must return a value assignable to the interface parameter type; otherwise
-metadata is treated as empty and resolvers that rely on `MessageType` will skip it.
+`MessageValue()` must return a value assignable to the interface parameter type; otherwise metadata is treated as empty and resolvers that rely on `MessageType` will skip it.
 
 For the global registry helpers, use `registry.AddResolver` and `registry.HasResolver`.
 
 Migration notes:
 
-- If you switch to resolver-based queue registration, you must attach the queue resolver
-  or queue registration will not happen.
-- When both resolver-based and direct registration are used, the queue layer should treat
-  duplicate registrations as no-ops to avoid conflicts.
+- If you switch to resolver based queue registration, you must attach the queue resolver or queue registration will not happen.
+- When both resolver based and direct registration are used, the queue layer should treat duplicate registrations as noops to avoid conflicts.
 
 See `docs/GUIDE_RESOLVERS.md` for a deeper guide.
 
@@ -257,7 +254,7 @@ The batch executor:
 
 - Splits messages into batches of specified size
 - Processes batches concurrently with configurable parallelism
-- Supports error handling with optional stop-on-error behavior
+- Supports error handling with optional "stop on error" behavior
 - Provides detailed error metadata for debugging
 
 ### 4. Parallel Executor
@@ -320,8 +317,8 @@ err := runner.RunCommand(ctx, handler, cmd, msg)
 
 The runner supports custom retry logic through error interfaces:
 
-- `IsRetryable() bool` - Control whether an error should trigger a retry
-- `RetryDelay(attempt int) time.Duration` - Custom retry delay calculation
+- `IsRetryable() bool`: Control whether an error should trigger a retry
+- `RetryDelay(attempt int) time.Duration`: Custom retry delay calculation
 
 ### 6. Cron Scheduler
 
@@ -393,15 +390,15 @@ _ = registry.Start(context.Background())
 
 RPC handler signatures are strict:
 
-- Execute-style: `Execute(ctx, msg) error`
-- Query-style: `Query(ctx, msg) (result, error)`
+- Execute style: `Execute(ctx, msg) error`
+- Query style: `Query(ctx, msg) (result, error)`
 - Function handlers must use the same signatures.
 
 Failure handling modes:
 
-- `FailureModeReject` (default): registration errors return; invoke panics re-panic.
-- `FailureModeRecover`: registration errors return; invoke panics become errors.
-- `FailureModeLogAndContinue`: registration failures are skipped after logging; invoke panics return errors after logging.
+- `FailureModeReject` (default): registration errors return, invoke panics.
+- `FailureModeRecover`: registration errors return, invoke panics become errors.
+- `FailureModeLogAndContinue`: registration failures are skipped after logging, invoke panics return errors after logging.
 
 Endpoint metadata returned by `Endpoint()` and `Endpoints()` is defensively copied, so caller mutations do not affect server state.
 
@@ -609,7 +606,7 @@ All operations support context for:
 
 ### Thread Safety
 
-All components are designed to be thread-safe and can be used concurrently.
+All components are designed to be thread safe and can be used concurrently.
 
 ## Contributing
 
@@ -617,4 +614,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License: see the LICENSE file for details.
