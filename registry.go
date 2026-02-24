@@ -189,6 +189,9 @@ func (r *Registry) registerWithRPC(rpcCmd RPCCommand, meta CommandMeta) error {
 
 	handler := rpcCmd.RPCHandler()
 	config := rpcCmd.RPCOptions()
+	if describer, ok := rpcCmd.(RPCDescriber); ok {
+		config = mergeRPCDescription(config, describer.RPCDescription())
+	}
 
 	if err := r.rpcRegisterFn(config, handler, meta); err != nil {
 		return errors.Wrap(err, errors.CategoryExternal, "rpc transport registration failed").
@@ -200,6 +203,25 @@ func (r *Registry) registerWithRPC(rpcCmd RPCCommand, meta CommandMeta) error {
 	}
 
 	return nil
+}
+
+func mergeRPCDescription(config RPCConfig, description RPCDescription) RPCConfig {
+	if description.Summary != "" {
+		config.Summary = description.Summary
+	}
+	if description.Description != "" {
+		config.Description = description.Description
+	}
+	if len(description.Tags) > 0 {
+		config.Tags = append([]string(nil), description.Tags...)
+	}
+	if description.Deprecated {
+		config.Deprecated = true
+	}
+	if description.Since != "" {
+		config.Since = description.Since
+	}
+	return config
 }
 
 func (r *Registry) registerWithCLI(cliCmd CLICommand) error {
