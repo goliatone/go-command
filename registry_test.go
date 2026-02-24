@@ -154,6 +154,23 @@ func (c *RPCOnlyCommand) RPCOptions() RPCConfig {
 	return c.config
 }
 
+type RPCDescribedCommand struct {
+	config      RPCConfig
+	description RPCDescription
+}
+
+func (c *RPCDescribedCommand) RPCHandler() any {
+	return c
+}
+
+func (c *RPCDescribedCommand) RPCOptions() RPCConfig {
+	return c.config
+}
+
+func (c *RPCDescribedCommand) RPCDescription() RPCDescription {
+	return c.description
+}
+
 type mockCronRegister struct {
 	mu            sync.Mutex
 	registrations []HandlerConfig
@@ -493,6 +510,41 @@ func TestRegisterWithRPC(t *testing.T) {
 		assert.Equal(t, []string{"fsm:write"}, rpcRegs[0].config.Permissions)
 		assert.Equal(t, []string{"admin"}, rpcRegs[0].config.Roles)
 		assert.Equal(t, meta, rpcRegs[0].meta)
+	})
+
+	t.Run("merges optional describer metadata", func(t *testing.T) {
+		registry := NewRegistry()
+		mockRPC := &mockRPCRegister{}
+		registry.SetRPCRegister(mockRPC.register)
+
+		cmd := &RPCDescribedCommand{
+			config: RPCConfig{
+				Method:      "fsm.snapshot",
+				Summary:     "fallback summary",
+				Description: "fallback description",
+				Tags:        []string{"fallback"},
+				Since:       "v1.0.0",
+			},
+			description: RPCDescription{
+				Summary:     "Snapshot",
+				Description: "Read current FSM snapshot",
+				Tags:        []string{"fsm", "read"},
+				Deprecated:  true,
+				Since:       "v2.0.0",
+			},
+		}
+
+		err := registry.registerWithRPC(cmd, CommandMeta{})
+		assert.NoError(t, err)
+
+		rpcRegs := mockRPC.getRegistrations()
+		require.Len(t, rpcRegs, 1)
+		assert.Equal(t, "fsm.snapshot", rpcRegs[0].config.Method)
+		assert.Equal(t, "Snapshot", rpcRegs[0].config.Summary)
+		assert.Equal(t, "Read current FSM snapshot", rpcRegs[0].config.Description)
+		assert.Equal(t, []string{"fsm", "read"}, rpcRegs[0].config.Tags)
+		assert.True(t, rpcRegs[0].config.Deprecated)
+		assert.Equal(t, "v2.0.0", rpcRegs[0].config.Since)
 	})
 
 	t.Run("no rpc register function", func(t *testing.T) {
