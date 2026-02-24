@@ -8,11 +8,13 @@ import (
 )
 
 const (
-	ErrCodeInvalidTransition  = "FSM_INVALID_TRANSITION"
-	ErrCodeGuardRejected      = "FSM_GUARD_REJECTED"
-	ErrCodeStateNotFound      = "FSM_STATE_NOT_FOUND"
-	ErrCodeVersionConflict    = "FSM_VERSION_CONFLICT"
-	ErrCodePreconditionFailed = "FSM_PRECONDITION_FAILED"
+	ErrCodeInvalidTransition     = "FSM_INVALID_TRANSITION"
+	ErrCodeGuardRejected         = "FSM_GUARD_REJECTED"
+	ErrCodeStateNotFound         = "FSM_STATE_NOT_FOUND"
+	ErrCodeVersionConflict       = "FSM_VERSION_CONFLICT"
+	ErrCodePreconditionFailed    = "FSM_PRECONDITION_FAILED"
+	ErrCodeIdempotencyConflict   = "FSM_IDEMPOTENCY_CONFLICT"
+	ErrCodeOrchestrationDegraded = "FSM_ORCHESTRATION_DEGRADED"
 )
 
 var (
@@ -26,6 +28,10 @@ var (
 				WithTextCode(ErrCodeVersionConflict)
 	ErrPreconditionFailed = apperrors.New("precondition failed", apperrors.CategoryBadInput).
 				WithTextCode(ErrCodePreconditionFailed)
+	ErrIdempotencyConflict = apperrors.New("idempotency conflict", apperrors.CategoryConflict).
+				WithTextCode(ErrCodeIdempotencyConflict)
+	ErrOrchestrationDegraded = apperrors.New("orchestration degraded", apperrors.CategoryExternal).
+					WithTextCode(ErrCodeOrchestrationDegraded)
 )
 
 func cloneRuntimeError(base *apperrors.Error, message string, source error, metadata map[string]any) *apperrors.Error {

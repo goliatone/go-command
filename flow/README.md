@@ -49,31 +49,46 @@ _ = actions.Register("audit", func(ctx context.Context, m OrderMsg) error { retu
 sm, _ := flow.NewStateMachine(cfg, flow.NewInMemoryStateStore(), req, nil, actions)
 
 res, err := sm.ApplyEvent(context.Background(), flow.ApplyEventRequest[OrderMsg]{
+  MachineID: "order",
   EntityID: "order-1",
   Event:    "approve",
   Msg:      OrderMsg{ID: "order-1", Event: "approve", State: "draft"},
   ExecCtx:  flow.ExecutionContext{ActorID: "user-1", Roles: []string{"admin"}, Tenant: "acme"},
+  IdempotencyKey: "approve-order-1-v1", // optional
+  Metadata: map[string]any{
+    "request_id": "req-123",
+  },
+  DryRun: false, // optional
 })
 if err != nil {
-  // handle runtime category: ErrInvalidTransition / ErrGuardRejected / ErrVersionConflict / ...
+  // handle runtime category: ErrInvalidTransition / ErrGuardRejected / ErrVersionConflict /
+  // ErrIdempotencyConflict / ErrOrchestrationDegraded / ...
 }
+_ = res.EventID
+_ = res.Version
 _ = res.Transition
 _ = res.Snapshot
 _ = res.Execution // nil for lightweight; set for orchestrated policy
+_ = res.IdempotencyHit
 ```
 
 Snapshot includes target metadata for static and dynamic transitions:
 
 ```go
 snap, err := sm.Snapshot(context.Background(), flow.SnapshotRequest[OrderMsg]{
+  MachineID: "order",
   EntityID: "order-1",
   Msg:      OrderMsg{ID: "order-1", State: "draft"},
   ExecCtx:  flow.ExecutionContext{ActorID: "user-1"},
+  EvaluateGuards: true,
+  IncludeBlocked: true,
 })
 if err != nil {
   // handle error
 }
 for _, tr := range snap.AllowedTransitions {
+  // tr.Allowed indicates whether guards pass for provided msg/execCtx.
+  // tr.Rejections contains structured guard rejection details when blocked.
   // tr.Target.Kind => "static" | "dynamic"
   // tr.Target.To / tr.Target.Resolver / tr.Target.Resolved / tr.Target.ResolvedTo / tr.Target.Candidates
 }

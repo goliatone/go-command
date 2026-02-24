@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/goliatone/go-command"
+	apperrors "github.com/goliatone/go-errors"
 )
 
 // TransitionRequest extracts state machine metadata from a message.
@@ -26,6 +28,8 @@ type StateMachine[T command.Message] struct {
 	machine              *CompiledMachine[T]
 	transitions          map[string]CompiledTransition[T]
 	store                StateStore
+	idempotencyStore     IdempotencyStore[T]
+	idempotencyLocks     *idempotencyKeyLocker
 	actions              *ActionRegistry[T] // reserved for orchestrator/policy layers
 	req                  TransitionRequest[T]
 	allowInitialFallback bool
@@ -64,6 +68,13 @@ func WithExecutionPolicy[T command.Message](policy ExecutionPolicy) StateMachine
 func WithOrchestrator[T command.Message](orchestrator Orchestrator[T]) StateMachineOption[T] {
 	return func(sm *StateMachine[T]) {
 		sm.orchestrator = orchestrator
+	}
+}
+
+// WithIdempotencyStore sets an explicit idempotency store implementation.
+func WithIdempotencyStore[T command.Message](store IdempotencyStore[T]) StateMachineOption[T] {
+	return func(sm *StateMachine[T]) {
+		sm.idempotencyStore = store
 	}
 }
 
@@ -152,15 +163,17 @@ func newStateMachineFromCompiled[T command.Message](
 	}
 
 	sm := &StateMachine[T]{
-		entity:          entity,
-		initial:         resolveInitialState(compiled.States),
-		machine:         compiled,
-		transitions:     transitions,
-		store:           store,
-		actions:         actions,
-		req:             req,
-		logger:          normalizeLogger(nil),
-		hookFailureMode: HookFailureModeFailOpen,
+		entity:           entity,
+		initial:          resolveInitialState(compiled.States),
+		machine:          compiled,
+		transitions:      transitions,
+		store:            store,
+		idempotencyStore: NewInMemoryIdempotencyStore[T](),
+		idempotencyLocks: newIdempotencyKeyLocker(),
+		actions:          actions,
+		req:              req,
+		logger:           normalizeLogger(nil),
+		hookFailureMode:  HookFailureModeFailOpen,
 	}
 
 	for _, opt := range opts {
@@ -170,6 +183,12 @@ func newStateMachineFromCompiled[T command.Message](
 	}
 	sm.logger = normalizeLogger(sm.logger)
 	sm.hookFailureMode = normalizeHookFailureMode(sm.hookFailureMode)
+	if sm.idempotencyStore == nil {
+		sm.idempotencyStore = NewInMemoryIdempotencyStore[T]()
+	}
+	if sm.idempotencyLocks == nil {
+		sm.idempotencyLocks = newIdempotencyKeyLocker()
+	}
 
 	if !isValidExecutionPolicy(sm.policy) {
 		return nil, fmt.Errorf("execution policy selection required: %q or %q",
@@ -250,16 +269,58 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		)
 	}
 	executionID := newExecutionID()
+	eventID := newEventID()
+	machineID := s.machineID()
+	machineVersion := s.machineVersion()
 
-	fields := map[string]any{
-		"machine_id":      s.machineID(),
-		"machine_version": s.machineVersion(),
+	fields := mergeFields(copyMap(req.Metadata), map[string]any{
+		"machine_id":      machineID,
+		"machine_version": machineVersion,
 		"entity_id":       entityID,
 		"event":           event,
 		"execution_id":    executionID,
+	})
+	if requestedMachineID := strings.TrimSpace(req.MachineID); requestedMachineID != "" {
+		fields["request_machine_id"] = requestedMachineID
+	}
+	if req.DryRun {
+		fields["dry_run"] = true
 	}
 	logger := withLoggerFields(s.logger.WithContext(ctx), fields)
 	logger.Debug("apply event requested")
+	if err := s.validateRequestedMachineID(req.MachineID, nil, fields); err != nil {
+		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", "", "", executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		return nil, err
+	}
+
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	idempotencyScope := IdempotencyScope{}
+	requestHash := ""
+	if idempotencyKey != "" {
+		fields["idempotency_key"] = idempotencyKey
+		idempotencyScope = IdempotencyScope{
+			MachineID:      machineID,
+			EntityID:       entityID,
+			Event:          event,
+			IdempotencyKey: idempotencyKey,
+		}
+		unlock := s.idempotencyLocks.Lock(idempotencyScope.key())
+		defer unlock()
+
+		requestHash = idempotencyPayloadHash(req, machineID, entityID, event)
+		replay, replayErr := s.loadIdempotencyReplay(ctx, idempotencyScope, requestHash, fields)
+		if replayErr != nil {
+			if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", "", "", executionID, TransitionPhaseRejected, replayErr)); lifecycleErr != nil {
+				return nil, lifecycleErr
+			}
+			return nil, replayErr
+		}
+		if replay != nil {
+			return replay, nil
+		}
+	}
 
 	rec, current, currentVersion, err := s.loadCurrentRecord(ctx, entityID, req.Msg)
 	if err != nil {
@@ -270,6 +331,12 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		return nil, err
 	}
 	if err := s.validateMachinePin(rec, fields); err != nil {
+		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		return nil, err
+	}
+	if err := s.validateRequestedMachineID(req.MachineID, rec, fields); err != nil {
 		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
@@ -338,7 +405,44 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		return nil, err
 	}
 
-	var effects []Effect
+	effects := s.compileEffects(req.Msg, tr)
+	result := &TransitionResult[T]{
+		PreviousState: current,
+		CurrentState:  next,
+		Effects:       effects,
+	}
+
+	if req.DryRun {
+		snapshot, snapErr := s.snapshotForState(ctx, SnapshotRequest[T]{
+			MachineID: req.MachineID,
+			EntityID:  req.EntityID,
+			Msg:       req.Msg,
+			ExecCtx:   req.ExecCtx,
+		}, next, currentVersion)
+		if snapErr != nil {
+			logger.Warn("dry run snapshot generation failed: %v", snapErr)
+		}
+		response := &ApplyEventResponse[T]{
+			EventID:    eventID,
+			Version:    currentVersion,
+			Transition: result,
+			Snapshot:   snapshot,
+		}
+		if idempotencyScope.valid() {
+			replayed, persistErr := s.persistIdempotencyReplay(ctx, idempotencyScope, requestHash, response, fields)
+			if persistErr != nil {
+				if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, persistErr)); lifecycleErr != nil {
+					return nil, lifecycleErr
+				}
+				return nil, persistErr
+			}
+			response = replayed
+		}
+		if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseCommitted, nil)); err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
 
 	nextVersion := currentVersion
 	txErr := s.store.RunInTransaction(ctx, func(tx TxStore) error {
@@ -360,10 +464,11 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		save := &StateRecord{
 			EntityID:       entityID,
 			State:          next,
-			MachineID:      s.machineID(),
-			MachineVersion: s.machineVersion(),
+			MachineID:      machineID,
+			MachineVersion: machineVersion,
 			Metadata: mergeRecordMetadata(map[string]any{
 				"last_event":     event,
+				"event_id":       eventID,
 				"transition_id":  tr.ID,
 				"actor_id":       req.ExecCtx.ActorID,
 				"tenant":         req.ExecCtx.Tenant,
@@ -376,7 +481,6 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		}
 		nextVersion = newVersion
 
-		effects = s.compileEffects(req.Msg, tr)
 		if s.shouldPersistOutboxEffects() {
 			entries := effectsToOutbox(entityID, tr.ID, event, effects, fields)
 			for _, entry := range entries {
@@ -396,6 +500,18 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		} else {
 			outErr = cloneRuntimeError(ErrPreconditionFailed, "failed to persist state", txErr, fields)
 		}
+		if idempotencyScope.valid() && runtimeErrorCode(outErr) == ErrCodeVersionConflict {
+			replay, replayErr := s.loadIdempotencyReplay(ctx, idempotencyScope, requestHash, fields)
+			if replayErr != nil {
+				if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, replayErr)); lifecycleErr != nil {
+					return nil, lifecycleErr
+				}
+				return nil, replayErr
+			}
+			if replay != nil {
+				return replay, nil
+			}
+		}
 		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, outErr)); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
@@ -404,23 +520,19 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	logger.Info("apply event committed state=%s version=%d", next, nextVersion)
 
 	snapshot, snapErr := s.snapshotForState(ctx, SnapshotRequest[T]{
-		EntityID: req.EntityID,
-		Msg:      req.Msg,
-		ExecCtx:  req.ExecCtx,
+		MachineID: req.MachineID,
+		EntityID:  req.EntityID,
+		Msg:       req.Msg,
+		ExecCtx:   req.ExecCtx,
 	}, next, nextVersion)
 	if snapErr != nil {
 		logger.Warn("snapshot generation failed: %v", snapErr)
 	}
 
-	result := &TransitionResult[T]{
-		PreviousState: current,
-		CurrentState:  next,
-		Effects:       effects,
-	}
 	startReq := StartRequest[T]{
 		ExecutionID:     executionID,
-		MachineID:       s.machineID(),
-		MachineVersion:  s.machineVersion(),
+		MachineID:       machineID,
+		MachineVersion:  machineVersion,
 		EntityID:        entityID,
 		Event:           event,
 		TransitionID:    tr.ID,
@@ -439,6 +551,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		logger.Warn("orchestrator start failed after commit: %v", orchestrationErr)
 		fields["orchestration_start_error"] = orchestrationErr.Error()
 		fields["orchestration_degraded"] = true
+		fields["orchestration_error_code"] = ErrCodeOrchestrationDegraded
 		handle = s.newDegradedExecutionHandle(executionID, fields)
 	}
 	if handle != nil && strings.TrimSpace(handle.ExecutionID) != "" {
@@ -446,15 +559,29 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		fields["execution_id"] = executionID
 		logger = withLoggerFields(logger, map[string]any{"execution_id": executionID})
 	}
+	response := &ApplyEventResponse[T]{
+		EventID:    eventID,
+		Version:    nextVersion,
+		Transition: result,
+		Snapshot:   snapshot,
+		Execution:  handle,
+	}
+	if idempotencyScope.valid() {
+		replayed, persistErr := s.persistIdempotencyReplay(ctx, idempotencyScope, requestHash, response, fields)
+		if persistErr != nil {
+			logger.Warn("idempotency persistence failed after commit: %v", persistErr)
+			if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseRejected, persistErr)); lifecycleErr != nil {
+				return nil, lifecycleErr
+			}
+			return nil, persistErr
+		}
+		response = replayed
+	}
 	if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseCommitted, nil)); err != nil {
 		logger.Warn("committed lifecycle dispatch failed post-commit: %v", err)
 	}
 
-	return &ApplyEventResponse[T]{
-		Transition: result,
-		Snapshot:   snapshot,
-		Execution:  handle,
-	}, nil
+	return response, nil
 }
 
 // ExecutionStatus returns current orchestration status for an execution.
@@ -488,6 +615,70 @@ func (s *StateMachine[T]) ExecutionStatus(ctx context.Context, executionID strin
 	return status, nil
 }
 
+// ExecutionList returns execution statuses matching the provided scope.
+func (s *StateMachine[T]) ExecutionList(ctx context.Context, scope ExecutionScope) ([]ExecutionStatus, error) {
+	scope = normalizeExecutionScope(scope)
+	if s == nil || s.orchestrator == nil {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"orchestrator not configured",
+			nil,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	provider, ok := s.orchestrator.(ExecutionListProvider)
+	if !ok {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"orchestrator does not support execution list",
+			nil,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	statuses, err := provider.List(ctx, scope)
+	if err != nil {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"failed to list executions",
+			err,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	return statuses, nil
+}
+
+// ExecutionHistory returns lifecycle events matching the provided scope.
+func (s *StateMachine[T]) ExecutionHistory(ctx context.Context, scope ExecutionScope) ([]TransitionLifecycleEvent[T], error) {
+	scope = normalizeExecutionScope(scope)
+	if s == nil || s.orchestrator == nil {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"orchestrator not configured",
+			nil,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	provider, ok := s.orchestrator.(ExecutionHistoryProvider[T])
+	if !ok {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"orchestrator does not support execution history",
+			nil,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	events, err := provider.History(ctx, scope)
+	if err != nil {
+		return nil, cloneRuntimeError(
+			ErrPreconditionFailed,
+			"failed to load execution history",
+			err,
+			s.executionScopeMetadata(scope),
+		)
+	}
+	return events, nil
+}
+
 // PauseExecution pauses one orchestrated execution by identifier.
 func (s *StateMachine[T]) PauseExecution(ctx context.Context, executionID string) error {
 	return s.controlExecution(ctx, executionID, "pause", func(orc Orchestrator[T], id string) error {
@@ -512,20 +703,33 @@ func (s *StateMachine[T]) StopExecution(ctx context.Context, executionID string)
 // Snapshot returns transition metadata for the current entity state.
 func (s *StateMachine[T]) Snapshot(ctx context.Context, req SnapshotRequest[T]) (*Snapshot, error) {
 	entityID := strings.TrimSpace(req.EntityID)
+	fields := map[string]any{
+		"machine_id": s.machineID(),
+		"entity_id":  entityID,
+	}
 	if entityID == "" {
 		return nil, cloneRuntimeError(
 			ErrPreconditionFailed,
 			"entity id is required",
 			nil,
-			map[string]any{"machine_id": s.machineID()},
+			fields,
 		)
+	}
+	if requestedMachineID := strings.TrimSpace(req.MachineID); requestedMachineID != "" {
+		fields["request_machine_id"] = requestedMachineID
+	}
+	if err := s.validateRequestedMachineID(req.MachineID, nil, fields); err != nil {
+		return nil, err
 	}
 
 	rec, current, version, err := s.loadCurrentRecord(ctx, entityID, req.Msg)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateMachinePin(rec, map[string]any{"machine_id": s.machineID(), "entity_id": entityID}); err != nil {
+	if err := s.validateMachinePin(rec, fields); err != nil {
+		return nil, err
+	}
+	if err := s.validateRequestedMachineID(req.MachineID, rec, fields); err != nil {
 		return nil, err
 	}
 	return s.snapshotForState(ctx, req, current, version)
@@ -538,12 +742,22 @@ func (s *StateMachine[T]) snapshotForState(ctx context.Context, req SnapshotRequ
 		if normalizeState(tr.From) != current {
 			continue
 		}
-		allowed = append(allowed, TransitionInfo{
+		info := TransitionInfo{
 			ID:       tr.ID,
 			Event:    tr.Event,
 			Target:   buildTargetInfo(ctx, tr, req.Msg, req.ExecCtx, s.machine),
+			Allowed:  true,
 			Metadata: copyMap(tr.Metadata),
-		})
+		}
+		if req.EvaluateGuards {
+			rejections := collectGuardRejections(ctx, tr.Guards, req.Msg, req.ExecCtx)
+			info.Rejections = cloneGuardRejections(rejections)
+			info.Allowed = len(rejections) == 0
+			if !info.Allowed && !req.IncludeBlocked {
+				continue
+			}
+		}
+		allowed = append(allowed, info)
 	}
 	sort.Slice(allowed, func(i, j int) bool {
 		if allowed[i].Event == allowed[j].Event {
@@ -680,6 +894,109 @@ func (s *StateMachine[T]) validateMachinePin(rec *StateRecord, fields map[string
 	return nil
 }
 
+func (s *StateMachine[T]) validateRequestedMachineID(requestMachineID string, rec *StateRecord, fields map[string]any) error {
+	requestMachineID = strings.TrimSpace(requestMachineID)
+	if requestMachineID == "" {
+		return nil
+	}
+	runtimeMachineID := strings.TrimSpace(s.machineID())
+	if runtimeMachineID != "" && requestMachineID != runtimeMachineID {
+		meta := copyMap(fields)
+		meta["request_machine_id"] = requestMachineID
+		meta["runtime_machine_id"] = runtimeMachineID
+		return cloneRuntimeError(ErrPreconditionFailed, "requested machine id does not match runtime machine", nil, meta)
+	}
+	if rec != nil && strings.TrimSpace(rec.MachineID) != "" && requestMachineID != strings.TrimSpace(rec.MachineID) {
+		meta := copyMap(fields)
+		meta["request_machine_id"] = requestMachineID
+		meta["record_machine_id"] = strings.TrimSpace(rec.MachineID)
+		return cloneRuntimeError(ErrPreconditionFailed, "requested machine id does not match persisted machine", nil, meta)
+	}
+	return nil
+}
+
+func (s *StateMachine[T]) loadIdempotencyReplay(
+	ctx context.Context,
+	scope IdempotencyScope,
+	requestHash string,
+	fields map[string]any,
+) (*ApplyEventResponse[T], error) {
+	if s == nil || s.idempotencyStore == nil || !scope.valid() {
+		return nil, nil
+	}
+	rec, err := s.idempotencyStore.Load(ctx, scope)
+	if err != nil {
+		meta := copyMap(fields)
+		meta["idempotency_scope"] = scope.key()
+		return nil, cloneRuntimeError(ErrPreconditionFailed, "failed to load idempotency record", err, meta)
+	}
+	if rec == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(rec.RequestHash) != strings.TrimSpace(requestHash) {
+		meta := copyMap(fields)
+		meta["idempotency_scope"] = scope.key()
+		meta["idempotency_record_hash"] = strings.TrimSpace(rec.RequestHash)
+		meta["idempotency_request_hash"] = strings.TrimSpace(requestHash)
+		return nil, cloneRuntimeError(ErrIdempotencyConflict, "idempotency key replay payload mismatch", nil, meta)
+	}
+	replay := cloneApplyEventResponse(rec.Response)
+	if replay == nil {
+		meta := copyMap(fields)
+		meta["idempotency_scope"] = scope.key()
+		return nil, cloneRuntimeError(ErrPreconditionFailed, "idempotency replay response missing", nil, meta)
+	}
+	replay.IdempotencyHit = true
+	return replay, nil
+}
+
+func (s *StateMachine[T]) persistIdempotencyReplay(
+	ctx context.Context,
+	scope IdempotencyScope,
+	requestHash string,
+	response *ApplyEventResponse[T],
+	fields map[string]any,
+) (*ApplyEventResponse[T], error) {
+	if !scope.valid() {
+		return cloneApplyEventResponse(response), nil
+	}
+	if s == nil || s.idempotencyStore == nil {
+		return nil, cloneRuntimeError(ErrPreconditionFailed, "idempotency store not configured", nil, fields)
+	}
+	if response == nil {
+		return nil, cloneRuntimeError(ErrPreconditionFailed, "idempotency response required", nil, fields)
+	}
+
+	rec := &IdempotencyRecord[T]{
+		Scope:       scope,
+		RequestHash: strings.TrimSpace(requestHash),
+		Response:    cloneApplyEventResponse(response),
+	}
+	if err := s.idempotencyStore.Save(ctx, rec); err != nil {
+		if !errors.Is(err, ErrIdempotencyRecordExists) {
+			meta := copyMap(fields)
+			meta["idempotency_scope"] = scope.key()
+			return nil, cloneRuntimeError(ErrPreconditionFailed, "failed to persist idempotency record", err, meta)
+		}
+		replay, replayErr := s.loadIdempotencyReplay(ctx, scope, requestHash, fields)
+		if replayErr != nil {
+			return nil, replayErr
+		}
+		if replay != nil {
+			return replay, nil
+		}
+		meta := copyMap(fields)
+		meta["idempotency_scope"] = scope.key()
+		return nil, cloneRuntimeError(ErrPreconditionFailed, "idempotency record exists but replay is unavailable", nil, meta)
+	}
+
+	out := cloneApplyEventResponse(response)
+	if out != nil {
+		out.IdempotencyHit = false
+	}
+	return out, nil
+}
+
 func (s *StateMachine[T]) compileEffects(msg T, tr CompiledTransition[T]) []Effect {
 	if len(tr.Plan.Nodes) == 0 {
 		return nil
@@ -735,14 +1052,104 @@ func evaluateGuards[T any](
 			continue
 		}
 		if err := guard(ctx, msg, execCtx); err != nil {
-			message := fmt.Sprintf("guard[%d] rejected transition", idx)
-			if !isGuardRejected(err) {
-				message = fmt.Sprintf("guard[%d] failed", idx)
+			rejection := guardRejectionFromError(idx, err)
+			meta := copyMap(metadata)
+			if meta == nil {
+				meta = map[string]any{}
 			}
-			return cloneRuntimeError(ErrGuardRejected, message, err, metadata)
+			meta["guard_index"] = idx
+			meta["guard_rejection"] = rejection
+			meta["guard_rejections"] = []GuardRejection{rejection}
+
+			message := strings.TrimSpace(rejection.Message)
+			if message == "" {
+				if rejection.Category == GuardClassificationUnexpectedFailure {
+					message = fmt.Sprintf("guard[%d] failed", idx)
+				} else {
+					message = fmt.Sprintf("guard[%d] rejected transition", idx)
+				}
+			}
+			return cloneRuntimeError(ErrGuardRejected, message, err, meta)
 		}
 	}
 	return nil
+}
+
+func collectGuardRejections[T any](
+	ctx context.Context,
+	guards []Guard[T],
+	msg T,
+	execCtx ExecutionContext,
+) []GuardRejection {
+	for idx, guard := range guards {
+		if guard == nil {
+			continue
+		}
+		if err := guard(ctx, msg, execCtx); err != nil {
+			return []GuardRejection{guardRejectionFromError(idx, err)}
+		}
+	}
+	return nil
+}
+
+func guardRejectionFromError(idx int, err error) GuardRejection {
+	rejection := GuardRejection{
+		Code:     ErrCodeGuardRejected,
+		Category: GuardClassificationUnexpectedFailure,
+		Message:  fmt.Sprintf("guard[%d] failed", idx),
+		Metadata: map[string]any{"guard_index": idx},
+	}
+	if err == nil {
+		rejection.Category = GuardClassificationPass
+		rejection.Message = fmt.Sprintf("guard[%d] passed", idx)
+		return rejection
+	}
+
+	var structured *GuardRejection
+	if errors.As(err, &structured) && structured != nil {
+		rejection = *structured
+		rejection.Metadata = copyMap(structured.Metadata)
+		if rejection.Metadata == nil {
+			rejection.Metadata = map[string]any{}
+		}
+		rejection.Metadata["guard_index"] = idx
+		if strings.TrimSpace(rejection.Code) == "" {
+			rejection.Code = ErrCodeGuardRejected
+		}
+		if strings.TrimSpace(rejection.Category) == "" {
+			rejection.Category = GuardClassificationDomainReject
+		}
+		if strings.TrimSpace(rejection.Message) == "" {
+			rejection.Message = fmt.Sprintf("guard[%d] rejected transition", idx)
+		}
+		return rejection
+	}
+
+	var appErr *apperrors.Error
+	if errors.As(err, &appErr) && appErr != nil {
+		if appErr.TextCode != "" {
+			rejection.Code = appErr.TextCode
+		}
+		if len(appErr.Metadata) > 0 {
+			rejection.Metadata = copyMap(appErr.Metadata)
+			rejection.Metadata["guard_index"] = idx
+		}
+	}
+
+	if isGuardRejected(err) {
+		rejection.Category = GuardClassificationDomainReject
+		rejection.Message = fmt.Sprintf("guard[%d] rejected transition", idx)
+		return rejection
+	}
+
+	rejection.Category = GuardClassificationUnexpectedFailure
+	if text := strings.TrimSpace(err.Error()); text != "" {
+		rejection.Message = text
+	}
+	if code := strings.TrimSpace(runtimeErrorCode(err)); code != "" {
+		rejection.Code = code
+	}
+	return rejection
 }
 
 func resolveTarget[T any](
@@ -933,6 +1340,30 @@ func (s *StateMachine[T]) executionControlMetadata(executionID string) map[strin
 	metadata["machine_id"] = s.machineID()
 	metadata["machine_version"] = s.machineVersion()
 	return metadata
+}
+
+func (s *StateMachine[T]) executionScopeMetadata(scope ExecutionScope) map[string]any {
+	scope = normalizeExecutionScope(scope)
+	metadata := map[string]any{
+		"machine_id":      "",
+		"machine_version": "",
+		"scope_machine_id": scope.MachineID,
+		"scope_entity_id":  scope.EntityID,
+		"scope_execution_id": scope.ExecutionID,
+		"scope_tenant":       scope.Tenant,
+	}
+	if s != nil {
+		metadata["machine_id"] = s.machineID()
+		metadata["machine_version"] = s.machineVersion()
+	}
+	return metadata
+}
+
+var eventCounter atomic.Uint64
+
+func newEventID() string {
+	n := eventCounter.Add(1)
+	return fmt.Sprintf("evt-%d-%d", time.Now().UTC().UnixNano(), n)
 }
 
 func transitionKey(state, event string) string {

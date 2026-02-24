@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -14,19 +15,26 @@ type ExecutionContext struct {
 
 // ApplyEventRequest is the canonical runtime envelope for transitions.
 type ApplyEventRequest[T any] struct {
+	MachineID       string
 	EntityID        string
 	Event           string
 	Msg             T
 	ExecCtx         ExecutionContext
 	ExpectedState   string
 	ExpectedVersion int
+	IdempotencyKey  string
+	Metadata        map[string]any
+	DryRun          bool
 }
 
 // ApplyEventResponse is the canonical transport-agnostic transition envelope.
 type ApplyEventResponse[T any] struct {
-	Transition *TransitionResult[T]
-	Snapshot   *Snapshot
-	Execution  *ExecutionHandle
+	EventID        string
+	Version        int
+	Transition     *TransitionResult[T]
+	Snapshot       *Snapshot
+	Execution      *ExecutionHandle
+	IdempotencyHit bool
 }
 
 // ExecutionHandle describes external orchestration execution state.
@@ -39,9 +47,12 @@ type ExecutionHandle struct {
 
 // SnapshotRequest is the canonical request envelope for snapshot reads.
 type SnapshotRequest[T any] struct {
-	EntityID string
-	Msg      T
-	ExecCtx  ExecutionContext
+	MachineID      string
+	EntityID       string
+	Msg            T
+	ExecCtx        ExecutionContext
+	EvaluateGuards bool
+	IncludeBlocked bool
 }
 
 // Snapshot captures current state and transition metadata.
@@ -54,10 +65,39 @@ type Snapshot struct {
 
 // TransitionInfo describes one transition available from snapshot state.
 type TransitionInfo struct {
-	ID       string
-	Event    string
-	Target   TargetInfo
-	Metadata map[string]any
+	ID         string
+	Event      string
+	Target     TargetInfo
+	Allowed    bool
+	Rejections []GuardRejection
+	Metadata   map[string]any
+}
+
+const (
+	GuardClassificationPass              = "pass"
+	GuardClassificationDomainReject      = "domain reject"
+	GuardClassificationUnexpectedFailure = "unexpected failure"
+)
+
+// GuardRejection captures structured guard rejection diagnostics.
+type GuardRejection struct {
+	Code            string
+	Category        string
+	Retryable       bool
+	RequiresAction  bool
+	Message         string
+	RemediationHint string
+	Metadata        map[string]any
+}
+
+func (g *GuardRejection) Error() string {
+	if g == nil {
+		return "guard rejection"
+	}
+	if message := strings.TrimSpace(g.Message); message != "" {
+		return message
+	}
+	return "guard rejection"
 }
 
 // TargetInfo captures static/dynamic target metadata.

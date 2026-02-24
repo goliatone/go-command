@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,6 +44,24 @@ type Orchestrator[T any] interface {
 	Resume(ctx context.Context, executionID string) error
 	Stop(ctx context.Context, executionID string) error
 	Status(ctx context.Context, executionID string) (*ExecutionStatus, error)
+}
+
+// ExecutionScope constrains execution control/query APIs.
+type ExecutionScope struct {
+	MachineID   string
+	EntityID    string
+	ExecutionID string
+	Tenant      string
+}
+
+// ExecutionListProvider exposes execution listing for query handlers.
+type ExecutionListProvider interface {
+	List(ctx context.Context, scope ExecutionScope) ([]ExecutionStatus, error)
+}
+
+// ExecutionHistoryProvider exposes execution lifecycle history for query handlers.
+type ExecutionHistoryProvider[T any] interface {
+	History(ctx context.Context, scope ExecutionScope) ([]TransitionLifecycleEvent[T], error)
 }
 
 // StartRequest carries transition output into the orchestration layer.
@@ -106,6 +125,7 @@ type ExecutionRecord[T any] struct {
 type ExecutionRecordStore[T any] interface {
 	Save(ctx context.Context, rec *ExecutionRecord[T]) error
 	Load(ctx context.Context, executionID string) (*ExecutionRecord[T], error)
+	List(ctx context.Context) ([]*ExecutionRecord[T], error)
 	UpdateStatus(ctx context.Context, executionID, status string) error
 	UpdateResult(ctx context.Context, executionID, status, errorCode, errorMessage, currentState string) error
 }
@@ -169,6 +189,28 @@ func (s *InMemoryExecutionRecordStore[T]) Load(_ context.Context, executionID st
 		return nil, nil
 	}
 	return cloneExecutionRecord(rec), nil
+}
+
+func (s *InMemoryExecutionRecordStore[T]) List(_ context.Context) ([]*ExecutionRecord[T], error) {
+	if s == nil {
+		return nil, errors.New("execution record store not configured")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*ExecutionRecord[T], 0, len(s.records))
+	for _, rec := range s.records {
+		if rec == nil {
+			continue
+		}
+		out = append(out, cloneExecutionRecord(rec))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out, nil
 }
 
 func (s *InMemoryExecutionRecordStore[T]) UpdateStatus(_ context.Context, executionID, status string) error {
@@ -293,6 +335,7 @@ type LightweightOrchestrator[T command.Message] struct {
 
 	mu       sync.RWMutex
 	statuses map[string]*ExecutionStatus
+	history  []TransitionLifecycleEvent[T]
 }
 
 // LightweightOrchestratorOption customizes lightweight orchestration.
@@ -329,6 +372,7 @@ func NewLightweightOrchestrator[T command.Message](
 		hookFailureMode: HookFailureModeFailOpen,
 		logger:          normalizeLogger(nil),
 		statuses:        make(map[string]*ExecutionStatus),
+		history:         make([]TransitionLifecycleEvent[T], 0),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -431,10 +475,64 @@ func (o *LightweightOrchestrator[T]) Status(_ context.Context, executionID strin
 	return &cp, nil
 }
 
+func (o *LightweightOrchestrator[T]) List(_ context.Context, scope ExecutionScope) ([]ExecutionStatus, error) {
+	if o == nil {
+		return nil, errors.New("lightweight orchestrator not configured")
+	}
+	scope = normalizeExecutionScope(scope)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	out := make([]ExecutionStatus, 0, len(o.statuses))
+	for _, status := range o.statuses {
+		if status == nil {
+			continue
+		}
+		cp := *status
+		cp.Metadata = copyMap(status.Metadata)
+		if !executionScopeMatchesStatus(scope, &cp) {
+			continue
+		}
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (o *LightweightOrchestrator[T]) History(_ context.Context, scope ExecutionScope) ([]TransitionLifecycleEvent[T], error) {
+	if o == nil {
+		return nil, errors.New("lightweight orchestrator not configured")
+	}
+	scope = normalizeExecutionScope(scope)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	out := make([]TransitionLifecycleEvent[T], 0, len(o.history))
+	for _, evt := range o.history {
+		if !executionScopeMatchesEvent(scope, evt) {
+			continue
+		}
+		out = append(out, cloneLifecycleEvent(evt))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].OccurredAt.Before(out[j].OccurredAt)
+	})
+	return out, nil
+}
+
 func (o *LightweightOrchestrator[T]) OnTransitionLifecycleEvent(ctx context.Context, evt TransitionLifecycleEvent[T]) error {
 	if o == nil {
 		return errors.New("lightweight orchestrator not configured")
 	}
+	o.mu.Lock()
+	o.history = append(o.history, cloneLifecycleEvent(evt))
+	o.mu.Unlock()
 	return fanoutLifecycleHooks(ctx, o.hooks, evt, o.hookFailureMode, o.logger)
 }
 
@@ -667,6 +765,60 @@ func (o *DurableOrchestrator[T]) Status(ctx context.Context, executionID string)
 	}, nil
 }
 
+func (o *DurableOrchestrator[T]) List(ctx context.Context, scope ExecutionScope) ([]ExecutionStatus, error) {
+	if o == nil {
+		return nil, errors.New("durable orchestrator not configured")
+	}
+	records, err := o.records.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scope = normalizeExecutionScope(scope)
+	out := make([]ExecutionStatus, 0, len(records))
+	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
+		status := executionStatusFromRecord(rec)
+		if !executionScopeMatchesStatus(scope, &status) {
+			continue
+		}
+		out = append(out, status)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (o *DurableOrchestrator[T]) History(ctx context.Context, scope ExecutionScope) ([]TransitionLifecycleEvent[T], error) {
+	if o == nil {
+		return nil, errors.New("durable orchestrator not configured")
+	}
+	intents, err := o.intents.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scope = normalizeExecutionScope(scope)
+	out := make([]TransitionLifecycleEvent[T], 0, len(intents))
+	for _, evt := range intents {
+		if !executionScopeMatchesEvent(scope, evt) {
+			continue
+		}
+		out = append(out, cloneLifecycleEvent(evt))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].OccurredAt.Before(out[j].OccurredAt)
+	})
+	return out, nil
+}
+
 func (o *DurableOrchestrator[T]) OnTransitionLifecycleEvent(ctx context.Context, evt TransitionLifecycleEvent[T]) error {
 	if o == nil {
 		return errors.New("durable orchestrator not configured")
@@ -766,6 +918,97 @@ func (o *DurableOrchestrator[T]) HandleResume(ctx context.Context, req ResumeReq
 		nextState = resp.Transition.CurrentState
 	}
 	return o.records.UpdateResult(ctx, executionID, ExecutionStateCompleted, "", "", nextState)
+}
+
+func executionStatusFromRecord[T any](rec *ExecutionRecord[T]) ExecutionStatus {
+	if rec == nil {
+		return ExecutionStatus{}
+	}
+	metadata := copyMap(rec.Metadata)
+	metadata = mergeFields(metadata, map[string]any{
+		"machine_id":      strings.TrimSpace(rec.MachineID),
+		"machine_version": strings.TrimSpace(rec.MachineVersion),
+		"entity_id":       strings.TrimSpace(rec.EntityID),
+		"execution_id":    strings.TrimSpace(rec.ExecutionID),
+	})
+	return ExecutionStatus{
+		ExecutionID: rec.ExecutionID,
+		Policy:      rec.Policy,
+		Status:      rec.Status,
+		Attempts:    rec.AttemptCount,
+		ErrorCode:   rec.ErrorCode,
+		Error:       rec.ErrorMessage,
+		UpdatedAt:   rec.UpdatedAt,
+		Metadata:    metadata,
+	}
+}
+
+func normalizeExecutionScope(scope ExecutionScope) ExecutionScope {
+	scope.MachineID = strings.TrimSpace(scope.MachineID)
+	scope.EntityID = strings.TrimSpace(scope.EntityID)
+	scope.ExecutionID = strings.TrimSpace(scope.ExecutionID)
+	scope.Tenant = strings.TrimSpace(scope.Tenant)
+	return scope
+}
+
+func executionScopeMatchesStatus(scope ExecutionScope, status *ExecutionStatus) bool {
+	if status == nil {
+		return false
+	}
+	scope = normalizeExecutionScope(scope)
+	if scope.ExecutionID != "" && strings.TrimSpace(status.ExecutionID) != scope.ExecutionID {
+		return false
+	}
+	metadata := status.Metadata
+	if scope.MachineID != "" && strings.TrimSpace(readStringFromMetadata(metadata, "machine_id")) != scope.MachineID {
+		return false
+	}
+	if scope.EntityID != "" && strings.TrimSpace(readStringFromMetadata(metadata, "entity_id")) != scope.EntityID {
+		return false
+	}
+	if scope.Tenant != "" && strings.TrimSpace(readStringFromMetadata(metadata, "tenant")) != scope.Tenant {
+		return false
+	}
+	return true
+}
+
+func executionScopeMatchesEvent[T any](scope ExecutionScope, evt TransitionLifecycleEvent[T]) bool {
+	scope = normalizeExecutionScope(scope)
+	if scope.ExecutionID != "" && strings.TrimSpace(evt.ExecutionID) != scope.ExecutionID {
+		return false
+	}
+	if scope.MachineID != "" && strings.TrimSpace(evt.MachineID) != scope.MachineID {
+		return false
+	}
+	if scope.EntityID != "" && strings.TrimSpace(evt.EntityID) != scope.EntityID {
+		return false
+	}
+	tenant := strings.TrimSpace(evt.ExecCtx.Tenant)
+	if tenant == "" {
+		tenant = strings.TrimSpace(readStringFromMetadata(evt.Metadata, "tenant"))
+	}
+	if scope.Tenant != "" && tenant != scope.Tenant {
+		return false
+	}
+	return true
+}
+
+func readStringFromMetadata(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	raw, ok := metadata[strings.TrimSpace(key)]
+	if !ok {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return value
+	case fmt.Stringer:
+		return value.String()
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 func waitForDelay(ctx context.Context, delay time.Duration) error {
