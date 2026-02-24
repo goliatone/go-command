@@ -107,8 +107,8 @@ Exposure defaults:
 
 ## RPC Resolver and Transport Hook
 
-RPC registration is built in and runs through `SetRPCRegister(...)`.
-Commands opt in by implementing `command.RPCCommand`.
+Prefer explicit RPC endpoint registration via `rpc.Resolver(...)`.
+Commands opt in by implementing `rpc.EndpointsProvider`.
 
 ```go
 rpcServer := rpc.NewServer(
@@ -119,14 +119,13 @@ rpcServer := rpc.NewServer(
 )
 
 cmdRegistry := command.NewRegistry()
-cmdRegistry.SetRPCRegister(rpcServer.Register)
+_ = cmdRegistry.AddResolver("rpc-explicit", rpc.Resolver(rpcServer))
 ```
 
-Required handler signatures are strict:
+Canonical endpoint signatures should use:
 
-- Execute-style: `Execute(ctx, msg) error`
-- Query-style: `Query(ctx, msg) (result, error)`
-- Function handlers must use the same signatures.
+- Request: `rpc.RequestEnvelope[T]`
+- Response: `rpc.ResponseEnvelope[T]`
 
 If signatures are invalid, registration fails (or is handled by your configured
 failure mode).
@@ -135,7 +134,7 @@ Failure mode summary:
 
 - `FailureModeReject` (default): return registration errors; invoke panic re-panics.
 - `FailureModeRecover`: return registration errors; convert invoke panic to error.
-- `FailureModeLogAndContinue`: skip registration failure after logging; invoke panic returns `(nil, nil)` after logging.
+- `FailureModeLogAndContinue`: skip registration failure after logging; invoke panic returns an error after logging.
 
 ## Message Metadata and MessageFactory
 

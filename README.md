@@ -349,24 +349,36 @@ scheduler.Start(context.Background())
 
 ### 7. RPC Method Adapter
 
-Expose commands and queries as RPC methods by implementing `command.RPCCommand`:
+Expose methods as explicit typed RPC endpoints by implementing `rpc.EndpointsProvider`:
 
 ```go
-type ApplyEventCommand struct{}
-
-func (c *ApplyEventCommand) Execute(ctx context.Context, msg ApplyEvent) error {
-    return nil
+type ApplyEventData struct {
+    EntityID string `json:"entityId"`
+    Event    string `json:"event"`
 }
 
-func (c *ApplyEventCommand) RPCHandler() any { return c }
+type ApplyEventEndpoint struct{}
 
-func (c *ApplyEventCommand) RPCOptions() command.RPCConfig {
-    return command.RPCConfig{
-        Method:      "fsm.apply_event",
-        Timeout:     5 * time.Second,
-        Idempotent:  false,
-        Permissions: []string{"fsm:write"},
-        Roles:       []string{"admin"},
+func (c *ApplyEventEndpoint) RPCEndpoints() []rpc.EndpointDefinition {
+    return []rpc.EndpointDefinition{
+        rpc.NewEndpoint[ApplyEventData, map[string]any](
+            rpc.EndpointSpec{
+                Method:      "fsm.apply_event",
+                Kind:        rpc.MethodKindQuery,
+                Timeout:     5 * time.Second,
+                Permissions: []string{"fsm:write"},
+                Roles:       []string{"admin"},
+            },
+            func(ctx context.Context, req rpc.RequestEnvelope[ApplyEventData]) (rpc.ResponseEnvelope[map[string]any], error) {
+                return rpc.ResponseEnvelope[map[string]any]{
+                    Data: map[string]any{
+                        "entityId": req.Data.EntityID,
+                        "event":    req.Data.Event,
+                        "actorId":  req.Meta.ActorID,
+                    },
+                }, nil
+            },
+        ),
     }
 }
 ```
@@ -383,16 +395,15 @@ rpcServer := rpc.NewServer(
     }),
 )
 
-registry.SetRPCRegister(rpcServer.Register)
-_, _ = registry.RegisterCommand(&ApplyEventCommand{})
+_ = registry.AddResolver("rpc-explicit", rpc.Resolver(rpcServer))
+_, _ = registry.RegisterCommand(&ApplyEventEndpoint{})
 _ = registry.Start(context.Background())
 ```
 
-RPC handler signatures are strict:
+Canonical RPC method payloads should use:
 
-- Execute style: `Execute(ctx, msg) error`
-- Query style: `Query(ctx, msg) (result, error)`
-- Function handlers must use the same signatures.
+- Request: `rpc.RequestEnvelope[T]` (`data` + `meta`)
+- Response: `rpc.ResponseEnvelope[T]`
 
 Failure handling modes:
 
