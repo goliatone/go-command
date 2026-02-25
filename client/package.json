@@ -1,10 +1,13 @@
 {
-  "name": "@goliatone/go-command-fsm-client",
+  "name": "@goliatone/go-command-client-workspace",
   "version": "0.15.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest"
   },

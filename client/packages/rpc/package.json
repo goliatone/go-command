@@ -1,0 +1,14 @@
+{
+  "name": "@goliatone/go-command-rpc",
+  "version": "0.15.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && vite build"
+  }
+}

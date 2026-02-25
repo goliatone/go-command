@@ -1,11 +1,10 @@
 # go-command TypeScript Client
 
-TypeScript client toolkit for `go-command` with two layers:
+TypeScript client toolkit for `go-command` split into three libraries:
 
-1. Generic RPC client library (usable without FSM)
-2. FSM projection runtime (`ClientFSM`) built on transport adapters
-
-This keeps RPC reusable across your app while FSM remains a focused projection client.
+1. `@goliatone/go-command-rpc` (generic RPC clients)
+2. `@goliatone/go-command-fsm` (FSM projection runtime + REST transport)
+3. `@goliatone/go-command-fsm-rpc` (FSM RPC transport adapter)
 
 ## Install and run
 
@@ -20,15 +19,15 @@ npm run build
 Versioning and embedded release artifacts are managed from repo root:
 
 ```bash
-./taskfile client:release    # sync client/package.json version to .version
-./taskfile client:build      # build dist and copy into data/client
+./taskfile client:release    # sync all client package versions to .version
+./taskfile client:build      # build all packages and copy into data/client
 ```
 
 ## Package overview
 
 ### Generic RPC (standalone)
 
-Use these when you need RPC calls outside FSM:
+Use these when you need RPC calls outside FSM from `@goliatone/go-command-rpc`:
 
 - `RPCClient` interface
 - `FunctionRPCClient`
@@ -38,20 +37,21 @@ Use these when you need RPC calls outside FSM:
 
 ### FSM projection runtime
 
-Use these for server-authoritative FSM state projection:
+Use these for server-authoritative FSM state projection from `@goliatone/go-command-fsm`:
 
 - `ClientFSM`
 - `Transport` interface
 - `RESTTransport`
-- `RPCTransport` (uses any `RPCClient`)
 - `bootstrapClientFSM`, `readHydratedSnapshot`
+
+`RPCTransport` lives in `@goliatone/go-command-fsm-rpc`.
 
 ## Quick start: standalone RPC
 
 ### Option A: function-based client
 
 ```ts
-import { FunctionRPCClient } from "./src";
+import { FunctionRPCClient } from "@goliatone/go-command-rpc";
 
 const rpc = new FunctionRPCClient(async (method, params) => {
   return myRpcInvoker(method, params);
@@ -64,7 +64,7 @@ console.log(health.ok);
 ### Option B: HTTP RPC client
 
 ```ts
-import { HTTPRPCClient } from "./src";
+import { HTTPRPCClient } from "@goliatone/go-command-rpc";
 
 const rpc = new HTTPRPCClient({
   endpoint: "https://api.example.com/rpc",
@@ -78,7 +78,7 @@ console.log(user.id);
 ### Option C: WebSocket RPC client
 
 ```ts
-import { WebSocketRPCClient } from "./src";
+import { WebSocketRPCClient } from "@goliatone/go-command-rpc";
 
 const rpc = new WebSocketRPCClient("wss://api.example.com/rpc", {
   rpcVersion: "2.0",
@@ -102,10 +102,10 @@ The FSM client is server-authoritative:
 ```ts
 import {
   ClientFSM,
-  HTTPRPCClient,
-  RPCTransport,
   type Snapshot,
-} from "./src";
+} from "@goliatone/go-command-fsm";
+import { HTTPRPCClient } from "@goliatone/go-command-rpc";
+import { RPCTransport } from "@goliatone/go-command-fsm-rpc";
 
 const rpc = new HTTPRPCClient({
   endpoint: "https://api.example.com/rpc",
@@ -165,7 +165,7 @@ const transport = new RPCTransport(rpc, {
 ### Using REST for FSM
 
 ```ts
-import { ClientFSM, RESTTransport } from "./src";
+import { ClientFSM, RESTTransport } from "@goliatone/go-command-fsm";
 
 const transport = new RESTTransport({
   baseUrl: "https://api.example.com",
@@ -231,7 +231,7 @@ Server can embed an initial snapshot:
 Client bootstrap:
 
 ```ts
-import { bootstrapClientFSM, RESTTransport } from "./src";
+import { bootstrapClientFSM, RESTTransport } from "@goliatone/go-command-fsm";
 
 const transport = new RESTTransport({ baseUrl: "https://api.example.com" });
 const fsm = bootstrapClientFSM({ machine: "orders", transport });
@@ -246,7 +246,7 @@ if (fsm) {
 Generic RPC clients throw `RPCClientError` for transport/protocol errors.
 
 ```ts
-import { RPCClientError } from "./src";
+import { RPCClientError } from "@goliatone/go-command-rpc";
 
 try {
   await rpc.call("user.get", { id: "missing" });
