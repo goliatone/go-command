@@ -109,17 +109,24 @@ function flow:test {
     lgr exec -- go test ./flow/...
 }
 
+function _client:packages {
+    echo "rpc fsm fsm-rpc"
+}
+
 ##
 ## -----
 ##
 ## client:release
 ##
-## Keep client package version in sync with the root .version file.
+## Keep client package versions in sync with the root .version file.
 ##
 ## Arguments:
 ## @arg 1 {string} [tag=<root .version>]
 function client:release {
     local tag
+    local pkg
+    local pkgs
+    local pkg_file
 
     tag=${1:-$(version:get)}
     if [ -z "$tag" ]; then
@@ -127,14 +134,27 @@ function client:release {
         return 1
     fi
 
-    if ! command -v npm >/dev/null 2>&1; then
-        echo "npm is required for client:release"
+    if ! command -v node >/dev/null 2>&1; then
+        echo "node is required for client:release"
         return 1
     fi
 
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required for client:release lockfile sync"
+        return 1
+    fi
+
+    node -e 'const fs=require("fs"); const path="client/package.json"; const version=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); json.version=version; fs.writeFileSync(path, JSON.stringify(json, null, 2)+"\n");' "${tag}" || return 1
+
+    pkgs=$(_client:packages)
+    for pkg in $pkgs; do
+        pkg_file="client/packages/${pkg}/package.json"
+        node -e 'const fs=require("fs"); const path=process.argv[1]; const version=process.argv[2]; const json=JSON.parse(fs.readFileSync(path,"utf8")); json.version=version; fs.writeFileSync(path, JSON.stringify(json, null, 2)+"\n");' "${pkg_file}" "${tag}" || return 1
+    done
+
     (
         cd client || exit "$?"
-        npm version "$tag" --no-git-tag-version --allow-same-version
+        npm install --package-lock-only
     ) || return 1
 }
 
@@ -143,10 +163,11 @@ function client:release {
 ##
 ## client:build
 ##
-## Build TS client and sync dist output into embedded Go assets (`data/client`).
+## Build TS client packages and sync dist output into embedded Go assets (`data/client`).
 function client:build {
     local client_dir
-    local dist_dir
+    local pkgs
+    local pkg
     local output_dir
 
     if ! command -v npm >/dev/null 2>&1; then
@@ -155,7 +176,6 @@ function client:build {
     fi
 
     client_dir="$(pwd)/client"
-    dist_dir="${client_dir}/dist"
     output_dir="$(pwd)/data/client"
 
     if [ ! -d "${client_dir}/node_modules" ]; then
@@ -172,12 +192,16 @@ function client:build {
 
     rm -rf "${output_dir}"
     mkdir -p "${output_dir}"
-    cp -R "${dist_dir}/." "${output_dir}/"
 
-    if [ ! -f "${output_dir}/index.js" ]; then
-        echo "client build output is missing ${output_dir}/index.js"
-        return 1
-    fi
+    pkgs=$(_client:packages)
+    for pkg in $pkgs; do
+        mkdir -p "${output_dir}/${pkg}"
+        cp -R "${client_dir}/packages/${pkg}/dist/." "${output_dir}/${pkg}/"
+        if [ ! -f "${output_dir}/${pkg}/index.js" ]; then
+            echo "client build output is missing ${output_dir}/${pkg}/index.js"
+            return 1
+        fi
+    done
 }
 
 ##
@@ -386,7 +410,7 @@ function release {
     # Add updated version file to git
     git add "${VERSION_FILE}"
     if [ -f "client/package.json" ]; then
-        git add client/package.json client/package-lock.json
+        git add client/package.json client/package-lock.json client/packages/*/package.json
     fi
     if [ -d "data/client" ]; then
         git add data/client
