@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -121,13 +122,32 @@ type ExecutionRecord[T any] struct {
 	Msg             T
 }
 
+// ExecutionDispatchHistory captures durable dispatch progression for one execution.
+type ExecutionDispatchHistory struct {
+	ExecutionID  string
+	MachineID    string
+	EntityID     string
+	TransitionID string
+	OutboxID     string
+	Event        string
+	Outcome      DispatchOutcome
+	Attempt      int
+	RetryAt      time.Time
+	Error        string
+	OccurredAt   time.Time
+	Metadata     map[string]any
+}
+
 // ExecutionRecordStore persists execution records for durable orchestration.
 type ExecutionRecordStore[T any] interface {
 	Save(ctx context.Context, rec *ExecutionRecord[T]) error
 	Load(ctx context.Context, executionID string) (*ExecutionRecord[T], error)
 	List(ctx context.Context) ([]*ExecutionRecord[T], error)
+	ListByScope(ctx context.Context, scope ExecutionScope) ([]*ExecutionRecord[T], error)
 	UpdateStatus(ctx context.Context, executionID, status string) error
 	UpdateResult(ctx context.Context, executionID, status, errorCode, errorMessage, currentState string) error
+	ApplyDispatchOutcome(ctx context.Context, result DispatchEntryResult) error
+	DispatchHistory(ctx context.Context, scope ExecutionScope) ([]ExecutionDispatchHistory, error)
 }
 
 // LifecycleIntentStore persists lifecycle intents for async/durable processing.
@@ -140,12 +160,14 @@ type LifecycleIntentStore[T any] interface {
 type InMemoryExecutionRecordStore[T any] struct {
 	mu      sync.RWMutex
 	records map[string]*ExecutionRecord[T]
+	history []ExecutionDispatchHistory
 }
 
 // NewInMemoryExecutionRecordStore constructs an empty execution record store.
 func NewInMemoryExecutionRecordStore[T any]() *InMemoryExecutionRecordStore[T] {
 	return &InMemoryExecutionRecordStore[T]{
 		records: make(map[string]*ExecutionRecord[T]),
+		history: make([]ExecutionDispatchHistory, 0),
 	}
 }
 
@@ -192,14 +214,22 @@ func (s *InMemoryExecutionRecordStore[T]) Load(_ context.Context, executionID st
 }
 
 func (s *InMemoryExecutionRecordStore[T]) List(_ context.Context) ([]*ExecutionRecord[T], error) {
+	return s.ListByScope(context.Background(), ExecutionScope{})
+}
+
+func (s *InMemoryExecutionRecordStore[T]) ListByScope(_ context.Context, scope ExecutionScope) ([]*ExecutionRecord[T], error) {
 	if s == nil {
 		return nil, errors.New("execution record store not configured")
 	}
+	scope = normalizeExecutionScope(scope)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*ExecutionRecord[T], 0, len(s.records))
 	for _, rec := range s.records {
 		if rec == nil {
+			continue
+		}
+		if !executionScopeMatchesRecord(scope, rec) {
 			continue
 		}
 		out = append(out, cloneExecutionRecord(rec))
@@ -261,6 +291,114 @@ func (s *InMemoryExecutionRecordStore[T]) UpdateResult(
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+func (s *InMemoryExecutionRecordStore[T]) ApplyDispatchOutcome(_ context.Context, result DispatchEntryResult) error {
+	if s == nil {
+		return errors.New("execution record store not configured")
+	}
+	executionID := strings.TrimSpace(result.ExecutionID)
+	if executionID == "" {
+		return errors.New("execution id required")
+	}
+	now := time.Now().UTC()
+	occurredAt := result.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = now
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.records[executionID]
+	if !ok || rec == nil {
+		return fmt.Errorf("execution %s not found", executionID)
+	}
+
+	history := ExecutionDispatchHistory{
+		ExecutionID:  executionID,
+		MachineID:    strings.TrimSpace(rec.MachineID),
+		EntityID:     strings.TrimSpace(result.EntityID),
+		TransitionID: strings.TrimSpace(result.TransitionID),
+		OutboxID:     strings.TrimSpace(result.OutboxID),
+		Event:        normalizeEvent(result.Event),
+		Outcome:      result.Outcome,
+		Attempt:      result.Attempt,
+		RetryAt:      result.RetryAt,
+		Error:        strings.TrimSpace(result.Error),
+		OccurredAt:   occurredAt,
+		Metadata:     copyMap(result.Metadata),
+	}
+	if history.EntityID == "" {
+		history.EntityID = strings.TrimSpace(rec.EntityID)
+	}
+	if history.TransitionID == "" {
+		history.TransitionID = strings.TrimSpace(rec.TransitionID)
+	}
+	if history.Event == "" {
+		history.Event = normalizeEvent(rec.Event)
+	}
+	s.history = append(s.history, history)
+
+	rec.Metadata = mergeFields(rec.Metadata, map[string]any{
+		"last_dispatch_outcome": string(result.Outcome),
+		"last_dispatch_outbox":  history.OutboxID,
+	})
+	switch result.Outcome {
+	case DispatchOutcomeCompleted:
+		completedCount := metadataInt(rec.Metadata, "dispatch_completed_count") + 1
+		rec.Metadata["dispatch_completed_count"] = completedCount
+		rec.Metadata["dispatch_effect_count"] = len(rec.Effects)
+		rec.Status = ExecutionStateRunning
+		if len(rec.Effects) == 0 || completedCount >= len(rec.Effects) {
+			rec.Status = ExecutionStateCompleted
+		}
+		rec.ErrorCode = ""
+		rec.ErrorMessage = ""
+	case DispatchOutcomeRetryScheduled:
+		rec.Status = ExecutionStateDegraded
+		rec.ErrorCode = ErrCodeOrchestrationDegraded
+		rec.ErrorMessage = strings.TrimSpace(result.Error)
+		if !result.RetryAt.IsZero() {
+			rec.Metadata["dispatch_retry_at"] = result.RetryAt.UTC().Format(time.RFC3339Nano)
+		}
+	case DispatchOutcomeDeadLettered:
+		rec.Status = ExecutionStateFailed
+		rec.ErrorCode = ErrCodeOrchestrationDegraded
+		rec.ErrorMessage = strings.TrimSpace(result.Error)
+	default:
+		// Keep existing status for unknown outcomes.
+	}
+	if result.Attempt > rec.AttemptCount {
+		rec.AttemptCount = result.Attempt
+	}
+	rec.UpdatedAt = now
+	return nil
+}
+
+func (s *InMemoryExecutionRecordStore[T]) DispatchHistory(_ context.Context, scope ExecutionScope) ([]ExecutionDispatchHistory, error) {
+	if s == nil {
+		return nil, errors.New("execution record store not configured")
+	}
+	scope = normalizeExecutionScope(scope)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ExecutionDispatchHistory, 0, len(s.history))
+	for _, item := range s.history {
+		if !executionScopeMatchesDispatchHistory(scope, item) {
+			continue
+		}
+		out = append(out, cloneExecutionDispatchHistory(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			if out[i].ExecutionID == out[j].ExecutionID {
+				return out[i].OutboxID < out[j].OutboxID
+			}
+			return out[i].ExecutionID < out[j].ExecutionID
+		}
+		return out[i].OccurredAt.Before(out[j].OccurredAt)
+	})
+	return out, nil
 }
 
 // InMemoryLifecycleIntentStore keeps lifecycle intents in memory.
@@ -604,12 +742,15 @@ func (o *LightweightOrchestrator[T]) setStatus(status *ExecutionStatus) {
 
 // DurableOrchestrator persists execution metadata and lifecycle intents.
 type DurableOrchestrator[T command.Message] struct {
-	records     ExecutionRecordStore[T]
-	intents     LifecycleIntentStore[T]
-	scheduler   JobScheduler
-	outbox      OutboxStore
-	retryPolicy RetryPolicy
-	logger      Logger
+	records           ExecutionRecordStore[T]
+	intents           LifecycleIntentStore[T]
+	scheduler         JobScheduler
+	outbox            OutboxStore
+	dispatcher        DispatcherRuntime
+	autoDispatch      bool
+	dispatcherOptions []OutboxDispatcherOption
+	retryPolicy       RetryPolicy
+	logger            Logger
 }
 
 // DurableOrchestratorOption customizes durable orchestration.
@@ -636,6 +777,27 @@ func WithDurableLifecycleIntentStore[T command.Message](store LifecycleIntentSto
 	}
 }
 
+// WithDurableDispatcherRunner overrides the default orchestrator-managed dispatcher runtime.
+func WithDurableDispatcherRunner[T command.Message](runner DispatcherRuntime) DurableOrchestratorOption[T] {
+	return func(o *DurableOrchestrator[T]) {
+		o.dispatcher = runner
+	}
+}
+
+// WithDurableDispatchAutoRun configures automatic RunOnce progression during Start.
+func WithDurableDispatchAutoRun[T command.Message](enabled bool) DurableOrchestratorOption[T] {
+	return func(o *DurableOrchestrator[T]) {
+		o.autoDispatch = enabled
+	}
+}
+
+// WithDurableOutboxDispatcherOptions configures options for the default managed outbox dispatcher runtime.
+func WithDurableOutboxDispatcherOptions[T command.Message](opts ...OutboxDispatcherOption) DurableOrchestratorOption[T] {
+	return func(o *DurableOrchestrator[T]) {
+		o.dispatcherOptions = append(o.dispatcherOptions[:0], opts...)
+	}
+}
+
 // NewDurableOrchestrator builds a durable orchestrator implementation.
 func NewDurableOrchestrator[T command.Message](
 	records ExecutionRecordStore[T],
@@ -647,11 +809,12 @@ func NewDurableOrchestrator[T command.Message](
 		records = NewInMemoryExecutionRecordStore[T]()
 	}
 	o := &DurableOrchestrator[T]{
-		records:   records,
-		intents:   NewInMemoryLifecycleIntentStore[T](),
-		scheduler: scheduler,
-		outbox:    outbox,
-		logger:    normalizeLogger(nil),
+		records:      records,
+		intents:      NewInMemoryLifecycleIntentStore[T](),
+		scheduler:    scheduler,
+		outbox:       outbox,
+		autoDispatch: true,
+		logger:       normalizeLogger(nil),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -663,6 +826,16 @@ func NewDurableOrchestrator[T command.Message](
 	}
 	if err := o.retryPolicy.Validate(); err != nil {
 		return nil, err
+	}
+	if o.dispatcher == nil && o.outbox != nil && o.scheduler != nil {
+		dispatcherOpts := make([]OutboxDispatcherOption, 0, len(o.dispatcherOptions)+1)
+		dispatcherOpts = append(dispatcherOpts, o.dispatcherOptions...)
+		dispatcherOpts = append(dispatcherOpts, WithOutboxOutcomeHook(o.onDispatchOutcome))
+		o.dispatcher = NewOutboxDispatcher(
+			o.outbox,
+			o.scheduler,
+			dispatcherOpts...,
+		)
 	}
 	o.logger = normalizeLogger(o.logger)
 	return o, nil
@@ -688,6 +861,13 @@ func (o *DurableOrchestrator[T]) Start(ctx context.Context, req StartRequest[T])
 	if req.Result != nil {
 		effects = append(effects, req.Result.Effects...)
 	}
+	metadata := copyMap(req.Metadata)
+	metadata = mergeFields(metadata, map[string]any{
+		"dispatch_effect_count":     len(effects),
+		"dispatch_completed_count":  0,
+		"last_dispatch_outcome":     "",
+		"dispatch_auto_progression": o.autoDispatch,
+	})
 	record := &ExecutionRecord[T]{
 		ExecutionID:     executionID,
 		Policy:          ExecutionPolicyOrchestrated,
@@ -704,14 +884,14 @@ func (o *DurableOrchestrator[T]) Start(ctx context.Context, req StartRequest[T])
 		AttemptCount:    1,
 		RetryPolicy:     retry,
 		Effects:         effects,
-		Metadata:        copyMap(req.Metadata),
+		Metadata:        metadata,
 		Msg:             req.Msg,
 	}
 	if err := o.records.Save(ctx, record); err != nil {
 		return nil, err
 	}
 
-	fields := mergeFields(copyMap(req.Metadata), map[string]any{
+	fields := mergeFields(copyMap(metadata), map[string]any{
 		"machine_id":      record.MachineID,
 		"machine_version": record.MachineVersion,
 		"entity_id":       record.EntityID,
@@ -722,10 +902,37 @@ func (o *DurableOrchestrator[T]) Start(ctx context.Context, req StartRequest[T])
 	logger := withLoggerFields(o.logger.WithContext(ctx), fields)
 	logger.Info("durable execution recorded status=%s", record.Status)
 
+	if o.autoDispatch && o.dispatcher != nil && len(effects) > 0 {
+		report, dispatchErr := o.dispatcher.RunOnce(ctx)
+		if dispatchErr != nil {
+			logger.Warn("durable dispatcher run-once failed: %v", dispatchErr)
+			// If the cycle failed before emitting execution-scoped outcomes, mark degradation explicitly.
+			if !reportContainsExecutionOutcome(report, executionID) {
+				_ = o.records.UpdateResult(
+					ctx,
+					executionID,
+					ExecutionStateDegraded,
+					ErrCodeOrchestrationDegraded,
+					dispatchErr.Error(),
+					record.CurrentState,
+				)
+			}
+		}
+		if report.Lag > 0 {
+			logger.Debug("durable dispatcher lag=%s claimed=%d processed=%d", report.Lag, report.Claimed, report.Processed)
+		}
+	}
+
+	handleStatus := record.Status
+	updated, loadErr := o.records.Load(ctx, executionID)
+	if loadErr == nil && updated != nil && strings.TrimSpace(updated.Status) != "" {
+		handleStatus = strings.TrimSpace(updated.Status)
+	}
+
 	return &ExecutionHandle{
 		ExecutionID: record.ExecutionID,
 		Policy:      string(ExecutionPolicyOrchestrated),
-		Status:      record.Status,
+		Status:      handleStatus,
 		Metadata:    copyMap(fields),
 	}, nil
 }
@@ -769,20 +976,17 @@ func (o *DurableOrchestrator[T]) List(ctx context.Context, scope ExecutionScope)
 	if o == nil {
 		return nil, errors.New("durable orchestrator not configured")
 	}
-	records, err := o.records.List(ctx)
+	scope = normalizeExecutionScope(scope)
+	records, err := o.records.ListByScope(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
-	scope = normalizeExecutionScope(scope)
 	out := make([]ExecutionStatus, 0, len(records))
 	for _, rec := range records {
 		if rec == nil {
 			continue
 		}
 		status := executionStatusFromRecord(rec)
-		if !executionScopeMatchesStatus(scope, &status) {
-			continue
-		}
 		out = append(out, status)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -843,6 +1047,163 @@ func (o *DurableOrchestrator[T]) LifecycleIntents(ctx context.Context) ([]Transi
 		return nil, errors.New("durable orchestrator not configured")
 	}
 	return o.intents.List(ctx)
+}
+
+// DispatchRuntime exposes the orchestrator-managed dispatcher runtime.
+func (o *DurableOrchestrator[T]) DispatchRuntime() DispatcherRuntime {
+	if o == nil {
+		return nil
+	}
+	return o.dispatcher
+}
+
+// Run starts the orchestrator-managed dispatcher runtime loop.
+func (o *DurableOrchestrator[T]) Run(ctx context.Context) error {
+	if o == nil {
+		return errors.New("durable orchestrator not configured")
+	}
+	if o.dispatcher == nil {
+		return errors.New("durable dispatcher runtime not configured")
+	}
+	return o.dispatcher.Run(ctx)
+}
+
+// RunOnce executes one orchestrator-managed dispatch cycle.
+func (o *DurableOrchestrator[T]) RunOnce(ctx context.Context) (DispatchReport, error) {
+	if o == nil {
+		return DispatchReport{}, errors.New("durable orchestrator not configured")
+	}
+	if o.dispatcher == nil {
+		return DispatchReport{}, errors.New("durable dispatcher runtime not configured")
+	}
+	return o.dispatcher.RunOnce(ctx)
+}
+
+// StopDispatcher stops the orchestrator-managed dispatcher runtime loop.
+func (o *DurableOrchestrator[T]) StopDispatcher(ctx context.Context) error {
+	if o == nil {
+		return errors.New("durable orchestrator not configured")
+	}
+	if o.dispatcher == nil {
+		return nil
+	}
+	return o.dispatcher.Stop(ctx)
+}
+
+// DispatcherStatus returns the latest dispatcher runtime status snapshot.
+func (o *DurableOrchestrator[T]) DispatcherStatus() (DispatcherRuntimeStatus, error) {
+	if o == nil {
+		return DispatcherRuntimeStatus{}, errors.New("durable orchestrator not configured")
+	}
+	if o.dispatcher == nil {
+		return DispatcherRuntimeStatus{}, errors.New("durable dispatcher runtime not configured")
+	}
+	return o.dispatcher.Status(), nil
+}
+
+// DispatcherHealth returns dispatcher runtime health and emits health hooks.
+func (o *DurableOrchestrator[T]) DispatcherHealth(ctx context.Context) (DispatcherHealth, error) {
+	if o == nil {
+		return DispatcherHealth{}, errors.New("durable orchestrator not configured")
+	}
+	if o.dispatcher == nil {
+		return DispatcherHealth{}, errors.New("durable dispatcher runtime not configured")
+	}
+	return o.dispatcher.Health(ctx), nil
+}
+
+// DeadLetters exposes dead-letter inspection through the orchestrator's outbox store.
+func (o *DurableOrchestrator[T]) DeadLetters(ctx context.Context, scope DeadLetterScope) ([]OutboxEntry, error) {
+	if o == nil {
+		return nil, errors.New("durable orchestrator not configured")
+	}
+	if o.outbox == nil {
+		return nil, errors.New("durable outbox store not configured")
+	}
+	return o.outbox.ListDeadLetters(ctx, scope)
+}
+
+// DispatchHistory returns durable dispatch progression records for inspection.
+func (o *DurableOrchestrator[T]) DispatchHistory(ctx context.Context, scope ExecutionScope) ([]ExecutionDispatchHistory, error) {
+	if o == nil {
+		return nil, errors.New("durable orchestrator not configured")
+	}
+	return o.records.DispatchHistory(ctx, normalizeExecutionScope(scope))
+}
+
+func (o *DurableOrchestrator[T]) onDispatchOutcome(ctx context.Context, result DispatchEntryResult) {
+	if o == nil || o.records == nil {
+		return
+	}
+	executionID := strings.TrimSpace(result.ExecutionID)
+	if executionID == "" {
+		return
+	}
+	if err := o.records.ApplyDispatchOutcome(ctx, result); err != nil {
+		logger := withLoggerFields(o.logger.WithContext(ctx), map[string]any{
+			"execution_id": executionID,
+			"outbox_id":    strings.TrimSpace(result.OutboxID),
+			"outcome":      string(result.Outcome),
+		})
+		logger.Warn("durable dispatch outcome progression update failed: %v", err)
+		return
+	}
+
+	logger := withLoggerFields(o.logger.WithContext(ctx), map[string]any{
+		"execution_id": executionID,
+		"outbox_id":    strings.TrimSpace(result.OutboxID),
+		"outcome":      string(result.Outcome),
+		"attempt":      result.Attempt,
+	})
+	switch result.Outcome {
+	case DispatchOutcomeCompleted:
+		logger.Info("durable dispatch outcome completed")
+	case DispatchOutcomeRetryScheduled:
+		logger.Warn("durable dispatch outcome retry_scheduled retry_at=%s", result.RetryAt.UTC().Format(time.RFC3339Nano))
+	case DispatchOutcomeDeadLettered:
+		logger.Error("durable dispatch outcome dead_lettered")
+	}
+
+	rec, err := o.records.Load(ctx, executionID)
+	if err != nil || rec == nil {
+		return
+	}
+	phase := TransitionPhaseCommitted
+	if result.Outcome != DispatchOutcomeCompleted {
+		phase = TransitionPhaseRejected
+	}
+	evt := TransitionLifecycleEvent[T]{
+		Phase:          phase,
+		MachineID:      strings.TrimSpace(rec.MachineID),
+		MachineVersion: strings.TrimSpace(rec.MachineVersion),
+		EntityID:       strings.TrimSpace(rec.EntityID),
+		ExecutionID:    executionID,
+		Event:          normalizeEvent(rec.Event),
+		TransitionID:   strings.TrimSpace(rec.TransitionID),
+		PreviousState:  normalizeState(rec.PreviousState),
+		CurrentState:   normalizeState(rec.CurrentState),
+		Metadata: mergeFields(copyMap(result.Metadata), map[string]any{
+			"dispatch_outcome": string(result.Outcome),
+			"outbox_id":        strings.TrimSpace(result.OutboxID),
+			"dispatch_attempt": result.Attempt,
+		}),
+		OccurredAt: time.Now().UTC(),
+		Msg:        rec.Msg,
+	}
+	if !result.RetryAt.IsZero() {
+		evt.Metadata = mergeFields(evt.Metadata, map[string]any{
+			"retry_at": result.RetryAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	if text := strings.TrimSpace(result.Error); text != "" {
+		evt.ErrorCode = ErrCodeOrchestrationDegraded
+		evt.ErrorMessage = text
+		evt.Metadata = mergeFields(evt.Metadata, map[string]any{
+			"error_code":    evt.ErrorCode,
+			"error_message": text,
+		})
+	}
+	_ = o.intents.Append(ctx, cloneLifecycleEvent(evt))
 }
 
 // ResumeRequest encapsulates a resume callback with stale-state safeguards.
@@ -943,6 +1304,62 @@ func executionStatusFromRecord[T any](rec *ExecutionRecord[T]) ExecutionStatus {
 	}
 }
 
+func executionScopeMatchesRecord[T any](scope ExecutionScope, rec *ExecutionRecord[T]) bool {
+	if rec == nil {
+		return false
+	}
+	scope = normalizeExecutionScope(scope)
+	if scope.ExecutionID != "" && strings.TrimSpace(rec.ExecutionID) != scope.ExecutionID {
+		return false
+	}
+	if scope.MachineID != "" && strings.TrimSpace(rec.MachineID) != scope.MachineID {
+		return false
+	}
+	if scope.EntityID != "" && strings.TrimSpace(rec.EntityID) != scope.EntityID {
+		return false
+	}
+	if scope.Tenant != "" && strings.TrimSpace(readStringFromMetadata(rec.Metadata, "tenant")) != scope.Tenant {
+		return false
+	}
+	return true
+}
+
+func executionScopeMatchesDispatchHistory(scope ExecutionScope, item ExecutionDispatchHistory) bool {
+	scope = normalizeExecutionScope(scope)
+	if scope.ExecutionID != "" && strings.TrimSpace(item.ExecutionID) != scope.ExecutionID {
+		return false
+	}
+	if scope.MachineID != "" && strings.TrimSpace(item.MachineID) != scope.MachineID {
+		return false
+	}
+	if scope.EntityID != "" && strings.TrimSpace(item.EntityID) != scope.EntityID {
+		return false
+	}
+	if scope.Tenant != "" && strings.TrimSpace(readStringFromMetadata(item.Metadata, "tenant")) != scope.Tenant {
+		return false
+	}
+	return true
+}
+
+func cloneExecutionDispatchHistory(item ExecutionDispatchHistory) ExecutionDispatchHistory {
+	cp := item
+	cp.Metadata = copyMap(item.Metadata)
+	return cp
+}
+
+func reportContainsExecutionOutcome(report DispatchReport, executionID string) bool {
+	executionID = strings.TrimSpace(executionID)
+	if executionID == "" {
+		return false
+	}
+	for _, outcome := range report.Outcomes {
+		if strings.TrimSpace(outcome.ExecutionID) == executionID {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeExecutionScope(scope ExecutionScope) ExecutionScope {
 	scope.MachineID = strings.TrimSpace(scope.MachineID)
 	scope.EntityID = strings.TrimSpace(scope.EntityID)
@@ -1008,6 +1425,45 @@ func readStringFromMetadata(metadata map[string]any, key string) string {
 		return value.String()
 	default:
 		return fmt.Sprintf("%v", value)
+	}
+}
+
+func metadataInt(metadata map[string]any, key string) int {
+	if len(metadata) == 0 {
+		return 0
+	}
+	raw, ok := metadata[strings.TrimSpace(key)]
+	if !ok {
+		return 0
+	}
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int8:
+		return int(value)
+	case int16:
+		return int(value)
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case uint:
+		return int(value)
+	case uint8:
+		return int(value)
+	case uint16:
+		return int(value)
+	case uint32:
+		return int(value)
+	case uint64:
+		return int(value)
+	case float32:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		n, _ := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", raw)))
+		return n
 	}
 }
 
