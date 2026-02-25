@@ -14,6 +14,7 @@ const (
 	ErrCodeVersionConflict       = "FSM_VERSION_CONFLICT"
 	ErrCodePreconditionFailed    = "FSM_PRECONDITION_FAILED"
 	ErrCodeIdempotencyConflict   = "FSM_IDEMPOTENCY_CONFLICT"
+	ErrCodeIdempotencyDegraded   = "FSM_IDEMPOTENCY_DEGRADED"
 	ErrCodeOrchestrationDegraded = "FSM_ORCHESTRATION_DEGRADED"
 )
 
