@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- FSM flow bridge-removal policy completed: `Execute(ctx, msg)` is now the only compatibility bridge on `StateMachine`.
+- Removed legacy FSM compatibility paths: `NewStateMachine`, `WithInitialFallback`, `TransitionRequestFromState`, and request-level `CurrentState` fallback inference.
+- Config/bootstrap wiring now emits canonical `MachineDefinition` and builds runtime via `NewStateMachineFromDefinition`.
+- Updated flow docs/examples and release audit coverage for canonical constructor usage and explicit persisted-state requirements.
+
 # [0.14.0](https://github.com/goliatone/go-command/compare/v0.13.0...v0.14.0) - (2026-02-17)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -441,5 +450,4 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-
 

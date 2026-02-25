@@ -18,6 +18,11 @@ go run ./cmd/rpc-tsgen \
 
 If `-manifest` is omitted, the generator emits an empty scaffold file.
 
+End-to-end example:
+
+- `examples/rpc/tsgen` exports a manifest from registered endpoints and runs this generator.
+- Execute with `go generate ./examples/rpc/tsgen` from repo root.
+
 ## Output
 
 Generated TypeScript includes:

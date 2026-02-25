@@ -554,7 +554,12 @@ func (e RetryableError) RetryDelay(attempt int) time.Duration {
 `flow` exposes a canonical envelope contract:
 
 - `ApplyEvent(ctx, ApplyEventRequest[T]) -> *ApplyEventResponse[T]`
+  - apply request supports optional `MachineID`, `IdempotencyKey`, `Metadata`, `DryRun`
+  - `DryRun` is evaluation-only: no state/outbox/orchestrator/lifecycle/idempotency-store writes
+  - apply response includes `EventID`, `Version`, `IdempotencyHit`
 - `Snapshot(ctx, SnapshotRequest[T]) -> *Snapshot`
+  - snapshot request supports optional `MachineID`, `EvaluateGuards`, `IncludeBlocked`
+  - `TransitionInfo` includes `Allowed` and structured `Rejections`
 - `Execute(ctx, msg)` remains only as a compatibility wrapper.
 
 Additional surfaces include:
@@ -562,7 +567,9 @@ Additional surfaces include:
 - Authoring: `CompileDSL`, `MachineDefinition.ToDSL()`
 - UI schema: `GenerateMachineSchema`, `GenerateMachineUISchema`
 - Orchestration: mandatory execution policy (`lightweight` or `orchestrated`)
-- RPC method family: `fsm.apply_event`, `fsm.snapshot`, `fsm.execution_status`, `fsm.execution_pause`, `fsm.execution_resume`, `fsm.execution_stop`
+- RPC command methods: `fsm.apply_event`, `fsm.execution.pause`, `fsm.execution.resume`, `fsm.execution.stop`
+- RPC query methods: `fsm.snapshot`, `fsm.execution.status`, `fsm.execution.list`, `fsm.execution.history`
+  - query telemetry is additive under `query_*` keys and does not overwrite transition metadata keys
 - Transport/runtime error mapping: `MapRuntimeError`, `RPCErrorForError`
 
 See:
