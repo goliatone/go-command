@@ -270,6 +270,66 @@ func (s *InMemoryStateStore) MarkFailed(_ context.Context, id, leaseToken string
 	return fmt.Errorf("outbox %s not found", id)
 }
 
+// MarkDeadLetter marks an outbox entry as terminal and inspectable in dead-letter queries.
+func (s *InMemoryStateStore) MarkDeadLetter(_ context.Context, id, leaseToken, reason string) error {
+	if s == nil {
+		return errors.New("in-memory store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	processedAt := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for idx := range s.outbox {
+		if s.outbox[idx].ID != id {
+			continue
+		}
+		if s.outbox[idx].LeaseToken != leaseToken {
+			return fmt.Errorf("outbox %s lease token mismatch", id)
+		}
+		s.outbox[idx].Status = "dead_lettered"
+		s.outbox[idx].LeaseOwner = ""
+		s.outbox[idx].LeaseUntil = time.Time{}
+		s.outbox[idx].LeaseToken = ""
+		s.outbox[idx].RetryAt = time.Time{}
+		s.outbox[idx].ProcessedAt = &processedAt
+		s.outbox[idx].LastError = strings.TrimSpace(reason)
+		return nil
+	}
+	return fmt.Errorf("outbox %s not found", id)
+}
+
+// ListDeadLetters returns dead-lettered outbox entries, filtered by optional scope fields.
+func (s *InMemoryStateStore) ListDeadLetters(_ context.Context, scope DeadLetterScope) ([]OutboxEntry, error) {
+	if s == nil {
+		return nil, errors.New("in-memory store not configured")
+	}
+	scope = normalizeDeadLetterScope(scope)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]OutboxEntry, 0)
+	for _, entry := range s.outbox {
+		if strings.ToLower(strings.TrimSpace(entry.Status)) != "dead_lettered" {
+			continue
+		}
+		if !deadLetterMatchesScope(entry, scope) {
+			continue
+		}
+		out = append(out, cloneOutboxEntry(entry))
+		if scope.Limit > 0 && len(out) >= scope.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ExtendLease extends a claimed entry lease when token ownership matches.
 func (s *InMemoryStateStore) ExtendLease(_ context.Context, id, leaseToken string, leaseTTL time.Duration) error {
 	if s == nil {
@@ -609,6 +669,90 @@ func (s *SQLiteStateStore) MarkFailed(ctx context.Context, id, leaseToken string
 		return fmt.Errorf("outbox %s not found", id)
 	}
 	return nil
+}
+
+// MarkDeadLetter marks one outbox entry as terminal after verifying lease ownership.
+func (s *SQLiteStateStore) MarkDeadLetter(ctx context.Context, id, leaseToken, reason string) error {
+	if s == nil || s.db == nil {
+		return errors.New("sqlite store not configured")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return err
+	}
+	q := fmt.Sprintf(`UPDATE %s
+		SET status='dead_lettered', lease_owner='', lease_until='', lease_token='', retry_at='', processed_at=?, last_error=?
+		WHERE id=? AND lease_token=? AND lower(trim(coalesce(status, '')))='leased'`, s.outboxTable)
+	result, err := s.db.ExecContext(
+		ctx,
+		q,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		strings.TrimSpace(reason),
+		id,
+		leaseToken,
+	)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("outbox %s not found", id)
+	}
+	return nil
+}
+
+// ListDeadLetters returns dead-lettered outbox entries for inspection.
+func (s *SQLiteStateStore) ListDeadLetters(ctx context.Context, scope DeadLetterScope) ([]OutboxEntry, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("sqlite store not configured")
+	}
+	scope = normalizeDeadLetterScope(scope)
+	if err := s.ensureSchema(ctx, s.db); err != nil {
+		return nil, err
+	}
+	limit := scope.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query := fmt.Sprintf(`SELECT
+		id, entity_id, transition_id, execution_id, event, topic,
+		effect_type, payload, status, attempts, lease_owner, lease_until, lease_token,
+		retry_at, processed_at, last_error, metadata, created_at
+		FROM %s
+		WHERE lower(trim(coalesce(status, '')))='dead_lettered'
+		ORDER BY processed_at DESC, created_at DESC, id DESC
+		LIMIT ?`, s.outboxTable)
+	rows, err := s.db.QueryContext(ctx, query, limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]OutboxEntry, 0, limit)
+	for rows.Next() {
+		entry, decodeErr := decodeOutboxEntry(rows)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if !deadLetterMatchesScope(entry, scope) {
+			continue
+		}
+		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ExtendLease extends lease ownership for one claimed outbox entry.
@@ -1096,6 +1240,88 @@ func (s *RedisStateStore) MarkFailed(ctx context.Context, id, leaseToken string,
 	}
 }
 
+// MarkDeadLetter marks one claimed entry as dead-lettered after verifying lease ownership.
+func (s *RedisStateStore) MarkDeadLetter(ctx context.Context, id, leaseToken, reason string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("outbox id required")
+	}
+	leaseToken = strings.TrimSpace(leaseToken)
+	if leaseToken == "" {
+		return errors.New("lease token required")
+	}
+	out, err := s.evalScript(
+		ctx,
+		"mark_dead_letter",
+		redisScriptMarkDeadLetter,
+		[]string{s.redisOutboxPendingKey(), s.redisOutboxDeadLetterKey(), s.redisOutboxKeyPrefix()},
+		id,
+		leaseToken,
+		strings.TrimSpace(reason),
+	)
+	if err != nil {
+		return err
+	}
+	status, err := redisResultInt(out)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case 1:
+		return nil
+	case -2:
+		return fmt.Errorf("outbox %s lease token mismatch", id)
+	case -3:
+		return fmt.Errorf("outbox %s not leased", id)
+	default:
+		return fmt.Errorf("outbox %s not found", id)
+	}
+}
+
+// ListDeadLetters returns dead-lettered entries from redis-backed outbox storage.
+func (s *RedisStateStore) ListDeadLetters(ctx context.Context, scope DeadLetterScope) ([]OutboxEntry, error) {
+	if s == nil || s.client == nil {
+		return nil, errors.New("redis store not configured")
+	}
+	scope = normalizeDeadLetterScope(scope)
+	limit := scope.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	out, err := s.evalScript(
+		ctx,
+		"list_dead_letters",
+		redisScriptListDeadLetters,
+		[]string{s.redisOutboxDeadLetterKey(), s.redisOutboxKeyPrefix()},
+		limit*4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := redisResultList(out)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]OutboxEntry, 0, limit)
+	for _, row := range rows {
+		entry, parseErr := parseOutboxRowJSON(redisResultString(row))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if strings.ToLower(strings.TrimSpace(entry.Status)) != "dead_lettered" {
+			continue
+		}
+		if !deadLetterMatchesScope(entry, scope) {
+			continue
+		}
+		results = append(results, entry)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
+}
+
 // ExtendLease extends one claimed entry lease.
 func (s *RedisStateStore) ExtendLease(ctx context.Context, id, leaseToken string, leaseTTL time.Duration) error {
 	id = strings.TrimSpace(id)
@@ -1287,6 +1513,10 @@ func (s *RedisStateStore) redisOutboxKeyPrefix() string {
 
 func (s *RedisStateStore) redisOutboxPendingKey() string {
 	return fmt.Sprintf("%s:outbox:pending", s.redisPrefix())
+}
+
+func (s *RedisStateStore) redisOutboxDeadLetterKey() string {
+	return fmt.Sprintf("%s:outbox:dead_letters", s.redisPrefix())
 }
 
 func (s *RedisStateStore) redisOutboxCounterKey() string {
@@ -1505,6 +1735,46 @@ func parseClaimedOutboxJSON(encoded string) (ClaimedOutboxEntry, error) {
 		return i
 	}
 
+	entry := parseRedisOutboxEntry(raw, readString, readInt)
+
+	return ClaimedOutboxEntry{
+		OutboxEntry: entry,
+		LeaseToken:  entry.LeaseToken,
+	}, nil
+}
+
+func parseOutboxRowJSON(encoded string) (OutboxEntry, error) {
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return OutboxEntry{}, fmt.Errorf("outbox payload is empty")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(encoded), &raw); err != nil {
+		return OutboxEntry{}, err
+	}
+	readString := func(key string) string {
+		if val, ok := raw[key]; ok {
+			return strings.TrimSpace(fmt.Sprintf("%v", val))
+		}
+		return ""
+	}
+	readInt := func(key string) int64 {
+		value := strings.TrimSpace(readString(key))
+		if value == "" {
+			return 0
+		}
+		i, _ := strconv.ParseInt(value, 10, 64)
+		return i
+	}
+	return parseRedisOutboxEntry(raw, readString, readInt), nil
+}
+
+func parseRedisOutboxEntry(
+	raw map[string]any,
+	readString func(string) string,
+	readInt func(string) int64,
+) OutboxEntry {
+	_ = raw
 	entry := OutboxEntry{
 		ID:           readString("id"),
 		EntityID:     readString("entity_id"),
@@ -1540,11 +1810,34 @@ func parseClaimedOutboxJSON(encoded string) (ClaimedOutboxEntry, error) {
 		ts := time.UnixMilli(ms).UTC()
 		entry.ProcessedAt = &ts
 	}
+	return entry
+}
 
-	return ClaimedOutboxEntry{
-		OutboxEntry: entry,
-		LeaseToken:  entry.LeaseToken,
-	}, nil
+func normalizeDeadLetterScope(scope DeadLetterScope) DeadLetterScope {
+	scope.MachineID = strings.TrimSpace(scope.MachineID)
+	scope.EntityID = strings.TrimSpace(scope.EntityID)
+	scope.ExecutionID = strings.TrimSpace(scope.ExecutionID)
+	if scope.Limit < 0 {
+		scope.Limit = 0
+	}
+	return scope
+}
+
+func deadLetterMatchesScope(entry OutboxEntry, scope DeadLetterScope) bool {
+	scope = normalizeDeadLetterScope(scope)
+	if scope.ExecutionID != "" && strings.TrimSpace(entry.ExecutionID) != scope.ExecutionID {
+		return false
+	}
+	if scope.EntityID != "" && strings.TrimSpace(entry.EntityID) != scope.EntityID {
+		return false
+	}
+	if scope.MachineID != "" {
+		machineID := strings.TrimSpace(readStringFromMetadata(entry.Metadata, "machine_id"))
+		if machineID != scope.MachineID {
+			return false
+		}
+	}
+	return true
 }
 
 const redisScriptLoadState = `
@@ -1651,7 +1944,9 @@ for _, id in ipairs(ids) do
   if redis.call('EXISTS', hashKey) == 1 then
     local status = tostring(redis.call('HGET', hashKey, 'status') or 'pending')
     local leaseUntil = tonumber(redis.call('HGET', hashKey, 'lease_until_ms') or '0')
-    if status ~= 'completed' and (status ~= 'leased' or leaseUntil <= nowMs) then
+    local retryable = (status == '' or status == 'pending' or status == 'failed')
+    local reclaimableLease = (status == 'leased' and leaseUntil <= nowMs)
+    if retryable or reclaimableLease then
       local attempts = tonumber(redis.call('HGET', hashKey, 'attempts') or '0') + 1
       local token = tostring(redis.call('INCR', KEYS[2])) .. ':' .. id .. ':' .. workerID
       redis.call('HSET', hashKey,
@@ -1728,6 +2023,58 @@ redis.call('HSET', hashKey,
 )
 redis.call('ZADD', KEYS[1], retryAt, id)
 return 1
+`
+
+const redisScriptMarkDeadLetter = `
+local id = tostring(ARGV[1] or '')
+local token = tostring(ARGV[2] or '')
+local reason = tostring(ARGV[3] or '')
+local hashKey = KEYS[3] .. id
+if redis.call('EXISTS', hashKey) ~= 1 then
+  return -1
+end
+if tostring(redis.call('HGET', hashKey, 'lease_token') or '') ~= token then
+  return -2
+end
+if tostring(redis.call('HGET', hashKey, 'status') or '') ~= 'leased' then
+  return -3
+end
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('HSET', hashKey,
+  'status', 'dead_lettered',
+  'lease_owner', '',
+  'lease_until_ms', '0',
+  'lease_token', '',
+  'retry_at_ms', '0',
+  'processed_at_ms', tostring(nowMs),
+  'last_error', reason
+)
+redis.call('ZREM', KEYS[1], id)
+redis.call('ZADD', KEYS[2], nowMs, id)
+return 1
+`
+
+const redisScriptListDeadLetters = `
+local limit = tonumber(ARGV[1] or '100')
+if limit <= 0 then
+  limit = 100
+end
+local ids = redis.call('ZREVRANGE', KEYS[1], 0, limit - 1)
+local rows = {}
+for _, id in ipairs(ids) do
+  local hashKey = KEYS[2] .. id
+  if redis.call('EXISTS', hashKey) == 1 then
+    local raw = redis.call('HGETALL', hashKey)
+    local row = {}
+    for i = 1, #raw, 2 do
+      row[raw[i]] = raw[i + 1]
+    end
+    row['id'] = id
+    table.insert(rows, cjson.encode(row))
+  end
+end
+return rows
 `
 
 const redisScriptExtendLease = `
