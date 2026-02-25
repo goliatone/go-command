@@ -40,19 +40,33 @@ cfg := flow.StateMachineConfig{
 req := flow.TransitionRequest[OrderMsg]{
   StateKey:     func(m OrderMsg) string { return m.ID },
   Event:        func(m OrderMsg) string { return m.Event },
-  CurrentState: func(m OrderMsg) string { return m.State },
 }
 
 actions := flow.NewActionRegistry[OrderMsg]()
 _ = actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil })
 
-sm, _ := flow.NewStateMachine(cfg, flow.NewInMemoryStateStore(), req, nil, actions)
+def := cfg.ToMachineDefinition()
+store := flow.NewInMemoryStateStore()
+_, _ = store.SaveIfVersion(context.Background(), &flow.StateRecord{
+  EntityID:       "order-1",
+  State:          "draft",
+  MachineID:      def.ID,
+  MachineVersion: def.Version,
+}, 0)
+sm, _ := flow.NewStateMachineFromDefinition(
+  def,
+  store,
+  req,
+  flow.NewResolverMap[OrderMsg](),
+  actions,
+  flow.WithExecutionPolicy[OrderMsg](cfg.ExecutionPolicy),
+)
 
 res, err := sm.ApplyEvent(context.Background(), flow.ApplyEventRequest[OrderMsg]{
   MachineID: "order",
   EntityID: "order-1",
   Event:    "approve",
-  Msg:      OrderMsg{ID: "order-1", Event: "approve", State: "draft"},
+  Msg:      OrderMsg{ID: "order-1", Event: "approve"},
   ExecCtx:  flow.ExecutionContext{ActorID: "user-1", Roles: []string{"admin"}, Tenant: "acme"},
   IdempotencyKey: "approve-order-1-v1", // optional
   Metadata: map[string]any{
@@ -71,6 +85,8 @@ _ = res.Snapshot
 _ = res.Execution // nil for lightweight; set for orchestrated policy
 _ = res.IdempotencyHit
 ```
+
+When `DryRun` is true, apply remains evaluation-only and skips state/outbox/orchestrator/lifecycle/idempotency-store writes.
 
 Snapshot includes target metadata for static and dynamic transitions:
 
@@ -130,13 +146,25 @@ _ = ui
   - `PauseExecution(ctx, executionID)`
   - `ResumeExecution(ctx, executionID)`
   - `StopExecution(ctx, executionID)`
-- RPC method family:
+- Durable orchestrator owns outbox-to-scheduler progression and exposes dispatcher runtime controls:
+  - `Run(ctx)` for continuous claim/enqueue/ack processing
+  - `RunOnce(ctx)` for one managed dispatch cycle
+  - `StopDispatcher(ctx)` for graceful runner shutdown
+  - `DispatcherStatus()` and `DispatcherHealth(ctx)` for runtime visibility
+  - dead-letter inspection via `DeadLetters(ctx, DeadLetterScope{...})`
+  - dispatch outcomes: `completed`, `retry_scheduled`, `dead_lettered`
+- RPC command methods:
   - `fsm.apply_event`
+  - `fsm.execution.pause`
+  - `fsm.execution.resume`
+  - `fsm.execution.stop`
+- RPC query methods:
   - `fsm.snapshot`
-  - `fsm.execution_status`
-  - `fsm.execution_pause`
-  - `fsm.execution_resume`
-  - `fsm.execution_stop`
+  - `fsm.execution.status`
+  - `fsm.execution.list`
+  - `fsm.execution.history`
+- Execution query responses add request telemetry using `query_*` keys (for example, `query_request_id`) and keep transition metadata keys immutable.
+- Execution control/status requests support scope fields: `machineId`, `entityId`, `executionId`, `tenant`.
 
 ```go
 registry := command.NewRegistry()
@@ -411,11 +439,12 @@ Registries (handlers, guards, actions, metrics recorders) resolve the IDs refere
 
 ## State Machine Usage
 
-Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis). You must provide either a stored state or a `CurrentState` extractor; otherwise the state machine errors to prevent silent resets (use `WithInitialFallback(true)` to allow reset-to-initial):
+Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis). State must be explicitly persisted before transition application.
 
 ```go
 smCfg := flow.StateMachineConfig{
-  Entity: "order",
+  Entity:          "order",
+  ExecutionPolicy: flow.ExecutionPolicyLightweight,
   States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
   Transitions: []flow.TransitionConfig{
     {Name: "approve", From: "draft", To: "approved", Guard: "is_admin", Action: "audit"},
@@ -429,17 +458,35 @@ store := flow.NewInMemoryStateStore()
 req := flow.TransitionRequest[OrderMsg]{
   StateKey:     func(m OrderMsg) string { return m.ID },
   Event:        func(m OrderMsg) string { return m.Event },
-  CurrentState: func(m OrderMsg) string { return m.State }, // fallback when store has no entry
 }
-sm, _ := flow.NewStateMachine(smCfg, store, req, guards, actions)
-result, err := sm.ApplyEvent(ctx, "approve", order)
+def := smCfg.ToMachineDefinition()
+resolvers := flow.NewResolverMap[OrderMsg]()
+guard, _ := guards.Lookup("is_admin")
+resolvers.RegisterGuard("is_admin", guard)
+sm, _ := flow.NewStateMachineFromDefinition(
+  def,
+  store,
+  req,
+  resolvers,
+  actions,
+  flow.WithExecutionPolicy[OrderMsg](smCfg.ExecutionPolicy),
+)
+_, _ = store.SaveIfVersion(ctx, &flow.StateRecord{
+  EntityID:       order.ID,
+  State:          "draft",
+  MachineID:      def.ID,
+  MachineVersion: def.Version,
+}, 0)
+result, err := sm.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
+  EntityID: order.ID,
+  Event:    "approve",
+  Msg:      order,
+})
 if err != nil {
   // handle transition error
 }
-_ = result // TransitionResult{PreviousState, CurrentState, Effects}
+_ = result
 ```
-
-Helper: `flow.TransitionRequestFromState(idFn, stateFn, eventFn)` builds a request using ID/current state/event to reduce boilerplate. Option `flow.WithInitialFallback(true)` re-enables the legacy behavior of falling back to the initial state when both store and CurrentState are empty.
 `StateMachine` also implements `Execute(ctx, msg) error` for `command.Commander[T]` compatibility.
 
 ## Metrics/Tracing Decorators
@@ -486,7 +533,8 @@ Define states, transitions, guards, and actions, with pluggable state stores (in
 
 ```go
 smCfg := flow.StateMachineConfig{
-  Entity: "order",
+  Entity:          "order",
+  ExecutionPolicy: flow.ExecutionPolicyLightweight,
   States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
   Transitions: []flow.TransitionConfig{{Name: "approve", From: "draft", To: "approved", Guard: "is_admin"}},
 }
@@ -494,8 +542,22 @@ guards := flow.NewGuardRegistry[OrderMsg]()
 guards.Register("is_admin", func(m OrderMsg) bool { return m.Admin })
 store := flow.NewInMemoryStateStore()
 req := flow.TransitionRequest[OrderMsg]{StateKey: func(m OrderMsg) string { return m.ID }, Event: func(m OrderMsg) string { return m.Event }}
-sm, _ := flow.NewStateMachine(smCfg, store, req, guards, nil)
-result, err := sm.ApplyEvent(ctx, "approve", order)
+def := smCfg.ToMachineDefinition()
+resolvers := flow.NewResolverMap[OrderMsg]()
+guard, _ := guards.Lookup("is_admin")
+resolvers.RegisterGuard("is_admin", guard)
+sm, _ := flow.NewStateMachineFromDefinition(def, store, req, resolvers, nil, flow.WithExecutionPolicy[OrderMsg](smCfg.ExecutionPolicy))
+_, _ = store.SaveIfVersion(ctx, &flow.StateRecord{
+  EntityID:       order.ID,
+  State:          "draft",
+  MachineID:      def.ID,
+  MachineVersion: def.Version,
+}, 0)
+result, err := sm.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
+  EntityID: order.ID,
+  Event:    "approve",
+  Msg:      order,
+})
 if err != nil {
   // handle transition error
 }
