@@ -1,5 +1,33 @@
 # Changelog
 
+# [0.16.0](https://github.com/goliatone/go-command/compare/v0.15.0...v0.16.0) - (2026-02-25)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.16.0 ([a2ed989](https://github.com/goliatone/go-command/commit/a2ed98968bc3aeb7fd9f05133c946c42e239be44))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Break down client release ([ca9cc01](https://github.com/goliatone/go-command/commit/ca9cc016489cf955343d0acadd9d89b918028d4b))  - (goliatone)
+- Client release tasks ([b69dec1](https://github.com/goliatone/go-command/commit/b69dec14a90c591321e6c39c46a7a460ed74875e))  - (goliatone)
+- Embedded client library ([32b31ae](https://github.com/goliatone/go-command/commit/32b31ae0566264d1e9ba50f309a04cfcfcc75bc4))  - (goliatone)
+- Udpate client build up ([7fddc04](https://github.com/goliatone/go-command/commit/7fddc0428dde97edd25a8f8732930dbce40d8c0a))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Rpc definition to better integrate external routers ([16969c8](https://github.com/goliatone/go-command/commit/16969c8e0899be3be9969554ae97c80fd57b638a))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.15.0 ([bc65e8d](https://github.com/goliatone/go-command/commit/bc65e8d08ffecc7990c745cc7e60c568e857a2aa))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([1189577](https://github.com/goliatone/go-command/commit/1189577b984a39a3fcb57e77efe75d0e51f822fd))  - (goliatone)
+- Update docs ([df82009](https://github.com/goliatone/go-command/commit/df820093c89cfd4ec4cb237a1c308223d2301d1b))  - (goliatone)
+- Update test ([538ed7e](https://github.com/goliatone/go-command/commit/538ed7e494ea36b66525a3d239e52f75c532b79f))  - (goliatone)
+- Update examples ([3a65125](https://github.com/goliatone/go-command/commit/3a65125c959da9149683ffab268e2c97b699f15b))  - (goliatone)
+
 # [0.15.0](https://github.com/goliatone/go-command/compare/v0.14.0...v0.15.0) - (2026-02-25)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -44,7 +72,6 @@
 
 ## <!-- 2 -->🚜 Refactor
 
-- RPC core clean-break: endpoint-first registration only; removed reflective `rpc.Server.Register(opts, handler, meta)` path and legacy resolver fallback.
 - Outbox dispatcher ([f837d3c](https://github.com/goliatone/go-command/commit/f837d3cf7a18eae3cd2838661f67ddb0ccbba3bf))  - (goliatone)
 - Cron to use scheduler ([b1de43e](https://github.com/goliatone/go-command/commit/b1de43ec2c85f85f4f8f6dfd552459821b881c2c))  - (goliatone)
 - Fsm state store to have new methods to manage pause/resume etc ([63f9a7b](https://github.com/goliatone/go-command/commit/63f9a7b60369c1e151daa07279a170d1770c1c9f))  - (goliatone)
@@ -507,4 +534,5 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
+
 
