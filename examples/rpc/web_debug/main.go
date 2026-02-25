@@ -78,27 +78,29 @@ type IncrementCounterRPCCommand struct {
 	store *CounterStore
 }
 
-func (c *IncrementCounterRPCCommand) Execute(_ context.Context, req cmdrpc.RequestEnvelope[IncrementCounterData]) error {
+func (c *IncrementCounterRPCCommand) apply(_ context.Context, req cmdrpc.RequestEnvelope[IncrementCounterData]) (cmdrpc.ResponseEnvelope[struct{}], error) {
 	if c == nil || c.store == nil {
-		return errors.New("increment command not configured")
+		return cmdrpc.ResponseEnvelope[struct{}]{}, errors.New("increment command not configured")
 	}
 	c.store.Increment(req.Data.Amount, req.Meta.ActorID, req.Meta.RequestID)
-	return nil
+	return cmdrpc.ResponseEnvelope[struct{}]{}, nil
 }
 
-func (c *IncrementCounterRPCCommand) RPCHandler() any {
-	return c
-}
-
-func (c *IncrementCounterRPCCommand) RPCOptions() command.RPCConfig {
-	return command.RPCConfig{
-		Method:      "counter.increment",
-		Summary:     "Increment counter",
-		Description: "Increase counter value by the provided amount (defaults to 1).",
-		Tags:        []string{"counter", "write"},
-		Permissions: []string{"counter:write"},
-		Roles:       []string{"editor", "admin"},
-		Since:       "v1.0.0",
+func (c *IncrementCounterRPCCommand) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[IncrementCounterData, struct{}](
+			cmdrpc.EndpointSpec{
+				Method:      "counter.increment",
+				Kind:        cmdrpc.MethodKindCommand,
+				Summary:     "Increment counter",
+				Description: "Increase counter value by the provided amount (defaults to 1).",
+				Tags:        []string{"counter", "write"},
+				Permissions: []string{"counter:write"},
+				Roles:       []string{"editor", "admin"},
+				Since:       "v1.0.0",
+			},
+			c.apply,
+		),
 	}
 }
 
@@ -106,27 +108,29 @@ type ResetCounterRPCCommand struct {
 	store *CounterStore
 }
 
-func (c *ResetCounterRPCCommand) Execute(_ context.Context, req cmdrpc.RequestEnvelope[ResetCounterData]) error {
+func (c *ResetCounterRPCCommand) apply(_ context.Context, req cmdrpc.RequestEnvelope[ResetCounterData]) (cmdrpc.ResponseEnvelope[struct{}], error) {
 	if c == nil || c.store == nil {
-		return errors.New("reset command not configured")
+		return cmdrpc.ResponseEnvelope[struct{}]{}, errors.New("reset command not configured")
 	}
 	c.store.Reset(req.Meta.ActorID, req.Meta.RequestID)
-	return nil
+	return cmdrpc.ResponseEnvelope[struct{}]{}, nil
 }
 
-func (c *ResetCounterRPCCommand) RPCHandler() any {
-	return c
-}
-
-func (c *ResetCounterRPCCommand) RPCOptions() command.RPCConfig {
-	return command.RPCConfig{
-		Method:      "counter.reset",
-		Summary:     "Reset counter",
-		Description: "Set counter value back to zero.",
-		Tags:        []string{"counter", "write"},
-		Permissions: []string{"counter:write"},
-		Roles:       []string{"admin"},
-		Since:       "v1.0.0",
+func (c *ResetCounterRPCCommand) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[ResetCounterData, struct{}](
+			cmdrpc.EndpointSpec{
+				Method:      "counter.reset",
+				Kind:        cmdrpc.MethodKindCommand,
+				Summary:     "Reset counter",
+				Description: "Set counter value back to zero.",
+				Tags:        []string{"counter", "write"},
+				Permissions: []string{"counter:write"},
+				Roles:       []string{"admin"},
+				Since:       "v1.0.0",
+			},
+			c.apply,
+		),
 	}
 }
 
@@ -148,20 +152,22 @@ func (q *CounterSnapshotRPCQuery) Query(_ context.Context, req cmdrpc.RequestEnv
 	return cmdrpc.ResponseEnvelope[CounterState]{Data: state}, nil
 }
 
-func (q *CounterSnapshotRPCQuery) RPCHandler() any {
-	return q
-}
-
-func (q *CounterSnapshotRPCQuery) RPCOptions() command.RPCConfig {
-	return command.RPCConfig{
-		Method:      "counter.snapshot",
-		Summary:     "Counter snapshot",
-		Description: "Read the current counter state.",
-		Tags:        []string{"counter", "read"},
-		Permissions: []string{"counter:read"},
-		Roles:       []string{"viewer", "editor", "admin"},
-		Idempotent:  true,
-		Since:       "v1.0.0",
+func (q *CounterSnapshotRPCQuery) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[SnapshotCounterData, CounterState](
+			cmdrpc.EndpointSpec{
+				Method:      "counter.snapshot",
+				Kind:        cmdrpc.MethodKindQuery,
+				Summary:     "Counter snapshot",
+				Description: "Read the current counter state.",
+				Tags:        []string{"counter", "read"},
+				Permissions: []string{"counter:read"},
+				Roles:       []string{"viewer", "editor", "admin"},
+				Idempotent:  true,
+				Since:       "v1.0.0",
+			},
+			q.Query,
+		),
 	}
 }
 
@@ -172,7 +178,10 @@ type App struct {
 
 func NewApp() (*App, error) {
 	rpcServer := cmdrpc.NewServer(cmdrpc.WithFailureMode(cmdrpc.FailureModeRecover))
-	reg := command.NewRegistry().SetRPCRegister(rpcServer.Register)
+	reg := command.NewRegistry()
+	if err := reg.AddResolver("rpc-endpoints", cmdrpc.Resolver(rpcServer)); err != nil {
+		return nil, fmt.Errorf("add rpc resolver: %w", err)
+	}
 	store := NewCounterStore()
 
 	commands := []any{
@@ -182,7 +191,7 @@ func NewApp() (*App, error) {
 	}
 	for _, cmd := range commands {
 		if err := reg.RegisterCommand(cmd); err != nil {
-			return nil, fmt.Errorf("register rpc command: %w", err)
+			return nil, fmt.Errorf("register rpc endpoint provider: %w", err)
 		}
 	}
 	if err := reg.Initialize(); err != nil {

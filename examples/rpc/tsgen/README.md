@@ -2,10 +2,7 @@
 
 This example shows an end-to-end pipeline for generating TypeScript RPC contracts from Go endpoint metadata.
 
-It demonstrates both registration styles supported by the RPC server:
-
-- Explicit typed endpoints via `rpc.NewEndpoint` (`tasks.create`, `tasks.list`)
-- RPC method adapter via `command.RPCCommand` (`search.rebuild_index`)
+It demonstrates endpoint-first registration with explicit typed endpoints via `rpc.NewEndpoint` (`tasks.create`, `tasks.list`, `search.rebuild_index`).
 
 ## What it produces
 

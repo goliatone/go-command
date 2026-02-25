@@ -4,8 +4,8 @@ This example runs a small web app that calls `go-command/rpc` methods from the b
 
 ## What it demonstrates
 
-- `command.RPCCommand` registration through `command.Registry`
-- RPC methods implemented as command/query handlers
+- Endpoint-provider registration through `command.Registry` + `rpc.Resolver`
+- RPC methods declared with explicit endpoint specs (`rpc.NewEndpoint`)
 - A tiny HTTP JSON-RPC adapter using `rpc.Server.NewRequestForMethod` + `rpc.Server.Invoke`
 - Browser-side debug panel with full request/response history
 

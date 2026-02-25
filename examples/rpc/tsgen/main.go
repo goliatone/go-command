@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/goliatone/go-command"
 	cmdrpc "github.com/goliatone/go-command/rpc"
 )
 
@@ -54,24 +53,26 @@ func (RebuildSearchIndexMessage) Type() string {
 
 type RebuildSearchIndexCommand struct{}
 
-func (c *RebuildSearchIndexCommand) Execute(_ context.Context, _ RebuildSearchIndexMessage) error {
-	return nil
+func (c *RebuildSearchIndexCommand) rebuild(_ context.Context, _ cmdrpc.RequestEnvelope[RebuildSearchIndexMessage]) (cmdrpc.ResponseEnvelope[struct{}], error) {
+	return cmdrpc.ResponseEnvelope[struct{}]{}, nil
 }
 
-func (c *RebuildSearchIndexCommand) RPCHandler() any {
-	return c
-}
-
-func (c *RebuildSearchIndexCommand) RPCOptions() command.RPCConfig {
-	return command.RPCConfig{
-		Method:      "search.rebuild_index",
-		Summary:     "Rebuild search index",
-		Description: "Execute a full or scoped search index rebuild.",
-		Tags:        []string{"search", "maintenance"},
-		Permissions: []string{"search:write"},
-		Roles:       []string{"admin"},
-		Idempotent:  true,
-		Since:       "v1.2.0",
+func (c *RebuildSearchIndexCommand) RPCEndpoints() []cmdrpc.EndpointDefinition {
+	return []cmdrpc.EndpointDefinition{
+		cmdrpc.NewEndpoint[RebuildSearchIndexMessage, struct{}](
+			cmdrpc.EndpointSpec{
+				Method:      "search.rebuild_index",
+				Kind:        cmdrpc.MethodKindCommand,
+				Summary:     "Rebuild search index",
+				Description: "Execute a full or scoped search index rebuild.",
+				Tags:        []string{"search", "maintenance"},
+				Permissions: []string{"search:write"},
+				Roles:       []string{"admin"},
+				Idempotent:  true,
+				Since:       "v1.2.0",
+			},
+			c.rebuild,
+		),
 	}
 }
 
@@ -158,8 +159,8 @@ func main() {
 	}
 
 	rebuild := &RebuildSearchIndexCommand{}
-	if err := server.Register(rebuild.RPCOptions(), rebuild.RPCHandler(), command.MessageTypeForCommand(rebuild)); err != nil {
-		die(fmt.Errorf("register RPC method adapter endpoint: %w", err))
+	if err := server.RegisterEndpoints(rebuild.RPCEndpoints()...); err != nil {
+		die(fmt.Errorf("register search endpoints: %w", err))
 	}
 
 	if err := writeManifest(manifestPath, endpointManifest{
