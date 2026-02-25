@@ -7,11 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestPhase7Audit_NoGoFSMModuleOrPackageIntroduced(t *testing.T) {
+func TestRepositoryAudit_NoGoFSMModuleOrPackageIntroduced(t *testing.T) {
 	mod, err := os.ReadFile("../go.mod")
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
@@ -46,11 +47,15 @@ func TestPhase7Audit_NoGoFSMModuleOrPackageIntroduced(t *testing.T) {
 	}
 }
 
-func TestPhase7Audit_NoLegacyShimBridgeBeyondExecute(t *testing.T) {
+func TestShimAudit_NoLegacyBridgeMethodsBeyondExecute(t *testing.T) {
 	disallowed := map[string]struct{}{
-		"Dispatch":      {},
-		"DispatchEvent": {},
-		"Transition":    {},
+		"Dispatch":                    {},
+		"DispatchEvent":               {},
+		"Transition":                  {},
+		"NewStateMachine":             {},
+		"WithInitialFallback":         {},
+		"TransitionRequestFromState":  {},
+		"machineDefinitionFromConfig": {},
 	}
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", func(info fs.FileInfo) bool {
@@ -78,13 +83,20 @@ func TestPhase7Audit_NoLegacyShimBridgeBeyondExecute(t *testing.T) {
 			if _, blocked := disallowed[fn.Name.Name]; !blocked {
 				continue
 			}
-			if receiverIsStateMachine(fn.Recv) {
+			if fn.Recv == nil || receiverIsStateMachine(fn.Recv) {
 				legacy = append(legacy, fileName+":"+fn.Name.Name)
 			}
 		}
 	}
 	if len(legacy) > 0 {
 		t.Fatalf("unexpected legacy shim bridges on StateMachine: %v", legacy)
+	}
+}
+
+func TestTransitionRequestAudit_NoCurrentStateFallbackField(t *testing.T) {
+	typ := reflect.TypeOf(TransitionRequest[shimAuditMsg]{})
+	if _, ok := typ.FieldByName("CurrentState"); ok {
+		t.Fatalf("unexpected CurrentState fallback field on TransitionRequest")
 	}
 }
 

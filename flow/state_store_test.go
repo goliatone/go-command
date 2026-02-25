@@ -166,6 +166,81 @@ func TestRedisStateStoreOutboxClaimLeaseAndRetry(t *testing.T) {
 	}
 }
 
+func TestInMemoryStateStoreDeadLetterInspection(t *testing.T) {
+	store := NewInMemoryStateStore()
+	err := store.RunInTransaction(context.Background(), func(tx TxStore) error {
+		return tx.AppendOutbox(context.Background(), OutboxEntry{
+			ID:          "outbox-dead-1",
+			EntityID:    "entity-1",
+			ExecutionID: "exec-dead-1",
+			Event:       "approve",
+			Effect:      CommandEffect{ActionID: "mark"},
+			Metadata:    map[string]any{"machine_id": "orders"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("append outbox failed: %v", err)
+	}
+	claimed, err := store.ClaimPending(context.Background(), "worker-d", 10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim pending failed: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("expected one claimed entry, got %d", len(claimed))
+	}
+	if err := store.MarkDeadLetter(context.Background(), "outbox-dead-1", claimed[0].LeaseToken, "terminal"); err != nil {
+		t.Fatalf("mark dead-letter failed: %v", err)
+	}
+
+	items, err := store.ListDeadLetters(context.Background(), DeadLetterScope{ExecutionID: "exec-dead-1"})
+	if err != nil {
+		t.Fatalf("list dead letters failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one dead-letter entry, got %d", len(items))
+	}
+	if items[0].Status != "dead_lettered" {
+		t.Fatalf("expected dead_lettered status, got %s", items[0].Status)
+	}
+}
+
+func TestRedisStateStoreDeadLetterInspection(t *testing.T) {
+	store := NewRedisStateStore(newMockRedisClient(), time.Minute)
+	err := store.RunInTransaction(context.Background(), func(tx TxStore) error {
+		return tx.AppendOutbox(context.Background(), OutboxEntry{
+			ID:          "outbox-redis-dead",
+			EntityID:    "entity-2",
+			ExecutionID: "exec-redis-dead",
+			Event:       "approve",
+			Effect:      CommandEffect{ActionID: "mark"},
+			Metadata:    map[string]any{"machine_id": "orders"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("append outbox failed: %v", err)
+	}
+	claimed, err := store.ClaimPending(context.Background(), "worker-rd", 10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim pending failed: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("expected one claimed entry, got %d", len(claimed))
+	}
+	if err := store.MarkDeadLetter(context.Background(), "outbox-redis-dead", claimed[0].LeaseToken, "terminal"); err != nil {
+		t.Fatalf("mark dead-letter failed: %v", err)
+	}
+	items, err := store.ListDeadLetters(context.Background(), DeadLetterScope{ExecutionID: "exec-redis-dead"})
+	if err != nil {
+		t.Fatalf("list dead letters failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one dead-letter entry, got %d", len(items))
+	}
+	if items[0].Status != "dead_lettered" {
+		t.Fatalf("expected dead_lettered status, got %s", items[0].Status)
+	}
+}
+
 type mockRedisClient struct {
 	mu          sync.RWMutex
 	state       map[string]string
@@ -245,6 +320,10 @@ func (m *mockRedisClient) Eval(_ context.Context, script string, keys []string, 
 		return m.evalMarkCompleted(args)
 	case redisScriptMarkFailed:
 		return m.evalMarkFailed(args)
+	case redisScriptMarkDeadLetter:
+		return m.evalMarkDeadLetter(args)
+	case redisScriptListDeadLetters:
+		return m.evalListDeadLetters(args)
 	case redisScriptExtendLease:
 		return m.evalExtendLease(args)
 	default:
@@ -383,7 +462,7 @@ func (m *mockRedisClient) evalClaimPending(args []any) (any, error) {
 		if !ok {
 			continue
 		}
-		if row.Status == "completed" {
+		if row.Status == "completed" || row.Status == "dead_lettered" {
 			continue
 		}
 		if row.Status == "leased" && row.LeaseUntilMS > nowMS {
@@ -473,6 +552,77 @@ func (m *mockRedisClient) evalMarkFailed(args []any) (any, error) {
 	m.outbox[id] = row
 	m.pending[id] = retryAt
 	return int64(1), nil
+}
+
+func (m *mockRedisClient) evalMarkDeadLetter(args []any) (any, error) {
+	id := mockArgString(args, 0)
+	token := mockArgString(args, 1)
+	reason := mockArgString(args, 2)
+	row, ok := m.outbox[id]
+	if !ok {
+		return int64(-1), nil
+	}
+	if row.LeaseToken != token {
+		return int64(-2), nil
+	}
+	if row.Status != "leased" {
+		return int64(-3), nil
+	}
+	row.Status = "dead_lettered"
+	row.LeaseOwner = ""
+	row.LeaseUntilMS = 0
+	row.LeaseToken = ""
+	row.RetryAtMS = 0
+	row.ProcessedMS = time.Now().UTC().UnixMilli()
+	row.LastError = reason
+	m.outbox[id] = row
+	delete(m.pending, id)
+	return int64(1), nil
+}
+
+func (m *mockRedisClient) evalListDeadLetters(args []any) (any, error) {
+	limit := int(mockArgInt64(args, 0))
+	if limit <= 0 {
+		limit = 100
+	}
+	ids := make([]string, 0)
+	for id, row := range m.outbox {
+		if row.Status == "dead_lettered" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return m.outbox[ids[i]].ProcessedMS > m.outbox[ids[j]].ProcessedMS
+	})
+	out := make([]any, 0, limit)
+	for _, id := range ids {
+		if len(out) >= limit {
+			break
+		}
+		row := m.outbox[id]
+		encoded, _ := json.Marshal(map[string]any{
+			"id":              row.ID,
+			"entity_id":       row.EntityID,
+			"transition_id":   row.TransitionID,
+			"execution_id":    row.ExecutionID,
+			"event":           row.Event,
+			"topic":           row.Topic,
+			"effect_type":     row.EffectType,
+			"payload":         row.Payload,
+			"status":          row.Status,
+			"attempts":        fmt.Sprintf("%d", row.Attempts),
+			"lease_owner":     row.LeaseOwner,
+			"lease_until_ms":  fmt.Sprintf("%d", row.LeaseUntilMS),
+			"lease_token":     row.LeaseToken,
+			"retry_at_ms":     fmt.Sprintf("%d", row.RetryAtMS),
+			"processed_at_ms": fmt.Sprintf("%d", row.ProcessedMS),
+			"last_error":      row.LastError,
+			"metadata_json":   row.MetadataJSON,
+			"created_at_ms":   fmt.Sprintf("%d", row.CreatedAtMS),
+		})
+		out = append(out, string(encoded))
+	}
+	return out, nil
 }
 
 func (m *mockRedisClient) evalExtendLease(args []any) (any, error) {

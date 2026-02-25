@@ -9,6 +9,14 @@ import (
 	"github.com/goliatone/go-logger/glog"
 )
 
+type loggerCompatMsg struct {
+	ID    string
+	Event string
+	State string
+}
+
+func (loggerCompatMsg) Type() string { return "logger.compat.msg" }
+
 type glogCompatLogger struct {
 	logger glog.Logger
 }
@@ -37,17 +45,16 @@ func (l glogCompatLogger) WithFields(fields map[string]any) Logger {
 	return l
 }
 
-func TestPhase7LoggerCompatibility_BaseLoggerAndFmtFallback(t *testing.T) {
+func TestLoggerCompatibility_BaseLoggerAndFmtFallback(t *testing.T) {
 	cfg := StateMachineConfig{
 		Entity:          "order",
 		ExecutionPolicy: ExecutionPolicyLightweight,
 		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
 		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
 	}
-	req := TransitionRequest[phase7Msg]{
-		StateKey:     func(m phase7Msg) string { return m.ID },
-		Event:        func(m phase7Msg) string { return m.Event },
-		CurrentState: func(m phase7Msg) string { return m.State },
+	req := TransitionRequest[loggerCompatMsg]{
+		StateKey: func(m loggerCompatMsg) string { return m.ID },
+		Event:    func(m loggerCompatMsg) string { return m.Event },
 	}
 
 	buf := &bytes.Buffer{}
@@ -58,14 +65,15 @@ func TestPhase7LoggerCompatibility_BaseLoggerAndFmtFallback(t *testing.T) {
 	)
 	logger := glogCompatLogger{logger: base}
 
-	smBase, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[phase7Msg](logger))
+	smBase, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[loggerCompatMsg](logger))
 	if err != nil {
 		t.Fatalf("new state machine with base logger: %v", err)
 	}
-	_, err = smBase.ApplyEvent(context.Background(), ApplyEventRequest[phase7Msg]{
+	mustSeedStateRecord(t, smBase, "entity-base", "draft")
+	_, err = smBase.ApplyEvent(context.Background(), ApplyEventRequest[loggerCompatMsg]{
 		EntityID: "entity-base",
 		Event:    "approve",
-		Msg:      phase7Msg{ID: "entity-base", Event: "approve", State: "draft"},
+		Msg:      loggerCompatMsg{ID: "entity-base", Event: "approve", State: "draft"},
 	})
 	if err != nil {
 		t.Fatalf("apply event with base logger: %v", err)
@@ -78,17 +86,18 @@ func TestPhase7LoggerCompatibility_BaseLoggerAndFmtFallback(t *testing.T) {
 		t.Fatalf("expected structured correlation fields in BaseLogger output")
 	}
 
-	smFallback, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[phase7Msg](nil))
+	smFallback, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[loggerCompatMsg](nil))
 	if err != nil {
 		t.Fatalf("new state machine with nil logger: %v", err)
 	}
 	if _, ok := smFallback.logger.(*FmtLogger); !ok {
 		t.Fatalf("expected nil logger to normalize to FmtLogger fallback")
 	}
-	_, err = smFallback.ApplyEvent(context.Background(), ApplyEventRequest[phase7Msg]{
+	mustSeedStateRecord(t, smFallback, "entity-fallback", "draft")
+	_, err = smFallback.ApplyEvent(context.Background(), ApplyEventRequest[loggerCompatMsg]{
 		EntityID: "entity-fallback",
 		Event:    "approve",
-		Msg:      phase7Msg{ID: "entity-fallback", Event: "approve", State: "draft"},
+		Msg:      loggerCompatMsg{ID: "entity-fallback", Event: "approve", State: "draft"},
 	})
 	if err != nil {
 		t.Fatalf("apply event with fallback logger: %v", err)

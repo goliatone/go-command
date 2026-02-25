@@ -42,18 +42,18 @@ func TestStateMachineApplyEventReturnsEnvelopeWithDescriptorEffects(t *testing.T
 	}
 
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	durable, err := NewDurableOrchestrator[smMsg](NewInMemoryExecutionRecordStore[smMsg](), nil, nil)
 	if err != nil {
 		t.Fatalf("new durable orchestrator: %v", err)
 	}
-	sm, err := NewStateMachine(cfg, store, req, guards, actions, WithOrchestrator[smMsg](durable))
+	sm, err := newStateMachineFromConfig(cfg, store, req, guards, actions, WithOrchestrator[smMsg](durable))
 	if err != nil {
 		t.Fatalf("expected state machine build success: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -135,11 +135,11 @@ func TestStateMachineGuardBlocks(t *testing.T) {
 	guards := NewGuardRegistry[smMsg]()
 	guards.Register("is_even", func(m smMsg) bool { return m.Number%2 == 0 })
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, _ := NewStateMachine(cfg, store, req, guards, nil)
+	sm, _ := newStateMachineFromConfig(cfg, store, req, guards, nil)
+	mustSeedStateRecord(t, sm, "1", "draft")
 	err := sm.Execute(context.Background(), smMsg{ID: "1", Event: "approve", State: "draft", Number: 3})
 	if err == nil {
 		t.Fatalf("expected guard to block")
@@ -157,11 +157,10 @@ func TestStateMachineExecuteNoImplicitIdentityFallback(t *testing.T) {
 		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(smMsg) string { return "" },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(smMsg) string { return "" },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
@@ -182,7 +181,7 @@ func TestStateMachineSnapshotRequiresEntityID(t *testing.T) {
 		Transitions:     nil,
 	}
 	req := TransitionRequest[smMsg]{StateKey: func(m smMsg) string { return m.ID }}
-	sm, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
@@ -226,14 +225,14 @@ func TestExecutionContextPlumbedToGuardAndDynamicResolver(t *testing.T) {
 
 	store := NewInMemoryStateStore()
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		CurrentState: func(m smMsg) string { return m.State },
-		Event:        func(m smMsg) string { return m.Event },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	sm, err := NewStateMachineFromDefinition(def, store, req, reg, nil, WithExecutionPolicy[smMsg](ExecutionPolicyLightweight))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -284,14 +283,14 @@ func TestStateMachineGuardShortCircuit(t *testing.T) {
 	})
 
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		CurrentState: func(m smMsg) string { return m.State },
-		Event:        func(m smMsg) string { return m.Event },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	sm, err := NewStateMachineFromDefinition(def, NewInMemoryStateStore(), req, reg, nil, WithExecutionPolicy[smMsg](ExecutionPolicyLightweight))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	_, err = sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -323,11 +322,10 @@ func TestStateMachinePreconditionsExpectedStateAndVersion(t *testing.T) {
 	}
 
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		CurrentState: func(m smMsg) string { return m.State },
-		Event:        func(m smMsg) string { return m.Event },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, store, req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, store, req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
@@ -380,7 +378,7 @@ func TestStateMachineMachineVersionPinningMismatch(t *testing.T) {
 		StateKey: func(m smMsg) string { return m.ID },
 		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, store, req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, store, req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
@@ -473,14 +471,14 @@ func TestStateMachineApplyEventMachineIDPrecondition(t *testing.T) {
 		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	_, err = sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		MachineID: "wrong-machine",
@@ -504,14 +502,14 @@ func TestStateMachineIdempotencyReplayAndConflict(t *testing.T) {
 		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil)
+	sm, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
 
 	first, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID:       "entity-1",
@@ -573,18 +571,18 @@ func TestStateMachineConcurrentIdempotencyCollisionSingleCommit(t *testing.T) {
 	}
 	store := NewInMemoryStateStore()
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	durable, err := NewDurableOrchestrator[smMsg](NewInMemoryExecutionRecordStore[smMsg](), nil, nil)
 	if err != nil {
 		t.Fatalf("new durable orchestrator: %v", err)
 	}
-	sm, err := NewStateMachine(cfg, store, req, nil, nil, WithOrchestrator[smMsg](durable))
+	sm, err := newStateMachineFromConfig(cfg, store, req, nil, nil, WithOrchestrator[smMsg](durable))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
 
 	type result struct {
 		resp *ApplyEventResponse[smMsg]
@@ -652,15 +650,15 @@ func TestStateMachineDryRunNoMutationNoOutboxNoOrchestratorStart(t *testing.T) {
 	}
 	store := NewInMemoryStateStore()
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	orchestrator := &countingOrchestrator{}
-	sm, err := NewStateMachine(cfg, store, req, nil, nil, WithOrchestrator[smMsg](orchestrator))
+	sm, err := newStateMachineFromConfig(cfg, store, req, nil, nil, WithOrchestrator[smMsg](orchestrator))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
 
 	resp, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "entity-1",
@@ -696,11 +694,182 @@ func TestStateMachineDryRunNoMutationNoOutboxNoOrchestratorStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load state failed: %v", err)
 	}
-	if rec != nil {
-		t.Fatalf("expected no persisted state during dry run")
+	if rec == nil {
+		t.Fatalf("expected existing seed state to remain unchanged during dry run")
+	}
+	if rec.State != "draft" || rec.Version != 0 {
+		t.Fatalf("expected dry run to keep seeded draft state version=0, got state=%q version=%d", rec.State, rec.Version)
 	}
 	if len(store.OutboxEntries()) != 0 {
 		t.Fatalf("expected no outbox entries during dry run")
+	}
+}
+
+func TestStateMachineDryRunSkipsLifecycleAndIdempotencyPersistence(t *testing.T) {
+	cfg := StateMachineConfig{
+		Entity:          "order",
+		ExecutionPolicy: ExecutionPolicyOrchestrated,
+		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions: []TransitionConfig{
+			{Name: "approve", From: "draft", To: "approved", Action: "mark"},
+		},
+	}
+	store := NewInMemoryStateStore()
+	req := TransitionRequest[smMsg]{
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
+	}
+	durable, err := NewDurableOrchestrator[smMsg](NewInMemoryExecutionRecordStore[smMsg](), nil, nil)
+	if err != nil {
+		t.Fatalf("new durable orchestrator: %v", err)
+	}
+	idStore := &observedIdempotencyStore[smMsg]{
+		delegate: NewInMemoryIdempotencyStore[smMsg](),
+	}
+	sm, err := newStateMachineFromConfig(
+		cfg,
+		store,
+		req,
+		nil,
+		nil,
+		WithOrchestrator[smMsg](durable),
+		WithIdempotencyStore[smMsg](idStore),
+	)
+	if err != nil {
+		t.Fatalf("build state machine: %v", err)
+	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
+
+	applyReq := ApplyEventRequest[smMsg]{
+		EntityID:       "entity-1",
+		Event:          "approve",
+		Msg:            smMsg{ID: "entity-1", State: "draft", Event: "approve"},
+		IdempotencyKey: "dry-run-idem",
+		DryRun:         true,
+	}
+	first, err := sm.ApplyEvent(context.Background(), applyReq)
+	if err != nil {
+		t.Fatalf("first dry run failed: %v", err)
+	}
+	second, err := sm.ApplyEvent(context.Background(), applyReq)
+	if err != nil {
+		t.Fatalf("second dry run failed: %v", err)
+	}
+	if first == nil || second == nil {
+		t.Fatalf("expected dry run responses")
+	}
+	if first.IdempotencyHit || second.IdempotencyHit {
+		t.Fatalf("dry run should not consult idempotency replay store")
+	}
+	if first.EventID == second.EventID {
+		t.Fatalf("expected unique event ids when dry run idempotency persistence is disabled")
+	}
+
+	rec, err := store.Load(context.Background(), "entity-1")
+	if err != nil {
+		t.Fatalf("load state failed: %v", err)
+	}
+	if rec == nil || rec.State != "draft" || rec.Version != 0 {
+		t.Fatalf("expected dry run to keep persisted state unchanged")
+	}
+	if len(store.OutboxEntries()) != 0 {
+		t.Fatalf("expected no outbox writes during dry run")
+	}
+	intents, err := durable.LifecycleIntents(context.Background())
+	if err != nil {
+		t.Fatalf("load lifecycle intents failed: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Fatalf("expected no lifecycle intent writes during dry run")
+	}
+	if idStore.loadCalls.Load() != 0 || idStore.saveCalls.Load() != 0 {
+		t.Fatalf("dry run should skip idempotency store calls; load=%d save=%d", idStore.loadCalls.Load(), idStore.saveCalls.Load())
+	}
+}
+
+func TestStateMachinePostCommitIdempotencyFailureReturnsDegradedSuccess(t *testing.T) {
+	cfg := StateMachineConfig{
+		Entity:          "order",
+		ExecutionPolicy: ExecutionPolicyOrchestrated,
+		States:          []StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+		Transitions: []TransitionConfig{
+			{Name: "approve", From: "draft", To: "approved", Action: "mark"},
+		},
+	}
+	store := NewInMemoryStateStore()
+	req := TransitionRequest[smMsg]{
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
+	}
+	durable, err := NewDurableOrchestrator[smMsg](NewInMemoryExecutionRecordStore[smMsg](), nil, nil)
+	if err != nil {
+		t.Fatalf("new durable orchestrator: %v", err)
+	}
+	idStore := &observedIdempotencyStore[smMsg]{
+		delegate: NewInMemoryIdempotencyStore[smMsg](),
+		saveErr:  errors.New("idempotency backend unavailable"),
+	}
+	sm, err := newStateMachineFromConfig(
+		cfg,
+		store,
+		req,
+		nil,
+		nil,
+		WithOrchestrator[smMsg](durable),
+		WithIdempotencyStore[smMsg](idStore),
+	)
+	if err != nil {
+		t.Fatalf("build state machine: %v", err)
+	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
+
+	resp, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
+		EntityID:       "entity-1",
+		Event:          "approve",
+		Msg:            smMsg{ID: "entity-1", State: "draft", Event: "approve"},
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("expected committed success despite idempotency persistence failure, got: %v", err)
+	}
+	if resp == nil || resp.Transition == nil || resp.Transition.CurrentState != "approved" {
+		t.Fatalf("expected successful transition response")
+	}
+	if resp.Execution == nil {
+		t.Fatalf("expected execution handle")
+	}
+	if resp.Execution.Status != ExecutionStateDegraded {
+		t.Fatalf("expected degraded execution handle status, got %s", resp.Execution.Status)
+	}
+	if resp.Execution.Metadata["idempotency_degraded"] != true {
+		t.Fatalf("expected idempotency degraded metadata flag")
+	}
+	if resp.Execution.Metadata["idempotency_error_code"] != ErrCodeIdempotencyDegraded {
+		t.Fatalf("unexpected idempotency degradation code: %v", resp.Execution.Metadata["idempotency_error_code"])
+	}
+	if resp.Execution.Metadata["idempotency_persistence_error"] == "" {
+		t.Fatalf("expected idempotency persistence error metadata")
+	}
+
+	rec, err := store.Load(context.Background(), "entity-1")
+	if err != nil {
+		t.Fatalf("load state failed: %v", err)
+	}
+	if rec == nil || rec.State != "approved" || rec.Version != 1 {
+		t.Fatalf("expected committed approved state version=1")
+	}
+	if len(store.OutboxEntries()) != 1 {
+		t.Fatalf("expected outbox entry to persist after committed transition")
+	}
+	intents, err := durable.LifecycleIntents(context.Background())
+	if err != nil {
+		t.Fatalf("load lifecycle intents failed: %v", err)
+	}
+	if len(intents) < 2 {
+		t.Fatalf("expected attempted and committed lifecycle intents")
+	}
+	if idStore.saveCalls.Load() == 0 {
+		t.Fatalf("expected idempotency store save attempt")
 	}
 }
 
@@ -725,14 +894,14 @@ func TestStateMachineSnapshotGuardEligibilityAndBlockedProjection(t *testing.T) 
 	})
 
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	sm, err := NewStateMachineFromDefinition(def, NewInMemoryStateStore(), req, reg, nil, WithExecutionPolicy[smMsg](ExecutionPolicyLightweight))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "entity-1", "draft")
 
 	withBlocked, err := sm.Snapshot(context.Background(), SnapshotRequest[smMsg]{
 		EntityID:       "entity-1",
@@ -823,14 +992,14 @@ func TestStateMachineLightweightDoesNotPersistOutbox(t *testing.T) {
 		t.Fatalf("register action: %v", err)
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(cfg, store, req, nil, actions)
+	sm, err := newStateMachineFromConfig(cfg, store, req, nil, actions)
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -866,11 +1035,10 @@ func TestStateMachinePostCommitOrchestratorStartFailureReturnsSuccess(t *testing
 		t.Fatalf("register action: %v", err)
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
-	sm, err := NewStateMachine(
+	sm, err := newStateMachineFromConfig(
 		cfg,
 		store,
 		req,
@@ -881,6 +1049,7 @@ func TestStateMachinePostCommitOrchestratorStartFailureReturnsSuccess(t *testing
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -918,9 +1087,8 @@ func TestStateMachineCommittedLifecycleFailureDoesNotFailAfterCommit(t *testing.
 	}
 	store := NewInMemoryStateStore()
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 	hook := lifecycleHookFunc[smMsg](func(_ context.Context, evt TransitionLifecycleEvent[smMsg]) error {
 		if evt.Phase == TransitionPhaseCommitted {
@@ -928,7 +1096,7 @@ func TestStateMachineCommittedLifecycleFailureDoesNotFailAfterCommit(t *testing.
 		}
 		return nil
 	})
-	sm, err := NewStateMachine(
+	sm, err := newStateMachineFromConfig(
 		cfg,
 		store,
 		req,
@@ -940,6 +1108,7 @@ func TestStateMachineCommittedLifecycleFailureDoesNotFailAfterCommit(t *testing.
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 
 	res, err := sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
@@ -1021,6 +1190,36 @@ func (o *countingOrchestrator) Status(context.Context, string) (*ExecutionStatus
 	}, nil
 }
 
+type observedIdempotencyStore[T any] struct {
+	delegate  IdempotencyStore[T]
+	loadCalls atomic.Int32
+	saveCalls atomic.Int32
+	saveErr   error
+}
+
+func (s *observedIdempotencyStore[T]) Load(ctx context.Context, scope IdempotencyScope) (*IdempotencyRecord[T], error) {
+	if s != nil {
+		s.loadCalls.Add(1)
+	}
+	if s == nil || s.delegate == nil {
+		return nil, nil
+	}
+	return s.delegate.Load(ctx, scope)
+}
+
+func (s *observedIdempotencyStore[T]) Save(ctx context.Context, rec *IdempotencyRecord[T]) error {
+	if s != nil {
+		s.saveCalls.Add(1)
+	}
+	if s != nil && s.saveErr != nil {
+		return s.saveErr
+	}
+	if s == nil || s.delegate == nil {
+		return nil
+	}
+	return s.delegate.Save(ctx, rec)
+}
+
 func TestWithLoggerAndFmtLoggerFallback(t *testing.T) {
 	cfg := StateMachineConfig{
 		Entity:          "order",
@@ -1029,17 +1228,17 @@ func TestWithLoggerAndFmtLoggerFallback(t *testing.T) {
 		Transitions:     []TransitionConfig{{Name: "approve", From: "draft", To: "approved"}},
 	}
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 
 	buf := &bytes.Buffer{}
 	fallback := NewFmtLogger(buf)
-	sm, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[smMsg](fallback))
+	sm, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[smMsg](fallback))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm, "1", "draft")
 	_, err = sm.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "1",
 		Event:    "approve",
@@ -1053,10 +1252,11 @@ func TestWithLoggerAndFmtLoggerFallback(t *testing.T) {
 	}
 
 	custom := &memoryLogger{}
-	sm2, err := NewStateMachine(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[smMsg](custom))
+	sm2, err := newStateMachineFromConfig(cfg, NewInMemoryStateStore(), req, nil, nil, WithLogger[smMsg](custom))
 	if err != nil {
 		t.Fatalf("build state machine: %v", err)
 	}
+	mustSeedStateRecord(t, sm2, "2", "draft")
 	_, err = sm2.ApplyEvent(context.Background(), ApplyEventRequest[smMsg]{
 		EntityID: "2",
 		Event:    "approve",

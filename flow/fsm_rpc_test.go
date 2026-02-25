@@ -15,7 +15,8 @@ func TestFSMRPCMethodFamilyRegistration(t *testing.T) {
 	sm := buildFSMRPCStateMachine(t, nil)
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
@@ -98,7 +99,8 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 	sm := buildFSMRPCStateMachine(t, nil)
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
@@ -163,8 +165,10 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 	require.NotNil(t, status)
 	assert.Equal(t, ExecutionStateRunning, status.Status)
 	require.NotNil(t, status.Metadata)
-	assert.Equal(t, "req-status", status.Metadata["request_id"])
-	assert.Equal(t, "corr-status", status.Metadata["correlation_id"])
+	assert.Equal(t, "req-1", status.Metadata["request_id"])
+	assert.Equal(t, "corr-1", status.Metadata["correlation_id"])
+	assert.Equal(t, "req-status", status.Metadata["query_request_id"])
+	assert.Equal(t, "corr-status", status.Metadata["query_correlation_id"])
 	assert.Equal(t, "order", status.Metadata["scope_machine_id"])
 	assert.Equal(t, "entity-1", status.Metadata["scope_entity_id"])
 	assert.Equal(t, "acme", status.Metadata["scope_tenant"])
@@ -184,7 +188,8 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 	paused := pausedEnvelope.Data
 	require.NotNil(t, paused)
 	assert.Equal(t, ExecutionStatePaused, paused.Status)
-	assert.Equal(t, "req-pause", paused.Metadata["request_id"])
+	assert.Equal(t, "req-1", paused.Metadata["request_id"])
+	assert.Equal(t, "req-pause", paused.Metadata["query_request_id"])
 
 	resumedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionResume, rpc.RequestEnvelope[FSMExecutionControlRequest]{
 		Data: scope,
@@ -196,7 +201,8 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 	resumed := resumedEnvelope.Data
 	require.NotNil(t, resumed)
 	assert.Equal(t, ExecutionStateRunning, resumed.Status)
-	assert.Equal(t, "req-resume", resumed.Metadata["request_id"])
+	assert.Equal(t, "req-1", resumed.Metadata["request_id"])
+	assert.Equal(t, "req-resume", resumed.Metadata["query_request_id"])
 
 	stoppedOut, err := server.Invoke(context.Background(), FSMRPCMethodExecutionStop, rpc.RequestEnvelope[FSMExecutionControlRequest]{
 		Data: scope,
@@ -232,7 +238,8 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 		}
 		found = true
 		assert.Equal(t, ExecutionStateStopped, item.Status)
-		assert.Equal(t, "req-list", item.Metadata["request_id"])
+		assert.Equal(t, "req-1", item.Metadata["request_id"])
+		assert.Equal(t, "req-list", item.Metadata["query_request_id"])
 		break
 	}
 	assert.True(t, found)
@@ -254,14 +261,16 @@ func TestFSMRPCApplyEventEnvelopeExecutionControlsAndQuerySurfaces(t *testing.T)
 	require.GreaterOrEqual(t, len(historyEnvelope.Data.Items), 2)
 	assert.Equal(t, TransitionPhaseAttempted, historyEnvelope.Data.Items[0].Phase)
 	assert.Equal(t, TransitionPhaseCommitted, historyEnvelope.Data.Items[1].Phase)
-	assert.Equal(t, "req-history", historyEnvelope.Data.Items[0].Metadata["request_id"])
+	assert.Equal(t, "req-1", historyEnvelope.Data.Items[0].Metadata["request_id"])
+	assert.Equal(t, "req-history", historyEnvelope.Data.Items[0].Metadata["query_request_id"])
 }
 
 func TestFSMRPCApplyEventPropagatesRequestMetaIntoLifecycleMetadata(t *testing.T) {
 	sm := buildFSMRPCStateMachine(t, nil)
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
@@ -313,7 +322,8 @@ func TestFSMRPCApplyEventBuildsCanonicalRequestWithEntityAndExecutionContext(t *
 	})
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
@@ -343,7 +353,8 @@ func TestFSMRPCExecutionControlScopeValidation(t *testing.T) {
 	sm := buildFSMRPCStateMachine(t, nil)
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
@@ -413,7 +424,8 @@ func TestFSMRPCErrorMappingParityAndStructuredDetails(t *testing.T) {
 	})
 	server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
 	registry := command.NewRegistry()
-	registry.SetRPCRegister(server.Register)
+	registry.SetRPCRegister(command.NilRPCRegister)
+	require.NoError(t, registry.AddResolver("rpc-explicit", rpc.Resolver(server)))
 	require.NoError(t, RegisterFSMRPCCommands(registry, sm))
 	require.NoError(t, registry.Initialize())
 
@@ -474,15 +486,17 @@ func buildFSMRPCStateMachine(t *testing.T, guard Guard[smMsg]) *StateMachine[smM
 	}
 	actions := NewActionRegistry[smMsg]()
 	req := TransitionRequest[smMsg]{
-		StateKey:     func(m smMsg) string { return m.ID },
-		Event:        func(m smMsg) string { return m.Event },
-		CurrentState: func(m smMsg) string { return m.State },
+		StateKey: func(m smMsg) string { return m.ID },
+		Event:    func(m smMsg) string { return m.Event },
 	}
 
 	durable, err := NewDurableOrchestrator[smMsg](NewInMemoryExecutionRecordStore[smMsg](), nil, nil)
 	require.NoError(t, err)
 
-	sm, err := NewStateMachine(cfg, store, req, guards, actions, WithOrchestrator[smMsg](durable))
+	sm, err := newStateMachineFromConfig(cfg, store, req, guards, actions, WithOrchestrator[smMsg](durable))
 	require.NoError(t, err)
+	for _, entityID := range []string{"entity-1", "entity-2", "entity-3", "entity-4", "entity-5"} {
+		mustSeedStateRecord(t, sm, entityID, "draft")
+	}
 	return sm
 }
