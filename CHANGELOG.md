@@ -1,13 +1,69 @@
 # Changelog
 
-## Unreleased
+# [0.15.0](https://github.com/goliatone/go-command/compare/v0.14.0...v0.15.0) - (2026-02-25)
 
-### Changed
+## <!-- 1 -->🐛 Bug Fixes
 
-- FSM flow bridge-removal policy completed: `Execute(ctx, msg)` is now the only compatibility bridge on `StateMachine`.
-- Removed legacy FSM compatibility paths: `NewStateMachine`, `WithInitialFallback`, `TransitionRequestFromState`, and request-level `CurrentState` fallback inference.
-- Config/bootstrap wiring now emits canonical `MachineDefinition` and builds runtime via `NewStateMachineFromDefinition`.
-- Updated flow docs/examples and release audit coverage for canonical constructor usage and explicit persisted-state requirements.
+- Registry data races ([d3c74d0](https://github.com/goliatone/go-command/commit/d3c74d0f1b784ea446885acb7010f0df51cb2079))  - (goliatone)
+- Register vs stop race ([adccd2f](https://github.com/goliatone/go-command/commit/adccd2fa4080b41884fcd037ad337a52263f4808))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.15.0 ([7efa7db](https://github.com/goliatone/go-command/commit/7efa7db05400ea6b6d7378c3dc6c8232d7e142cc))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- State store use redis lua to manage updates ([9eddf51](https://github.com/goliatone/go-command/commit/9eddf5121a58a27b7ecf8f1174eef1822d495d2d))  - (goliatone)
+- Update state machine flow ([11c806a](https://github.com/goliatone/go-command/commit/11c806a1b8cebc43afa5b2f91dc57733371fd875))  - (goliatone)
+- Err code idempotency degraded ([2916c5d](https://github.com/goliatone/go-command/commit/2916c5d6ff8c4c77b2065cb91a917dba725c4ee9))  - (goliatone)
+- Estate in orchestrator ([8acf8fd](https://github.com/goliatone/go-command/commit/8acf8fd47334ea9b2575cbf7b9549cc22a00ebef))  - (goliatone)
+- Fms rpc state ([7c2d7da](https://github.com/goliatone/go-command/commit/7c2d7da40367bfd9c540146efc34c265743880f4))  - (goliatone)
+- ToMachineDefinition to have state ([05ee123](https://github.com/goliatone/go-command/commit/05ee1234cfcce0dfe3f5b7c5369c50927d0e94c4))  - (goliatone)
+- Idempotency and finalized orchestration to flow fsm ([634d11f](https://github.com/goliatone/go-command/commit/634d11f433d128f7cd0400ecbbb7f62752c783c0))  - (goliatone)
+- Rpc gen ([c62a281](https://github.com/goliatone/go-command/commit/c62a281d4c70e2960b6b834fee5b59d56c03af8c))  - (goliatone)
+- Optional RPC command description provider ([b7a3ed9](https://github.com/goliatone/go-command/commit/b7a3ed95c6e74155974ea2458c4ddc0e082fbde3))  - (goliatone)
+- RPC contracts ([c9aa1b2](https://github.com/goliatone/go-command/commit/c9aa1b2f1920639977315d0cf9703ac996a29fae))  - (goliatone)
+- Udpated FSM integration with RPC ([c47da46](https://github.com/goliatone/go-command/commit/c47da46f6ae9b7501da5845456d1d89c1e03e4bf))  - (goliatone)
+- Update RPC client ([c7e130d](https://github.com/goliatone/go-command/commit/c7e130d4503922db190f2ffe00b6e6f4bcf5fde8))  - (goliatone)
+- Rpc and fsm clients ([19fc5d8](https://github.com/goliatone/go-command/commit/19fc5d847b40f3194683a1a61ce47d3a4d786202))  - (goliatone)
+- Outbox implement outbox scope ([de60777](https://github.com/goliatone/go-command/commit/de60777d630adf0b89d3fb7887695a842ead73d8))  - (goliatone)
+- Support multi match in mux ([18db740](https://github.com/goliatone/go-command/commit/18db7408c74cf26fd241bcd28ce76c6be9259ce9))  - (goliatone)
+- Cron subscription ([19b31fe](https://github.com/goliatone/go-command/commit/19b31fef175dc39e0d3ac5bf6f2a632cf05bd730))  - (goliatone)
+- Runner control and retry ([4871ebe](https://github.com/goliatone/go-command/commit/4871ebe62e57c547db6e0d6cec4dfa3adb9b592b))  - (goliatone)
+- Runtime registry ([20d4e33](https://github.com/goliatone/go-command/commit/20d4e33eece1206952740521936c08c3ceceeaff))  - (goliatone)
+- New state machie setup ([5a84b7f](https://github.com/goliatone/go-command/commit/5a84b7fadbd1247d2c81128fe0b56af2ef1a2ee1))  - (goliatone)
+- Flow logger implementation ([2f0c5ff](https://github.com/goliatone/go-command/commit/2f0c5ff83afc5c98b34af082d0ab2bd98e252ee1))  - (goliatone)
+- Flow orchestrator ([b2a8775](https://github.com/goliatone/go-command/commit/b2a8775049977bf3ee8341325e8475a737a4ee93))  - (goliatone)
+- Flow transport errors ([167fc74](https://github.com/goliatone/go-command/commit/167fc74cbf58be8d26bea7b061e6f3d21072d213))  - (goliatone)
+- New fsm rpc implementation ([22a2572](https://github.com/goliatone/go-command/commit/22a25725e55f5cc7baba31fbc8296bdea7fc7450))  - (goliatone)
+- Error bubble ([e1d0778](https://github.com/goliatone/go-command/commit/e1d077894dd96741003b3c2ff203e9ebbc163c3e))  - (goliatone)
+- RPC to registry ([2475293](https://github.com/goliatone/go-command/commit/24752939fae915ca80cb51f4c62071bdd060b1e8))  - (goliatone)
+- Config for fsm expanded ([99536e5](https://github.com/goliatone/go-command/commit/99536e506e8a5932e94e559fc18019419f5b3340))  - (goliatone)
+- Deterministic action ID ([a550235](https://github.com/goliatone/go-command/commit/a5502352050f81710852bf0f14c4b4545d90d658))  - (goliatone)
+- Rpc implementation ([38fdf22](https://github.com/goliatone/go-command/commit/38fdf229d1888d15ecbfbe672809bf54210a603e))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Outbox dispatcher ([f837d3c](https://github.com/goliatone/go-command/commit/f837d3cf7a18eae3cd2838661f67ddb0ccbba3bf))  - (goliatone)
+- Cron to use scheduler ([b1de43e](https://github.com/goliatone/go-command/commit/b1de43ec2c85f85f4f8f6dfd552459821b881c2c))  - (goliatone)
+- Fsm state store to have new methods to manage pause/resume etc ([63f9a7b](https://github.com/goliatone/go-command/commit/63f9a7b60369c1e151daa07279a170d1770c1c9f))  - (goliatone)
+- State machine to be deterministic ([2b8f707](https://github.com/goliatone/go-command/commit/2b8f7072d7bc7221ad992cb8216eb23009507b4f))  - (goliatone)
+- API take context and execution context ([e915f7e](https://github.com/goliatone/go-command/commit/e915f7eafa9f45ff407fad8d163a7092473cf076))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.14.0 ([3acc55e](https://github.com/goliatone/go-command/commit/3acc55e5ecd49d49a357d86b76b7229546ef4340))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update test ([de5f9d0](https://github.com/goliatone/go-command/commit/de5f9d083331bba48e8a24ff625d06c7e60c6073))  - (goliatone)
+- Update docs ([e395622](https://github.com/goliatone/go-command/commit/e395622d34e5be36f77e9c8c040a04d68449b3f2))  - (goliatone)
+- Update examples ([cd87ced](https://github.com/goliatone/go-command/commit/cd87cedc9862d5a7695790bf9a3436dbbdb6a55c))  - (goliatone)
+- Update readme ([7a20956](https://github.com/goliatone/go-command/commit/7a2095633df9cf57f7c3655db174b615ef2f88e5))  - (goliatone)
+- Udpate readme ([28e2433](https://github.com/goliatone/go-command/commit/28e2433e9586a7c8b47c74a1eeea8c2cd2b1c416))  - (goliatone)
+- Udpate deps ([9efc9fb](https://github.com/goliatone/go-command/commit/9efc9fb90808eca46b6f7d7371e9dc50698d6fbe))  - (goliatone)
+- Add CI/CD tests ([da045e9](https://github.com/goliatone/go-command/commit/da045e93e4f89af8db54dd9f73f4358e21e3bebc))  - (goliatone)
+- Update tasks ([de9f04d](https://github.com/goliatone/go-command/commit/de9f04dadeeff1da2ec0b9724f76e771a98c0298))  - (goliatone)
 
 # [0.14.0](https://github.com/goliatone/go-command/compare/v0.13.0...v0.14.0) - (2026-02-17)
 
@@ -450,4 +506,5 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
+
 
