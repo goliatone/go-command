@@ -17,6 +17,13 @@ npm test
 npm run build
 ```
 
+Versioning and embedded release artifacts are managed from repo root:
+
+```bash
+./taskfile client:release    # sync client/package.json version to .version
+./taskfile client:build      # build dist and copy into data/client
+```
+
 ## Package overview
 
 ### Generic RPC (standalone)
