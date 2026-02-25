@@ -16,39 +16,29 @@ import (
 
 // TransitionRequest extracts state machine metadata from a message.
 type TransitionRequest[T any] struct {
-	StateKey     func(T) string
-	Event        func(T) string
-	CurrentState func(T) string
+	StateKey func(T) string
+	Event    func(T) string
 }
 
 // StateMachine executes transitions using compiled contracts and versioned persistence.
 type StateMachine[T command.Message] struct {
-	entity               string
-	initial              string
-	machine              *CompiledMachine[T]
-	transitions          map[string]CompiledTransition[T]
-	store                StateStore
-	idempotencyStore     IdempotencyStore[T]
-	idempotencyLocks     *idempotencyKeyLocker
-	actions              *ActionRegistry[T] // reserved for orchestrator/policy layers
-	req                  TransitionRequest[T]
-	allowInitialFallback bool
-	logger               Logger
-	policy               ExecutionPolicy
-	orchestrator         Orchestrator[T]
-	lifecycleHooks       TransitionLifecycleHooks[T]
-	hookFailureMode      HookFailureMode
+	entity           string
+	machine          *CompiledMachine[T]
+	transitions      map[string]CompiledTransition[T]
+	store            StateStore
+	idempotencyStore IdempotencyStore[T]
+	idempotencyLocks *idempotencyKeyLocker
+	actions          *ActionRegistry[T] // reserved for orchestrator/policy layers
+	req              TransitionRequest[T]
+	logger           Logger
+	policy           ExecutionPolicy
+	orchestrator     Orchestrator[T]
+	lifecycleHooks   TransitionLifecycleHooks[T]
+	hookFailureMode  HookFailureMode
 }
 
 // StateMachineOption customizes state machine behavior.
 type StateMachineOption[T command.Message] func(*StateMachine[T])
-
-// WithInitialFallback allows falling back to initial state when persistence has no record.
-func WithInitialFallback[T command.Message](enable bool) StateMachineOption[T] {
-	return func(sm *StateMachine[T]) {
-		sm.allowInitialFallback = enable
-	}
-}
 
 // WithLogger sets the state-machine logger.
 func WithLogger[T command.Message](logger Logger) StateMachineOption[T] {
@@ -90,32 +80,6 @@ func WithHookFailureMode[T command.Message](mode HookFailureMode) StateMachineOp
 	return func(sm *StateMachine[T]) {
 		sm.hookFailureMode = normalizeHookFailureMode(mode)
 	}
-}
-
-// NewStateMachine constructs a state machine flow from legacy config.
-func NewStateMachine[T command.Message](
-	cfg StateMachineConfig,
-	store StateStore,
-	req TransitionRequest[T],
-	guards *GuardRegistry[T],
-	actions *ActionRegistry[T],
-	opts ...StateMachineOption[T],
-) (*StateMachine[T], error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
-	def := machineDefinitionFromConfig(cfg)
-	compiled, err := CompileMachine[T](def, guardResolverAdapter[T]{guards: guards})
-	if err != nil {
-		return nil, err
-	}
-	baseOpts := []StateMachineOption[T]{WithExecutionPolicy[T](cfg.ExecutionPolicy)}
-	if mode := strings.TrimSpace(string(cfg.HookFailureMode)); mode != "" {
-		baseOpts = append(baseOpts, WithHookFailureMode[T](cfg.HookFailureMode))
-	}
-	baseOpts = append(baseOpts, opts...)
-	return newStateMachineFromCompiled(cfg.Entity, compiled, store, req, actions, baseOpts...)
 }
 
 // NewStateMachineFromDefinition constructs a state machine from canonical definition.
@@ -164,7 +128,6 @@ func newStateMachineFromCompiled[T command.Message](
 
 	sm := &StateMachine[T]{
 		entity:           entity,
-		initial:          resolveInitialState(compiled.States),
 		machine:          compiled,
 		transitions:      transitions,
 		store:            store,
@@ -229,15 +192,28 @@ func (s *StateMachine[T]) Execute(ctx context.Context, msg T) error {
 	if entityID == "" {
 		return cloneRuntimeError(
 			ErrPreconditionFailed,
-			"state machine key required",
+			"state machine key extraction failed",
 			nil,
 			map[string]any{"machine_id": s.machineID()},
 		)
 	}
 
-	event := ""
-	if s.req.Event != nil {
-		event = s.req.Event(msg)
+	if s.req.Event == nil {
+		return cloneRuntimeError(
+			ErrPreconditionFailed,
+			"state machine event extractor not configured",
+			nil,
+			map[string]any{"machine_id": s.machineID(), "entity_id": entityID},
+		)
+	}
+	event := strings.TrimSpace(s.req.Event(msg))
+	if event == "" {
+		return cloneRuntimeError(
+			ErrPreconditionFailed,
+			"state machine event extraction failed",
+			nil,
+			map[string]any{"machine_id": s.machineID(), "entity_id": entityID},
+		)
 	}
 
 	_, err := s.ApplyEvent(ctx, ApplyEventRequest[T]{
@@ -288,8 +264,21 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	}
 	logger := withLoggerFields(s.logger.WithContext(ctx), fields)
 	logger.Debug("apply event requested")
+	emitLifecycle := func(
+		transitionID string,
+		previousState string,
+		currentState string,
+		execID string,
+		phase TransitionPhase,
+		cause error,
+	) error {
+		if req.DryRun {
+			return nil
+		}
+		return s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, transitionID, previousState, currentState, execID, phase, cause))
+	}
 	if err := s.validateRequestedMachineID(req.MachineID, nil, fields); err != nil {
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", "", "", executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", "", "", executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -300,44 +289,46 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	requestHash := ""
 	if idempotencyKey != "" {
 		fields["idempotency_key"] = idempotencyKey
-		idempotencyScope = IdempotencyScope{
-			MachineID:      machineID,
-			EntityID:       entityID,
-			Event:          event,
-			IdempotencyKey: idempotencyKey,
-		}
-		unlock := s.idempotencyLocks.Lock(idempotencyScope.key())
-		defer unlock()
-
-		requestHash = idempotencyPayloadHash(req, machineID, entityID, event)
-		replay, replayErr := s.loadIdempotencyReplay(ctx, idempotencyScope, requestHash, fields)
-		if replayErr != nil {
-			if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", "", "", executionID, TransitionPhaseRejected, replayErr)); lifecycleErr != nil {
-				return nil, lifecycleErr
+		if !req.DryRun {
+			idempotencyScope = IdempotencyScope{
+				MachineID:      machineID,
+				EntityID:       entityID,
+				Event:          event,
+				IdempotencyKey: idempotencyKey,
 			}
-			return nil, replayErr
-		}
-		if replay != nil {
-			return replay, nil
+			unlock := s.idempotencyLocks.Lock(idempotencyScope.key())
+			defer unlock()
+
+			requestHash = idempotencyPayloadHash(req, machineID, entityID, event)
+			replay, replayErr := s.loadIdempotencyReplay(ctx, idempotencyScope, requestHash, fields)
+			if replayErr != nil {
+				if lifecycleErr := emitLifecycle("", "", "", executionID, TransitionPhaseRejected, replayErr); lifecycleErr != nil {
+					return nil, lifecycleErr
+				}
+				return nil, replayErr
+			}
+			if replay != nil {
+				return replay, nil
+			}
 		}
 	}
 
-	rec, current, currentVersion, err := s.loadCurrentRecord(ctx, entityID, req.Msg)
+	rec, current, currentVersion, err := s.loadCurrentRecord(ctx, entityID)
 	if err != nil {
 		logger.Error("apply event load state failed: %v", err)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
 	}
 	if err := s.validateMachinePin(rec, fields); err != nil {
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
 	}
 	if err := s.validateRequestedMachineID(req.MachineID, rec, fields); err != nil {
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -350,7 +341,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 			nil,
 			fields,
 		)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -362,7 +353,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 			nil,
 			fields,
 		)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -376,7 +367,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 			nil,
 			fields,
 		)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, "", current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle("", current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -384,13 +375,13 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	fields["transition_id"] = tr.ID
 	logger = withLoggerFields(logger, map[string]any{"transition_id": tr.ID})
 
-	if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseAttempted, nil)); err != nil {
+	if err := emitLifecycle(tr.ID, current, current, executionID, TransitionPhaseAttempted, nil); err != nil {
 		return nil, err
 	}
 
 	if err := evaluateGuards(ctx, tr.Guards, req.Msg, req.ExecCtx, fields); err != nil {
 		logger.Warn("apply event guard rejected: %v", err)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle(tr.ID, current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -399,7 +390,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	next, err := resolveTarget(ctx, tr, req.Msg, req.ExecCtx, fields)
 	if err != nil {
 		logger.Warn("apply event target resolution failed: %v", err)
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, err)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle(tr.ID, current, current, executionID, TransitionPhaseRejected, err); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, err
@@ -427,19 +418,6 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 			Version:    currentVersion,
 			Transition: result,
 			Snapshot:   snapshot,
-		}
-		if idempotencyScope.valid() {
-			replayed, persistErr := s.persistIdempotencyReplay(ctx, idempotencyScope, requestHash, response, fields)
-			if persistErr != nil {
-				if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, persistErr)); lifecycleErr != nil {
-					return nil, lifecycleErr
-				}
-				return nil, persistErr
-			}
-			response = replayed
-		}
-		if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseCommitted, nil)); err != nil {
-			return nil, err
 		}
 		return response, nil
 	}
@@ -503,7 +481,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		if idempotencyScope.valid() && runtimeErrorCode(outErr) == ErrCodeVersionConflict {
 			replay, replayErr := s.loadIdempotencyReplay(ctx, idempotencyScope, requestHash, fields)
 			if replayErr != nil {
-				if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, replayErr)); lifecycleErr != nil {
+				if lifecycleErr := emitLifecycle(tr.ID, current, current, executionID, TransitionPhaseRejected, replayErr); lifecycleErr != nil {
 					return nil, lifecycleErr
 				}
 				return nil, replayErr
@@ -512,7 +490,7 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 				return replay, nil
 			}
 		}
-		if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, current, executionID, TransitionPhaseRejected, outErr)); lifecycleErr != nil {
+		if lifecycleErr := emitLifecycle(tr.ID, current, current, executionID, TransitionPhaseRejected, outErr); lifecycleErr != nil {
 			return nil, lifecycleErr
 		}
 		return nil, outErr
@@ -549,10 +527,8 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 	handle, orchestrationErr := s.orchestrator.Start(ctx, startReq)
 	if orchestrationErr != nil {
 		logger.Warn("orchestrator start failed after commit: %v", orchestrationErr)
-		fields["orchestration_start_error"] = orchestrationErr.Error()
-		fields["orchestration_degraded"] = true
-		fields["orchestration_error_code"] = ErrCodeOrchestrationDegraded
-		handle = s.newDegradedExecutionHandle(executionID, fields)
+		fields = markExecutionDegradedMetadata(fields, "orchestrator", ErrCodeOrchestrationDegraded, orchestrationErr)
+		handle = s.degradeExecutionHandle(handle, executionID, fields)
 	}
 	if handle != nil && strings.TrimSpace(handle.ExecutionID) != "" {
 		executionID = strings.TrimSpace(handle.ExecutionID)
@@ -570,14 +546,13 @@ func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[
 		replayed, persistErr := s.persistIdempotencyReplay(ctx, idempotencyScope, requestHash, response, fields)
 		if persistErr != nil {
 			logger.Warn("idempotency persistence failed after commit: %v", persistErr)
-			if lifecycleErr := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseRejected, persistErr)); lifecycleErr != nil {
-				return nil, lifecycleErr
-			}
-			return nil, persistErr
+			fields = markExecutionDegradedMetadata(fields, "idempotency", ErrCodeIdempotencyDegraded, persistErr)
+			response.Execution = s.degradeExecutionHandle(response.Execution, executionID, fields)
+		} else {
+			response = replayed
 		}
-		response = replayed
 	}
-	if err := s.emitLifecycleEvent(ctx, s.newLifecycleEvent(req, fields, tr.ID, current, next, executionID, TransitionPhaseCommitted, nil)); err != nil {
+	if err := emitLifecycle(tr.ID, current, next, executionID, TransitionPhaseCommitted, nil); err != nil {
 		logger.Warn("committed lifecycle dispatch failed post-commit: %v", err)
 	}
 
@@ -722,7 +697,7 @@ func (s *StateMachine[T]) Snapshot(ctx context.Context, req SnapshotRequest[T]) 
 		return nil, err
 	}
 
-	rec, current, version, err := s.loadCurrentRecord(ctx, entityID, req.Msg)
+	rec, current, version, err := s.loadCurrentRecord(ctx, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -838,7 +813,7 @@ func (s *StateMachine[T]) emitLifecycleEvent(ctx context.Context, evt Transition
 	return fanoutLifecycleHooks(ctx, s.lifecycleHooks, evt, s.hookFailureMode, logger)
 }
 
-func (s *StateMachine[T]) loadCurrentRecord(ctx context.Context, entityID string, msg T) (*StateRecord, string, int, error) {
+func (s *StateMachine[T]) loadCurrentRecord(ctx context.Context, entityID string) (*StateRecord, string, int, error) {
 	rec, err := s.store.Load(ctx, entityID)
 	if err != nil {
 		return nil, "", 0, cloneRuntimeError(
@@ -854,12 +829,6 @@ func (s *StateMachine[T]) loadCurrentRecord(ctx context.Context, entityID string
 	if rec != nil {
 		current = rec.State
 		version = rec.Version
-	}
-	if strings.TrimSpace(current) == "" && s.req.CurrentState != nil {
-		current = s.req.CurrentState(msg)
-	}
-	if strings.TrimSpace(current) == "" && s.allowInitialFallback {
-		current = s.initial
 	}
 	current = normalizeState(current)
 	if current == "" {
@@ -1233,18 +1202,6 @@ func payloadFromMessage[T any](msg T) map[string]any {
 	return payload
 }
 
-func resolveInitialState(states []State) string {
-	for _, st := range states {
-		if st.Initial {
-			return normalizeState(st.Name)
-		}
-	}
-	if len(states) == 0 {
-		return ""
-	}
-	return normalizeState(states[0].Name)
-}
-
 func mergeRecordMetadata(base map[string]any, rec *StateRecord) map[string]any {
 	out := copyMap(base)
 	if out == nil {
@@ -1296,6 +1253,78 @@ func (s *StateMachine[T]) newDegradedExecutionHandle(executionID string, metadat
 	}
 }
 
+func (s *StateMachine[T]) degradeExecutionHandle(handle *ExecutionHandle, executionID string, metadata map[string]any) *ExecutionHandle {
+	if handle == nil {
+		return s.newDegradedExecutionHandle(executionID, metadata)
+	}
+	out := cloneExecutionHandle(handle)
+	if out == nil {
+		return s.newDegradedExecutionHandle(executionID, metadata)
+	}
+	if strings.TrimSpace(out.ExecutionID) == "" {
+		out.ExecutionID = strings.TrimSpace(executionID)
+	}
+	if strings.TrimSpace(out.Policy) == "" {
+		policy := strings.TrimSpace(string(normalizeExecutionPolicy(s.policy)))
+		if policy == "" {
+			policy = strings.TrimSpace(string(s.policy))
+		}
+		out.Policy = policy
+	}
+	out.Status = ExecutionStateDegraded
+	out.Metadata = mergeFields(copyMap(out.Metadata), copyMap(metadata))
+	return out
+}
+
+func markExecutionDegradedMetadata(
+	fields map[string]any,
+	component string,
+	code string,
+	cause error,
+) map[string]any {
+	out := copyMap(fields)
+	if out == nil {
+		out = map[string]any{}
+	}
+	component = strings.TrimSpace(component)
+	code = strings.TrimSpace(code)
+	out["runtime_degraded"] = true
+	if component != "" {
+		out["degraded_component"] = component
+	}
+	if code != "" {
+		out["degraded_error_code"] = code
+	}
+	if cause != nil {
+		if text := strings.TrimSpace(cause.Error()); text != "" {
+			out["degraded_error"] = text
+		}
+	}
+	switch component {
+	case "orchestrator":
+		out["orchestration_degraded"] = true
+		if code != "" {
+			out["orchestration_error_code"] = code
+		}
+		if cause != nil {
+			if text := strings.TrimSpace(cause.Error()); text != "" {
+				out["orchestration_start_error"] = text
+			}
+		}
+	case "idempotency":
+		out["idempotency_degraded"] = true
+		if code != "" {
+			out["idempotency_error_code"] = code
+		}
+		if cause != nil {
+			if text := strings.TrimSpace(cause.Error()); text != "" {
+				out["idempotency_persistence_error"] = text
+			}
+		}
+	}
+	return out
+}
+
 func (s *StateMachine[T]) controlExecution(
 	ctx context.Context,
 	executionID string,
@@ -1345,10 +1374,10 @@ func (s *StateMachine[T]) executionControlMetadata(executionID string) map[strin
 func (s *StateMachine[T]) executionScopeMetadata(scope ExecutionScope) map[string]any {
 	scope = normalizeExecutionScope(scope)
 	metadata := map[string]any{
-		"machine_id":      "",
-		"machine_version": "",
-		"scope_machine_id": scope.MachineID,
-		"scope_entity_id":  scope.EntityID,
+		"machine_id":         "",
+		"machine_version":    "",
+		"scope_machine_id":   scope.MachineID,
+		"scope_entity_id":    scope.EntityID,
 		"scope_execution_id": scope.ExecutionID,
 		"scope_tenant":       scope.Tenant,
 	}
@@ -1376,43 +1405,6 @@ func normalizeState(s string) string {
 
 func normalizeEvent(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
-}
-
-func machineDefinitionFromConfig(cfg StateMachineConfig) *MachineDefinition {
-	def := &MachineDefinition{
-		ID:      strings.TrimSpace(cfg.Entity),
-		Name:    strings.TrimSpace(cfg.Entity),
-		Version: "v1",
-	}
-	for _, st := range cfg.States {
-		def.States = append(def.States, StateDefinition{
-			Name:     st.Name,
-			Initial:  st.Initial,
-			Terminal: st.Terminal,
-		})
-	}
-	for _, tr := range cfg.Transitions {
-		td := TransitionDefinition{
-			ID:    fmt.Sprintf("%s::%s", normalizeState(tr.From), normalizeEvent(tr.Name)),
-			Event: tr.Name,
-			From:  tr.From,
-			To:    tr.To,
-		}
-		if guard := strings.TrimSpace(tr.Guard); guard != "" {
-			td.Guards = append(td.Guards, GuardDefinition{Type: "resolver", Ref: guard})
-		}
-		if action := strings.TrimSpace(tr.Action); action != "" {
-			td.Workflow.Nodes = []WorkflowNodeDefinition{
-				{
-					ID:   action,
-					Kind: "step",
-					Step: &StepDefinition{ActionID: action},
-				},
-			}
-		}
-		def.Transitions = append(def.Transitions, td)
-	}
-	return def
 }
 
 type guardResolverAdapter[T any] struct {
