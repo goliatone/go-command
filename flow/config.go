@@ -212,6 +212,44 @@ func (s StateMachineConfig) Validate() error {
 	return nil
 }
 
+// ToMachineDefinition emits a canonical machine definition for runtime assembly.
+func (s StateMachineConfig) ToMachineDefinition() *MachineDefinition {
+	def := &MachineDefinition{
+		ID:      strings.TrimSpace(s.Entity),
+		Name:    strings.TrimSpace(s.Entity),
+		Version: "v1",
+	}
+	for _, st := range s.States {
+		def.States = append(def.States, StateDefinition{
+			Name:     st.Name,
+			Initial:  st.Initial,
+			Terminal: st.Terminal,
+		})
+	}
+	for _, tr := range s.Transitions {
+		td := TransitionDefinition{
+			ID:    fmt.Sprintf("%s::%s", normalizeState(tr.From), normalizeEvent(tr.Name)),
+			Event: tr.Name,
+			From:  tr.From,
+			To:    tr.To,
+		}
+		if guard := strings.TrimSpace(tr.Guard); guard != "" {
+			td.Guards = append(td.Guards, GuardDefinition{Type: "resolver", Ref: guard})
+		}
+		if action := strings.TrimSpace(tr.Action); action != "" {
+			td.Workflow.Nodes = []WorkflowNodeDefinition{
+				{
+					ID:   action,
+					Kind: "step",
+					Step: &StepDefinition{ActionID: action},
+				},
+			}
+		}
+		def.Transitions = append(def.Transitions, td)
+	}
+	return def
+}
+
 type DecoratorConfig struct {
 	Type   string         `json:"type" yaml:"type"`
 	Config map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
