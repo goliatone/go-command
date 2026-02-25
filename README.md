@@ -21,7 +21,11 @@ go get github.com/goliatone/go-command
 
 ## Embedded Client Assets
 
-The TypeScript FSM client can be built and embedded in this module at `data/client`.
+The TypeScript runtime is split into three client libraries:
+
+- RPC: `@goliatone/go-command-rpc`
+- FSM core: `@goliatone/go-command-fsm`
+- FSM RPC transport adapter: `@goliatone/go-command-fsm-rpc`
 
 Build/sync embedded artifacts:
 
@@ -29,21 +33,18 @@ Build/sync embedded artifacts:
 ./taskfile client:build
 ```
 
-The exported filesystem accessor is `data.ClientFS()`:
+Embedded output paths:
 
-```go
-import (
-    "net/http"
+- `data/client/rpc/index.js`
+- `data/client/fsm/index.js`
+- `data/client/fsm-rpc/index.js`
 
-    commanddata "github.com/goliatone/go-command/data"
-)
+Go accessors:
 
-func clientAssets() http.Handler {
-    return http.FileServer(http.FS(commanddata.ClientFS()))
-}
-```
-
-`data.ClientFS()` is already rooted with `fs.Sub("client")`, which keeps router/static mounting straightforward.
+- `data.ClientFS()` (rooted at `data/client`)
+- `data.ClientRPCFS()` (rooted at `data/client/rpc`)
+- `data.ClientFSMFS()` (rooted at `data/client/fsm`)
+- `data.ClientFSMRPCFS()` (rooted at `data/client/fsm-rpc`)
 
 ## Core Concepts
 
