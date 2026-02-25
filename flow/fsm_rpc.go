@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	FSMRPCMethodApplyEvent      = "fsm.apply_event"
-	FSMRPCMethodSnapshot        = "fsm.snapshot"
-	FSMRPCMethodExecutionStatus = "fsm.execution.status"
-	FSMRPCMethodExecutionPause  = "fsm.execution.pause"
-	FSMRPCMethodExecutionResume = "fsm.execution.resume"
-	FSMRPCMethodExecutionStop   = "fsm.execution.stop"
-	FSMRPCMethodExecutionList   = "fsm.execution.list"
+	FSMRPCMethodApplyEvent       = "fsm.apply_event"
+	FSMRPCMethodSnapshot         = "fsm.snapshot"
+	FSMRPCMethodExecutionStatus  = "fsm.execution.status"
+	FSMRPCMethodExecutionPause   = "fsm.execution.pause"
+	FSMRPCMethodExecutionResume  = "fsm.execution.resume"
+	FSMRPCMethodExecutionStop    = "fsm.execution.stop"
+	FSMRPCMethodExecutionList    = "fsm.execution.list"
 	FSMRPCMethodExecutionHistory = "fsm.execution.history"
 )
 
@@ -672,21 +672,21 @@ func (scope FSMExecutionScope) metadata() map[string]any {
 }
 
 func controlRequestTelemetry(scope FSMExecutionScope, meta cmdrpc.RequestMeta) map[string]any {
-	telemetry := mergeFields(scope.metadata(), metadataFromRPCMeta(meta))
+	telemetry := copyMap(scope.metadata())
 	if telemetry == nil {
 		telemetry = map[string]any{}
 	}
 	if actorID := strings.TrimSpace(meta.ActorID); actorID != "" {
-		telemetry["request_actor_id"] = actorID
+		telemetry["query_actor_id"] = actorID
 	}
 	if tenant := strings.TrimSpace(meta.Tenant); tenant != "" {
-		telemetry["request_tenant"] = tenant
+		telemetry["query_tenant"] = tenant
 	}
 	if requestID := strings.TrimSpace(meta.RequestID); requestID != "" {
-		telemetry["request_id"] = requestID
+		telemetry["query_request_id"] = requestID
 	}
 	if correlationID := strings.TrimSpace(meta.CorrelationID); correlationID != "" {
-		telemetry["correlation_id"] = correlationID
+		telemetry["query_correlation_id"] = correlationID
 	}
 	return telemetry
 }
