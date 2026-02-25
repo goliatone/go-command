@@ -404,3 +404,81 @@ func TestServerFailureModeLogAndContinueReturnsInvokePanicError(t *testing.T) {
 	assert.Error(t, events[0].Err)
 	assert.Equal(t, "boom", events[0].Panic)
 }
+
+func TestServerMiddlewareOrderAndPayloadMutation(t *testing.T) {
+	order := make([]string, 0, 4)
+	var captured InvokeRequest
+
+	s := NewServer(
+		WithMiddleware(
+			func(next InvokeHandler) InvokeHandler {
+				return func(ctx context.Context, req InvokeRequest) (any, error) {
+					order = append(order, "mw1.before")
+					captured = req
+					out, err := next(ctx, req)
+					order = append(order, "mw1.after")
+					return out, err
+				}
+			},
+			func(next InvokeHandler) InvokeHandler {
+				return func(ctx context.Context, req InvokeRequest) (any, error) {
+					order = append(order, "mw2.before")
+					req.Payload = RequestEnvelope[explicitRequest]{
+						Data: explicitRequest{Name: "middleware"},
+					}
+					out, err := next(ctx, req)
+					order = append(order, "mw2.after")
+					return out, err
+				}
+			},
+		),
+	)
+	require.NoError(t, s.RegisterEndpoint(newApplyEventEndpoint()))
+
+	out, err := s.Invoke(context.Background(), "fsm.apply_event", RequestEnvelope[explicitRequest]{
+		Data: explicitRequest{Name: "alice"},
+	})
+	require.NoError(t, err)
+	res, ok := out.(ResponseEnvelope[string])
+	require.True(t, ok)
+	assert.Equal(t, "applied:middleware", res.Data)
+	assert.Equal(t, []string{"mw1.before", "mw2.before", "mw2.after", "mw1.after"}, order)
+
+	assert.Equal(t, "fsm.apply_event", captured.Method)
+	assert.Equal(t, "fsm.apply_event", captured.Endpoint.Method)
+	assert.Equal(t, []string{"fsm:write"}, captured.Endpoint.Permissions)
+	assert.Equal(t, []string{"admin"}, captured.Endpoint.Roles)
+}
+
+func TestServerMiddlewareCanShortCircuitInvoke(t *testing.T) {
+	invoked := false
+	s := NewServer(
+		WithMiddleware(func(next InvokeHandler) InvokeHandler {
+			return func(ctx context.Context, req InvokeRequest) (any, error) {
+				if req.Method == "guarded.method" {
+					return nil, errors.New("forbidden")
+				}
+				return next(ctx, req)
+			}
+		}),
+	)
+
+	require.NoError(t, s.RegisterEndpoint(NewEndpoint[explicitRequest, string](
+		EndpointSpec{
+			Method: "guarded.method",
+			Kind:   MethodKindQuery,
+		},
+		func(_ context.Context, req RequestEnvelope[explicitRequest]) (ResponseEnvelope[string], error) {
+			invoked = true
+			return ResponseEnvelope[string]{Data: req.Data.Name}, nil
+		},
+	)))
+
+	out, err := s.Invoke(context.Background(), "guarded.method", RequestEnvelope[explicitRequest]{
+		Data: explicitRequest{Name: "blocked"},
+	})
+	require.Error(t, err)
+	assert.Nil(t, out)
+	assert.Contains(t, err.Error(), "forbidden")
+	assert.False(t, invoked)
+}

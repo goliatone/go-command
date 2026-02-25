@@ -440,6 +440,23 @@ Failure handling modes:
 
 Endpoint metadata returned by `Endpoint()` and `Endpoints()` is defensively copied, so caller mutations do not affect server state.
 
+Invoke middleware can be registered for auth/logging/metrics concerns:
+
+```go
+rpcServer := rpc.NewServer(
+    rpc.WithMiddleware(
+        func(next rpc.InvokeHandler) rpc.InvokeHandler {
+            return func(ctx context.Context, req rpc.InvokeRequest) (any, error) {
+                if req.Method == "fsm.apply_event" && req.Endpoint.HandlerKind == rpc.HandlerKindExecute {
+                    // add auth checks or request-scoped instrumentation here
+                }
+                return next(ctx, req)
+            }
+        },
+    ),
+)
+```
+
 ## Complete Example
 
 Here's a comprehensive example showing multiple features:
