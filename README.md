@@ -19,6 +19,32 @@ A Go package for implementing command and query patterns with support for multip
 go get github.com/goliatone/go-command
 ```
 
+## Embedded Client Assets
+
+The TypeScript FSM client can be built and embedded in this module at `data/client`.
+
+Build/sync embedded artifacts:
+
+```bash
+./taskfile client:build
+```
+
+The exported filesystem accessor is `data.ClientFS()`:
+
+```go
+import (
+    "net/http"
+
+    commanddata "github.com/goliatone/go-command/data"
+)
+
+func clientAssets() http.Handler {
+    return http.FileServer(http.FS(commanddata.ClientFS()))
+}
+```
+
+`data.ClientFS()` is already rooted with `fs.Sub("client")`, which keeps router/static mounting straightforward.
+
 ## Core Concepts
 
 ### Messages

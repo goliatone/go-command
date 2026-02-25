@@ -44,6 +44,7 @@
 
 ## <!-- 2 -->🚜 Refactor
 
+- RPC core clean-break: endpoint-first registration only; removed reflective `rpc.Server.Register(opts, handler, meta)` path and legacy resolver fallback.
 - Outbox dispatcher ([f837d3c](https://github.com/goliatone/go-command/commit/f837d3cf7a18eae3cd2838661f67ddb0ccbba3bf))  - (goliatone)
 - Cron to use scheduler ([b1de43e](https://github.com/goliatone/go-command/commit/b1de43ec2c85f85f4f8f6dfd552459821b881c2c))  - (goliatone)
 - Fsm state store to have new methods to manage pause/resume etc ([63f9a7b](https://github.com/goliatone/go-command/commit/63f9a7b60369c1e151daa07279a170d1770c1c9f))  - (goliatone)
@@ -506,5 +507,4 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-
 
