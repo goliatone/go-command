@@ -84,16 +84,16 @@ type FSMExecutionHistoryResponse[T command.Message] struct {
 	Items []TransitionLifecycleEvent[T] `json:"items"`
 }
 
-// FSMApplyEventRPCCommand provides the fsm.apply_event method over command.RPCCommand.
+// FSMApplyEventRPCCommand provides the fsm.apply_event method.
 type FSMApplyEventRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMApplyEventRPCCommand[T command.Message](machine *StateMachine[T]) *FSMApplyEventRPCCommand[T] {
 	return &FSMApplyEventRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method: FSMRPCMethodApplyEvent,
 		},
 	}
@@ -129,30 +129,22 @@ func (c *FSMApplyEventRPCCommand[T]) Query(
 func (c *FSMApplyEventRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMApplyEventRequest[T], *ApplyEventResponse[T]](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindCommand),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodApplyEvent, cmdrpc.MethodKindCommand),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMApplyEventRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMApplyEventRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodApplyEvent)
-}
-
-// FSMSnapshotRPCCommand provides the fsm.snapshot method over command.RPCCommand.
+// FSMSnapshotRPCCommand provides the fsm.snapshot method.
 type FSMSnapshotRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMSnapshotRPCCommand[T command.Message](machine *StateMachine[T]) *FSMSnapshotRPCCommand[T] {
 	return &FSMSnapshotRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method:     FSMRPCMethodSnapshot,
 			Idempotent: true,
 		},
@@ -184,30 +176,22 @@ func (c *FSMSnapshotRPCCommand[T]) Query(
 func (c *FSMSnapshotRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMSnapshotRequest[T], *Snapshot](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodSnapshot, cmdrpc.MethodKindQuery),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMSnapshotRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMSnapshotRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodSnapshot)
-}
-
 // FSMExecutionStatusRPCCommand provides the fsm.execution.status method.
 type FSMExecutionStatusRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionStatusRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionStatusRPCCommand[T] {
 	return &FSMExecutionStatusRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method:     FSMRPCMethodExecutionStatus,
 			Idempotent: true,
 		},
@@ -235,30 +219,22 @@ func (c *FSMExecutionStatusRPCCommand[T]) Query(
 func (c *FSMExecutionStatusRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionStatus, cmdrpc.MethodKindQuery),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMExecutionStatusRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionStatusRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionStatus)
-}
-
 // FSMExecutionPauseRPCCommand provides the fsm.execution.pause method.
 type FSMExecutionPauseRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionPauseRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionPauseRPCCommand[T] {
 	return &FSMExecutionPauseRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method: FSMRPCMethodExecutionPause,
 		},
 	}
@@ -291,30 +267,22 @@ func (c *FSMExecutionPauseRPCCommand[T]) Query(
 func (c *FSMExecutionPauseRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindCommand),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionPause, cmdrpc.MethodKindCommand),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMExecutionPauseRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionPauseRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionPause)
-}
-
 // FSMExecutionResumeRPCCommand provides the fsm.execution.resume method.
 type FSMExecutionResumeRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionResumeRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionResumeRPCCommand[T] {
 	return &FSMExecutionResumeRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method: FSMRPCMethodExecutionResume,
 		},
 	}
@@ -347,30 +315,22 @@ func (c *FSMExecutionResumeRPCCommand[T]) Query(
 func (c *FSMExecutionResumeRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindCommand),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionResume, cmdrpc.MethodKindCommand),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMExecutionResumeRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionResumeRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionResume)
-}
-
 // FSMExecutionStopRPCCommand provides the fsm.execution.stop method.
 type FSMExecutionStopRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionStopRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionStopRPCCommand[T] {
 	return &FSMExecutionStopRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method: FSMRPCMethodExecutionStop,
 		},
 	}
@@ -403,30 +363,22 @@ func (c *FSMExecutionStopRPCCommand[T]) Query(
 func (c *FSMExecutionStopRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionControlRequest, *ExecutionStatus](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindCommand),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionStop, cmdrpc.MethodKindCommand),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMExecutionStopRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionStopRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionStop)
-}
-
 // FSMExecutionListRPCCommand provides the fsm.execution.list method.
 type FSMExecutionListRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionListRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionListRPCCommand[T] {
 	return &FSMExecutionListRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method:     FSMRPCMethodExecutionList,
 			Idempotent: true,
 		},
@@ -463,30 +415,22 @@ func (c *FSMExecutionListRPCCommand[T]) Query(
 func (c *FSMExecutionListRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionListRequest, FSMExecutionListResponse](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionList, cmdrpc.MethodKindQuery),
 			c.Query,
 		),
 	}
 }
 
-func (c *FSMExecutionListRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionListRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionList)
-}
-
 // FSMExecutionHistoryRPCCommand provides the fsm.execution.history method.
 type FSMExecutionHistoryRPCCommand[T command.Message] struct {
 	Machine *StateMachine[T]
-	Config  command.RPCConfig
+	Spec    cmdrpc.EndpointSpec
 }
 
 func NewFSMExecutionHistoryRPCCommand[T command.Message](machine *StateMachine[T]) *FSMExecutionHistoryRPCCommand[T] {
 	return &FSMExecutionHistoryRPCCommand[T]{
 		Machine: machine,
-		Config: command.RPCConfig{
+		Spec: cmdrpc.EndpointSpec{
 			Method:     FSMRPCMethodExecutionHistory,
 			Idempotent: true,
 		},
@@ -519,18 +463,10 @@ func (c *FSMExecutionHistoryRPCCommand[T]) Query(
 func (c *FSMExecutionHistoryRPCCommand[T]) RPCEndpoints() []cmdrpc.EndpointDefinition {
 	return []cmdrpc.EndpointDefinition{
 		cmdrpc.NewEndpoint[FSMExecutionHistoryRequest, FSMExecutionHistoryResponse[T]](
-			fsmEndpointSpec(c.RPCOptions(), cmdrpc.MethodKindQuery),
+			normalizeFSMEndpointSpec(c.Spec, FSMRPCMethodExecutionHistory, cmdrpc.MethodKindQuery),
 			c.Query,
 		),
 	}
-}
-
-func (c *FSMExecutionHistoryRPCCommand[T]) RPCHandler() any {
-	return c
-}
-
-func (c *FSMExecutionHistoryRPCCommand[T]) RPCOptions() command.RPCConfig {
-	return normalizeFSMRPCConfig(c.Config, FSMRPCMethodExecutionHistory)
 }
 
 // NewFSMRPCCommands returns the full FSM RPC method family as registry commands.
@@ -560,29 +496,18 @@ func RegisterFSMRPCCommands[T command.Message](registry *command.Registry, machi
 	return nil
 }
 
-func normalizeFSMRPCConfig(cfg command.RPCConfig, method string) command.RPCConfig {
-	cfg.Method = strings.TrimSpace(cfg.Method)
-	if cfg.Method == "" {
-		cfg.Method = method
+func normalizeFSMEndpointSpec(spec cmdrpc.EndpointSpec, method string, kind cmdrpc.MethodKind) cmdrpc.EndpointSpec {
+	spec.Method = strings.TrimSpace(spec.Method)
+	if spec.Method == "" {
+		spec.Method = method
 	}
-	return cfg
-}
-
-func fsmEndpointSpec(cfg command.RPCConfig, kind cmdrpc.MethodKind) cmdrpc.EndpointSpec {
-	return cmdrpc.EndpointSpec{
-		Method:      cfg.Method,
-		Kind:        kind,
-		Timeout:     cfg.Timeout,
-		Streaming:   cfg.Streaming,
-		Idempotent:  cfg.Idempotent,
-		Permissions: append([]string(nil), cfg.Permissions...),
-		Roles:       append([]string(nil), cfg.Roles...),
-		Summary:     cfg.Summary,
-		Description: cfg.Description,
-		Tags:        append([]string(nil), cfg.Tags...),
-		Deprecated:  cfg.Deprecated,
-		Since:       cfg.Since,
+	if spec.Kind == "" {
+		spec.Kind = kind
 	}
+	spec.Permissions = append([]string(nil), spec.Permissions...)
+	spec.Roles = append([]string(nil), spec.Roles...)
+	spec.Tags = append([]string(nil), spec.Tags...)
+	return spec
 }
 
 func executionContextFromRPCMeta(meta cmdrpc.RequestMeta) ExecutionContext {
