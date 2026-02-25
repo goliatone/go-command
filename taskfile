@@ -110,6 +110,77 @@ function flow:test {
 }
 
 ##
+## -----
+##
+## client:release
+##
+## Keep client package version in sync with the root .version file.
+##
+## Arguments:
+## @arg 1 {string} [tag=<root .version>]
+function client:release {
+    local tag
+
+    tag=${1:-$(version:get)}
+    if [ -z "$tag" ]; then
+        echo "missing version tag"
+        return 1
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required for client:release"
+        return 1
+    fi
+
+    (
+        cd client || exit "$?"
+        npm version "$tag" --no-git-tag-version --allow-same-version
+    ) || return 1
+}
+
+##
+## -----
+##
+## client:build
+##
+## Build TS client and sync dist output into embedded Go assets (`data/client`).
+function client:build {
+    local client_dir
+    local dist_dir
+    local output_dir
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required for client:build"
+        return 1
+    fi
+
+    client_dir="$(pwd)/client"
+    dist_dir="${client_dir}/dist"
+    output_dir="$(pwd)/data/client"
+
+    if [ ! -d "${client_dir}/node_modules" ]; then
+        (
+            cd "${client_dir}" || exit "$?"
+            npm ci
+        ) || return 1
+    fi
+
+    (
+        cd "${client_dir}" || exit "$?"
+        npm run build
+    ) || return 1
+
+    rm -rf "${output_dir}"
+    mkdir -p "${output_dir}"
+    cp -R "${dist_dir}/." "${output_dir}/"
+
+    if [ ! -f "${output_dir}/index.js" ]; then
+        echo "client build output is missing ${output_dir}/index.js"
+        return 1
+    fi
+}
+
+##
 ## ########################################
 ##           Version Management
 ## ########################################
@@ -308,8 +379,18 @@ function release {
     # Update version file
     version:set "${tag}"
 
+    # Keep TS client package version and embedded dist in sync with release tag.
+    client:release "${tag}" || return 1
+    client:build || return 1
+
     # Add updated version file to git
     git add "${VERSION_FILE}"
+    if [ -f "client/package.json" ]; then
+        git add client/package.json client/package-lock.json
+    fi
+    if [ -d "data/client" ]; then
+        git add data/client
+    fi
     git commit -m "Bump version: v${tag}"
 
     # Create a new tag
