@@ -114,11 +114,26 @@ func WithFailureLogger(logger FailureLogger) Option {
 	}
 }
 
+// WithMiddleware appends invoke middleware in registration order.
+func WithMiddleware(mw ...Middleware) Option {
+	return func(s *Server) {
+		if s == nil {
+			return
+		}
+		for _, m := range mw {
+			if m != nil {
+				s.middleware = append(s.middleware, m)
+			}
+		}
+	}
+}
+
 // Server provides a lightweight in memory RPC method registry and invoker.
 // Transport adapters can use this server to register and invoke command/query handlers.
 type Server struct {
 	mu              sync.RWMutex
 	endpoints       map[string]endpointEntry
+	middleware      []Middleware
 	failureStrategy FailureStrategy
 	failureLogger   FailureLogger
 }
@@ -235,6 +250,7 @@ func (s *Server) Invoke(ctx context.Context, method string, payload any) (any, e
 
 	s.mu.RLock()
 	entry, ok := s.endpoints[method]
+	middleware := cloneMiddleware(s.middleware)
 	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("rpc method %q not found", method)
@@ -270,7 +286,12 @@ func (s *Server) Invoke(ctx context.Context, method string, payload any) (any, e
 				}
 			}
 		}()
-		out, err = entry.invoke(ctx, payload)
+		req := InvokeRequest{
+			Method:   method,
+			Endpoint: cloneEndpoint(entry.endpoint),
+			Payload:  payload,
+		}
+		out, err = applyMiddleware(middleware, entry.invoke)(ctx, req)
 	}()
 	if panErr != nil {
 		return out, err
@@ -408,6 +429,13 @@ func typeRef(t reflect.Type) *TypeRef {
 }
 
 func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return slices.Clone(values)
+}
+
+func cloneMiddleware(values []Middleware) []Middleware {
 	if len(values) == 0 {
 		return nil
 	}
