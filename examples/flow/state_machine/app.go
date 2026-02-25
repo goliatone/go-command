@@ -11,10 +11,9 @@ import (
 
 // OrderMsg demonstrates a message that drives state transitions.
 type OrderMsg struct {
-	ID     string
-	Event  string
-	Admin  bool
-	Target string
+	ID    string
+	Event string
+	Admin bool
 }
 
 func (OrderMsg) Type() string { return "order_msg" }
@@ -29,6 +28,7 @@ type Order struct {
 type App struct {
 	StateMachine *flow.StateMachine[OrderMsg]
 	Config       flow.StateMachineConfig
+	Definition   *flow.MachineDefinition
 	StateStore   flow.StateStore
 	Guards       *flow.GuardRegistry[OrderMsg]
 	Actions      *flow.ActionRegistry[OrderMsg]
@@ -80,18 +80,29 @@ func NewApp(ctx context.Context) (*App, error) {
 	req := flow.TransitionRequest[OrderMsg]{
 		StateKey: func(m OrderMsg) string { return m.ID },
 		Event:    func(m OrderMsg) string { return m.Event },
-		CurrentState: func(m OrderMsg) string {
-			return m.Target
-		},
 	}
 
-	sm, err := flow.NewStateMachine(cfg, store, req, guards, actions)
+	def := cfg.ToMachineDefinition()
+	resolvers := flow.NewResolverMap[OrderMsg]()
+	if guard, ok := guards.Lookup("is_admin"); ok {
+		resolvers.RegisterGuard("is_admin", guard)
+	}
+
+	sm, err := flow.NewStateMachineFromDefinition(
+		def,
+		store,
+		req,
+		resolvers,
+		actions,
+		flow.WithExecutionPolicy[OrderMsg](cfg.ExecutionPolicy),
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	app.StateMachine = sm
 	app.Config = cfg
+	app.Definition = def
 	app.StateStore = store
 	app.Guards = guards
 	app.Actions = actions
@@ -151,8 +162,10 @@ func (a *App) CreateOrder(id string) (*Order, error) {
 
 	ctx := context.Background()
 	_, err := a.StateStore.SaveIfVersion(ctx, &flow.StateRecord{
-		EntityID: id,
-		State:    "draft",
+		EntityID:       id,
+		State:          "draft",
+		MachineID:      a.Definition.ID,
+		MachineVersion: a.Definition.Version,
 	}, 0)
 	if err != nil {
 		a.mu.Lock()
@@ -179,10 +192,9 @@ func (a *App) Transition(id, event string, admin bool) error {
 	fmt.Printf("[DEBUG] StateMachine ptr=%p Store ptr=%p\n", a.StateMachine, a.StateStore)
 
 	msg := OrderMsg{
-		ID:     id,
-		Event:  event,
-		Admin:  admin,
-		Target: currentState, // provide current state as fallback for the state machine
+		ID:    id,
+		Event: event,
+		Admin: admin,
 	}
 
 	ctx := context.Background()

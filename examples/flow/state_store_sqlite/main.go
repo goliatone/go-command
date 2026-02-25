@@ -40,13 +40,29 @@ func main() {
 		Event:    func(m OrderMsg) string { return m.Event },
 	}
 
-	sm, err := flow.NewStateMachine(cfg, store, req, nil, nil)
+	def := cfg.ToMachineDefinition()
+	sm, err := flow.NewStateMachineFromDefinition(
+		def,
+		store,
+		req,
+		flow.NewResolverMap[OrderMsg](),
+		nil,
+		flow.WithExecutionPolicy[OrderMsg](cfg.ExecutionPolicy),
+	)
 	if err != nil {
 		panic(err)
 	}
 
 	ctx := context.Background()
 	msg := OrderMsg{ID: "ORD-1", Event: "approve"}
+	if _, err := store.SaveIfVersion(ctx, &flow.StateRecord{
+		EntityID:       msg.ID,
+		State:          "draft",
+		MachineID:      def.ID,
+		MachineVersion: def.Version,
+	}, 0); err != nil {
+		panic(err)
+	}
 	if err := sm.Execute(ctx, msg); err != nil {
 		panic(err)
 	}
