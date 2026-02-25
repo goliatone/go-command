@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.16.1](https://github.com/goliatone/go-command/compare/v0.16.0...v0.16.1) - (2026-02-25)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.16.1 ([0e4af0b](https://github.com/goliatone/go-command/commit/0e4af0b264bac4e3d77f56765788a28b040fbf09))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Middleware support for rpc ([5e3d996](https://github.com/goliatone/go-command/commit/5e3d9969031210bf0b13d813725ae1ebba35025b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.16.0 ([0a37154](https://github.com/goliatone/go-command/commit/0a371544b7c6be3b6a1432a4afbbe23391282e7c))  - (goliatone)
+
 # [0.16.0](https://github.com/goliatone/go-command/compare/v0.15.0...v0.16.0) - (2026-02-25)
 
 ## <!-- 13 -->📦 Bumps
