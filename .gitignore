@@ -53,3 +53,5 @@ Temporary Items
 # Go workspace file
 go.work
 .gocache
+.tmp
+.claude
