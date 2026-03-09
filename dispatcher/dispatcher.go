@@ -61,6 +61,7 @@ func Reset() {
 	defaultQueryMux = router.NewMux()
 	testCommandMux = nil
 	testQueryMux = nil
+	resetDispatchRoutingState()
 }
 
 // Subscribe a CommandHandler for a particular message type T.
@@ -94,29 +95,6 @@ func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ..
 	return SubscribeQuery(qry, runnerOpts...)
 }
 
-func getCommandHandlers[T any]() ([]*commandWrapper[T], error) {
-	var msg T
-	handlers := getCommandMux().Get(command.GetMessageType(msg))
-	if len(handlers) == 0 {
-		return nil, fmt.Errorf("no command handlers for message type %s", command.GetMessageType(msg))
-	}
-
-	var typedHandlers []*commandWrapper[T]
-	for _, h := range handlers {
-		cmdHandler, ok := h.Handler.(*commandWrapper[T])
-		if !ok {
-			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", command.GetMessageType(msg))
-		}
-		typedHandlers = append(typedHandlers, cmdHandler)
-	}
-
-	if len(typedHandlers) == 0 {
-		return nil, fmt.Errorf("no command handlers for message type %s", command.GetMessageType(msg))
-	}
-
-	return typedHandlers, nil
-}
-
 func DispatchWithResult[T any, R any](ctx context.Context, msg T) (R, error) {
 	result := command.NewResult[R]()
 	ctx = command.ContextWithResult(ctx, result)
@@ -144,32 +122,7 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 		return err
 	}
 
-	wrapers, err := getCommandHandlers[T]()
-	if err != nil {
-		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
-			WithTextCode("HANDLER_LOOKUP_ERROR").
-			WithMetadata(map[string]any{
-				"message_type": command.GetMessageType(msg),
-			})
-	}
-
-	if ctx.Err() != nil {
-		return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
-			WithTextCode("CONTEXT_ERROR")
-	}
-
-	var errs error
-	for _, cw := range wrapers {
-		if err := runner.RunCommand(ctx, cw.runner, cw.cmd, msg); err != nil {
-			wrappedErr := wrapHandlerError(err, msg, cw.cmd)
-			if ExitOnErr {
-				return wrappedErr
-			}
-			errs = errors.Join(errs, wrappedErr)
-		}
-	}
-
-	return errs
+	return dispatchInline(ctx, msg, command.GetMessageType(msg))
 }
 
 func getQueryHandler[T any, R any]() (*queryWrapper[T, R], error) {
@@ -238,6 +191,23 @@ type commandWrapper[T any] struct {
 	cmd    command.Commander[T]
 }
 
+type dispatchRunnable interface {
+	run(ctx context.Context, msg any) error
+	handler() any
+}
+
+func (w *commandWrapper[T]) run(ctx context.Context, msg any) error {
+	typedMsg, ok := msg.(T)
+	if !ok {
+		return fmt.Errorf("dispatcher message type mismatch for handler %T", w.cmd)
+	}
+	return runner.RunCommand(ctx, w.runner, w.cmd, typedMsg)
+}
+
+func (w *commandWrapper[T]) handler() any {
+	return w.cmd
+}
+
 type queryWrapper[T any, R any] struct {
 	runner *runner.Handler
 	qry    command.Querier[T, R]
@@ -282,4 +252,59 @@ func isValidationError(err error) bool {
 	}
 
 	return errors.Is(err, command.ErrValidation)
+}
+
+func commandHandlerCount(commandID string) int {
+	return len(getCommandMux().Get(commandID))
+}
+
+func dispatchInline(ctx context.Context, msg any, messageType string) error {
+	handlers, err := getDispatchHandlers(messageType)
+	if err != nil {
+		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
+			WithTextCode("HANDLER_LOOKUP_ERROR").
+			WithMetadata(map[string]any{
+				"message_type": messageType,
+			})
+	}
+
+	if ctx.Err() != nil {
+		return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
+			WithTextCode("CONTEXT_ERROR")
+	}
+
+	var errs error
+	for _, h := range handlers {
+		if err := h.run(ctx, msg); err != nil {
+			wrappedErr := wrapHandlerError(err, msg, h.handler())
+			if ExitOnErr {
+				return wrappedErr
+			}
+			errs = errors.Join(errs, wrappedErr)
+		}
+	}
+
+	return errs
+}
+
+func getDispatchHandlers(messageType string) ([]dispatchRunnable, error) {
+	handlers := getCommandMux().Get(messageType)
+	if len(handlers) == 0 {
+		return nil, fmt.Errorf("no command handlers for message type %s", messageType)
+	}
+
+	typedHandlers := make([]dispatchRunnable, 0, len(handlers))
+	for _, h := range handlers {
+		cmdHandler, ok := h.Handler.(dispatchRunnable)
+		if !ok {
+			return nil, fmt.Errorf("handler does not implement CommandHandler for type %s", messageType)
+		}
+		typedHandlers = append(typedHandlers, cmdHandler)
+	}
+
+	if len(typedHandlers) == 0 {
+		return nil, fmt.Errorf("no command handlers for message type %s", messageType)
+	}
+
+	return typedHandlers, nil
 }
