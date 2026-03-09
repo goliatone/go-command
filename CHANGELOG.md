@@ -1,5 +1,29 @@
 # Changelog
 
+# [0.17.0](https://github.com/goliatone/go-command/compare/v0.16.1...v0.17.0) - (2026-03-09)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.17.0 ([02b1fdc](https://github.com/goliatone/go-command/commit/02b1fdcb2219fff0f81cfddc3e302c1342d31082))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Dispatcher router ([43fe3ea](https://github.com/goliatone/go-command/commit/43fe3eafbf78156542137589622e82402ee33b9f))  - (goliatone)
+- Dispatch contracts ([aa67208](https://github.com/goliatone/go-command/commit/aa67208d562bd0ca900427ebd944b4578b114df1))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Dispatcher to support backend routing ([125c88a](https://github.com/goliatone/go-command/commit/125c88a1900cd1af50cc203db3dce4ba689067e3))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.16.1 ([a9efa12](https://github.com/goliatone/go-command/commit/a9efa122760483c1ac867a0391bb2be2e622482c))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([ac1afe2](https://github.com/goliatone/go-command/commit/ac1afe2c3fada05267887d854c26b6f1e38a6039))  - (goliatone)
+- Update tests ([d2555db](https://github.com/goliatone/go-command/commit/d2555dbe49a6b382c16a44df5e64bd6a1ec5aac1))  - (goliatone)
+
 # [0.16.1](https://github.com/goliatone/go-command/compare/v0.16.0...v0.16.1) - (2026-02-25)
 
 ## <!-- 13 -->📦 Bumps
