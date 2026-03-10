@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo": "vite --config vite.demo.config.ts"
   },
   "dependencies": {
     "react": "^19.1.1",

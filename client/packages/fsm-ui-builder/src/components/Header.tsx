@@ -13,7 +13,11 @@ export interface HeaderProps {
   authoringAvailable?: boolean
   recoveryAvailable?: boolean
   rpcExportAvailable?: boolean
+  readOnly?: boolean
+  onPanelToggle?: (panel: "explorer" | "inspector" | "console") => void
 }
+
+type HeaderAction = (() => Promise<void> | void) | undefined
 
 export function Header(props: HeaderProps) {
   const machineName = useMachineStore((state) => state.document.definition.name)
@@ -29,7 +33,7 @@ export function Header(props: HeaderProps) {
 
   const [busyAction, setBusyAction] = useState<string | null>(null)
 
-  const runAction = (name: string, action: HeaderProps[keyof HeaderProps]) => {
+  const runAction = (name: string, action: HeaderAction) => {
     if (!action || typeof action !== "function") {
       return
     }
@@ -47,6 +51,7 @@ export function Header(props: HeaderProps) {
   }
 
   const saveLabel = props.authoringAvailable ? "Save Draft" : "Save"
+  const readOnly = Boolean(props.readOnly)
 
   return (
     <header className="fub-header" aria-label="Builder header">
@@ -58,6 +63,7 @@ export function Header(props: HeaderProps) {
             aria-label="Machine name"
             className="fub-input"
             value={machineName}
+            readOnly={readOnly}
             onChange={(event) => setMachineName(event.target.value)}
           />
           {isDirty ? <span aria-label="Unsaved changes" className="fub-dirty-dot" /> : null}
@@ -65,25 +71,39 @@ export function Header(props: HeaderProps) {
       </div>
 
       <div className="fub-header-actions" role="group" aria-label="Builder actions">
-        <button type="button" className="fub-btn" onClick={undo} disabled={historyIndex === 0 || Boolean(busyAction)}>
+        <button
+          type="button"
+          className="fub-btn"
+          onClick={undo}
+          disabled={readOnly || historyIndex === 0 || Boolean(busyAction)}
+          aria-keyshortcuts="Control+Z Meta+Z"
+        >
           Undo
         </button>
         <button
           type="button"
           className="fub-btn"
           onClick={redo}
-          disabled={historyIndex >= historyLength - 1 || Boolean(busyAction)}
+          disabled={readOnly || historyIndex >= historyLength - 1 || Boolean(busyAction)}
+          aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z"
         >
           Redo
         </button>
-        <button type="button" className="fub-btn" onClick={() => runAction("save", props.onSave)} disabled={Boolean(busyAction)}>
+        <button
+          type="button"
+          className="fub-btn"
+          onClick={() => runAction("save", props.onSave)}
+          disabled={readOnly || Boolean(busyAction)}
+          aria-keyshortcuts="Control+S Meta+S"
+        >
           {busyAction === "save" ? "Saving..." : saveLabel}
         </button>
         <button
           type="button"
           className="fub-btn"
           onClick={() => runAction("validate", props.onValidate)}
-          disabled={Boolean(busyAction)}
+          disabled={readOnly || Boolean(busyAction)}
+          aria-keyshortcuts="Control+Enter Meta+Enter"
         >
           {busyAction === "validate" ? "Validating..." : "Validate"}
         </button>
@@ -100,7 +120,7 @@ export function Header(props: HeaderProps) {
           type="button"
           className="fub-btn"
           onClick={() => runAction("recover", props.onRecoverDraft)}
-          disabled={!props.recoveryAvailable || Boolean(busyAction)}
+          disabled={readOnly || !props.recoveryAvailable || Boolean(busyAction)}
           title={props.recoveryAvailable ? "Recover autosaved draft" : "No autosaved draft"}
         >
           Recover Draft
@@ -122,13 +142,26 @@ export function Header(props: HeaderProps) {
         >
           Export RPC
         </button>
-        <button type="button" className="fub-btn" onClick={() => togglePanel("explorer")}>
+        <button
+          type="button"
+          className="fub-btn"
+          onClick={() => (props.onPanelToggle ? props.onPanelToggle("explorer") : togglePanel("explorer"))}
+        >
           Explorer
         </button>
-        <button type="button" className="fub-btn" onClick={() => togglePanel("inspector")}>
+        <button
+          type="button"
+          className="fub-btn"
+          onClick={() => (props.onPanelToggle ? props.onPanelToggle("inspector") : togglePanel("inspector"))}
+        >
           Inspector
         </button>
-        <button type="button" className="fub-btn" onClick={() => togglePanel("console")}>
+        <button
+          type="button"
+          className="fub-btn"
+          onClick={() => (props.onPanelToggle ? props.onPanelToggle("console") : togglePanel("console"))}
+          aria-keyshortcuts="Control+` Meta+`"
+        >
           Console
         </button>
         <span className="fub-badge" aria-live="polite">

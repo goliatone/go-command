@@ -66,6 +66,7 @@ function parseMetadataText(raw: string): { value?: Record<string, unknown>; erro
 function StepMetadataEditor(props: {
   metadata: Record<string, unknown> | undefined
   onCommit: (metadata: Record<string, unknown>) => void
+  readOnly?: boolean
 }) {
   const serializedMetadata = useMemo(() => metadataToText(props.metadata), [props.metadata])
   const [text, setText] = useState(serializedMetadata)
@@ -77,6 +78,9 @@ function StepMetadataEditor(props: {
   }, [serializedMetadata])
 
   const commit = () => {
+    if (props.readOnly) {
+      return
+    }
     const result = parseMetadataText(text)
     if (result.error) {
       setError(result.error)
@@ -93,6 +97,7 @@ function StepMetadataEditor(props: {
         aria-label="Workflow metadata"
         className="fub-input fub-textarea"
         value={text}
+        readOnly={Boolean(props.readOnly)}
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
       />
@@ -144,6 +149,7 @@ function useActionCatalog(provider: ActionCatalogProvider | null | undefined): {
 
 export interface InspectorProps {
   actionCatalogProvider?: ActionCatalogProvider | null
+  readOnly?: boolean
 }
 
 export function Inspector(props: InspectorProps) {
@@ -166,13 +172,21 @@ export function Inspector(props: InspectorProps) {
 
   const selectionDiagnostics = diagnosticsForSelection(diagnostics, selection)
   const catalog = useActionCatalog(props.actionCatalogProvider)
+  const readOnly = Boolean(props.readOnly)
 
   if (selection.kind === "state") {
     const state = definition.states[selection.stateIndex]
     if (!state) {
       return (
-        <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-          <div className="fub-panel-header">
+        <section
+          className="fub-panel fub-inspector"
+          aria-label="Inspector panel"
+          role="region"
+          aria-labelledby="fub-panel-inspector-heading"
+          id="fub-panel-inspector"
+          tabIndex={-1}
+        >
+          <div className="fub-panel-header" id="fub-panel-inspector-heading">
             <strong>Inspector</strong>
           </div>
           <div className="fub-panel-body">State not found.</div>
@@ -181,21 +195,35 @@ export function Inspector(props: InspectorProps) {
     }
 
     return (
-      <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-        <div className="fub-panel-header">
+      <section
+        className="fub-panel fub-inspector"
+        aria-label="Inspector panel"
+        role="region"
+        aria-labelledby="fub-panel-inspector-heading"
+        id="fub-panel-inspector"
+        tabIndex={-1}
+      >
+        <div className="fub-panel-header" id="fub-panel-inspector-heading">
           <strong>State</strong>
-          <button type="button" className="fub-mini-btn danger" onClick={() => removeState(selection.stateIndex)}>
+          <button
+            type="button"
+            className="fub-mini-btn danger"
+            onClick={() => removeState(selection.stateIndex)}
+            disabled={readOnly}
+          >
             Delete
           </button>
         </div>
 
         <div className="fub-panel-body">
+          {readOnly ? <p className="fub-readonly-note">Read-only mode: editing is disabled in narrow/mobile layout.</p> : null}
           <label className="fub-field">
             <span>Name</span>
             <input
               aria-label="State name"
               className="fub-input"
               value={state.name}
+              readOnly={readOnly}
               onChange={(event) => updateStateName(selection.stateIndex, event.target.value)}
             />
             <InlineDiagnostics
@@ -209,6 +237,7 @@ export function Inspector(props: InspectorProps) {
             <input
               type="checkbox"
               checked={Boolean(state.initial)}
+              disabled={readOnly}
               onChange={(event) => updateStateFlag(selection.stateIndex, "initial", event.target.checked)}
             />
             Initial
@@ -218,6 +247,7 @@ export function Inspector(props: InspectorProps) {
             <input
               type="checkbox"
               checked={Boolean(state.terminal)}
+              disabled={readOnly}
               onChange={(event) => updateStateFlag(selection.stateIndex, "terminal", event.target.checked)}
             />
             Final
@@ -233,8 +263,15 @@ export function Inspector(props: InspectorProps) {
     const transition = definition.transitions[selection.transitionIndex]
     if (!transition) {
       return (
-        <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-          <div className="fub-panel-header">
+        <section
+          className="fub-panel fub-inspector"
+          aria-label="Inspector panel"
+          role="region"
+          aria-labelledby="fub-panel-inspector-heading"
+          id="fub-panel-inspector"
+          tabIndex={-1}
+        >
+          <div className="fub-panel-header" id="fub-panel-inspector-heading">
             <strong>Inspector</strong>
           </div>
           <div className="fub-panel-body">Transition not found.</div>
@@ -245,25 +282,35 @@ export function Inspector(props: InspectorProps) {
     const targetKind = transitionTargetKind(transition)
 
     return (
-      <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-        <div className="fub-panel-header">
+      <section
+        className="fub-panel fub-inspector"
+        aria-label="Inspector panel"
+        role="region"
+        aria-labelledby="fub-panel-inspector-heading"
+        id="fub-panel-inspector"
+        tabIndex={-1}
+      >
+        <div className="fub-panel-header" id="fub-panel-inspector-heading">
           <strong>Transition</strong>
           <button
             type="button"
             className="fub-mini-btn danger"
             onClick={() => removeTransition(selection.transitionIndex)}
+            disabled={readOnly}
           >
             Delete
           </button>
         </div>
 
         <div className="fub-panel-body">
+          {readOnly ? <p className="fub-readonly-note">Read-only mode: editing is disabled in narrow/mobile layout.</p> : null}
           <label className="fub-field">
             <span>Event</span>
             <input
               aria-label="Transition event"
               className="fub-input"
               value={transition.event}
+              readOnly={readOnly}
               onChange={(event) => updateTransition(selection.transitionIndex, "event", event.target.value)}
             />
             <InlineDiagnostics
@@ -279,6 +326,7 @@ export function Inspector(props: InspectorProps) {
               aria-label="Transition from"
               className="fub-input"
               value={transition.from}
+              disabled={readOnly}
               onChange={(event) => updateTransition(selection.transitionIndex, "from", event.target.value)}
             >
               {definition.states.map((state, stateIndex) => (
@@ -296,6 +344,7 @@ export function Inspector(props: InspectorProps) {
                 type="radio"
                 name={`target-kind-${selection.transitionIndex}`}
                 checked={targetKind === "static"}
+                disabled={readOnly}
                 onChange={() => updateTransitionTargetKind(selection.transitionIndex, "static")}
               />
               Static
@@ -305,6 +354,7 @@ export function Inspector(props: InspectorProps) {
                 type="radio"
                 name={`target-kind-${selection.transitionIndex}`}
                 checked={targetKind === "dynamic"}
+                disabled={readOnly}
                 onChange={() => updateTransitionTargetKind(selection.transitionIndex, "dynamic")}
               />
               Dynamic
@@ -318,6 +368,7 @@ export function Inspector(props: InspectorProps) {
                 aria-label="Transition target"
                 className="fub-input"
                 value={transition.to ?? ""}
+                disabled={readOnly}
                 onChange={(event) => updateTransition(selection.transitionIndex, "to", event.target.value)}
               >
                 {definition.states.map((state, stateIndex) => (
@@ -334,6 +385,7 @@ export function Inspector(props: InspectorProps) {
                 aria-label="Dynamic resolver"
                 className="fub-input"
                 value={transition.dynamic_to?.resolver ?? ""}
+                readOnly={readOnly}
                 onChange={(event) =>
                   updateTransition(selection.transitionIndex, "dynamic_to.resolver", event.target.value)
                 }
@@ -349,6 +401,7 @@ export function Inspector(props: InspectorProps) {
                   type="button"
                   className="fub-mini-btn"
                   onClick={() => addWorkflowNode(selection.transitionIndex, "step")}
+                  disabled={readOnly}
                 >
                   + Step
                 </button>
@@ -356,6 +409,7 @@ export function Inspector(props: InspectorProps) {
                   type="button"
                   className="fub-mini-btn"
                   onClick={() => addWorkflowNode(selection.transitionIndex, "when")}
+                  disabled={readOnly}
                 >
                   + When
                 </button>
@@ -391,8 +445,15 @@ export function Inspector(props: InspectorProps) {
 
     if (!transition || !node) {
       return (
-        <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-          <div className="fub-panel-header">
+        <section
+          className="fub-panel fub-inspector"
+          aria-label="Inspector panel"
+          role="region"
+          aria-labelledby="fub-panel-inspector-heading"
+          id="fub-panel-inspector"
+          tabIndex={-1}
+        >
+          <div className="fub-panel-header" id="fub-panel-inspector-heading">
             <strong>Inspector</strong>
           </div>
           <div className="fub-panel-body">Workflow node not found.</div>
@@ -402,8 +463,15 @@ export function Inspector(props: InspectorProps) {
 
     if (!isSupportedWorkflowNodeKind(node.kind)) {
       return (
-        <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-          <div className="fub-panel-header">
+        <section
+          className="fub-panel fub-inspector"
+          aria-label="Inspector panel"
+          role="region"
+          aria-labelledby="fub-panel-inspector-heading"
+          id="fub-panel-inspector"
+          tabIndex={-1}
+        >
+          <div className="fub-panel-header" id="fub-panel-inspector-heading">
             <strong>Workflow Node</strong>
           </div>
           <div className="fub-panel-body">
@@ -422,19 +490,28 @@ export function Inspector(props: InspectorProps) {
     const actionListID = `fub-action-catalog-${selection.transitionIndex}-${selection.nodeIndex}`
 
     return (
-      <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-        <div className="fub-panel-header">
+      <section
+        className="fub-panel fub-inspector"
+        aria-label="Inspector panel"
+        role="region"
+        aria-labelledby="fub-panel-inspector-heading"
+        id="fub-panel-inspector"
+        tabIndex={-1}
+      >
+        <div className="fub-panel-header" id="fub-panel-inspector-heading">
           <strong>Workflow Node</strong>
           <button
             type="button"
             className="fub-mini-btn danger"
             onClick={() => removeWorkflowNode(selection.transitionIndex, selection.nodeIndex)}
+            disabled={readOnly}
           >
             Delete
           </button>
         </div>
 
         <div className="fub-panel-body">
+          {readOnly ? <p className="fub-readonly-note">Read-only mode: editing is disabled in narrow/mobile layout.</p> : null}
           <div className="fub-muted">Kind: {node.kind}</div>
 
           {node.kind === "step" ? (
@@ -446,6 +523,7 @@ export function Inspector(props: InspectorProps) {
                   className="fub-input"
                   list={catalog.actions.length > 0 ? actionListID : undefined}
                   value={node.step?.action_id ?? ""}
+                  readOnly={readOnly}
                   onChange={(event) =>
                     updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "action_id", event.target.value)
                   }
@@ -471,6 +549,7 @@ export function Inspector(props: InspectorProps) {
                 <input
                   type="checkbox"
                   checked={Boolean(node.step?.async)}
+                  disabled={readOnly}
                   onChange={(event) =>
                     updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "async", event.target.checked)
                   }
@@ -484,6 +563,7 @@ export function Inspector(props: InspectorProps) {
                   aria-label="Workflow delay"
                   className="fub-input"
                   value={node.step?.delay ?? ""}
+                  readOnly={readOnly}
                   onChange={(event) =>
                     updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "delay", event.target.value)
                   }
@@ -496,6 +576,7 @@ export function Inspector(props: InspectorProps) {
                   aria-label="Workflow timeout"
                   className="fub-input"
                   value={node.step?.timeout ?? ""}
+                  readOnly={readOnly}
                   onChange={(event) =>
                     updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "timeout", event.target.value)
                   }
@@ -504,6 +585,7 @@ export function Inspector(props: InspectorProps) {
 
               <StepMetadataEditor
                 metadata={node.step?.metadata}
+                readOnly={readOnly}
                 onCommit={(metadata) =>
                   updateWorkflowNodeMetadata(selection.transitionIndex, selection.nodeIndex, metadata)
                 }
@@ -516,6 +598,7 @@ export function Inspector(props: InspectorProps) {
                 aria-label="Workflow when expression"
                 className="fub-input"
                 value={node.expr ?? ""}
+                readOnly={readOnly}
                 onChange={(event) =>
                   updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "expr", event.target.value)
                 }
@@ -535,8 +618,15 @@ export function Inspector(props: InspectorProps) {
   }
 
   return (
-    <section className="fub-panel fub-inspector" aria-label="Inspector panel">
-      <div className="fub-panel-header">
+    <section
+      className="fub-panel fub-inspector"
+      aria-label="Inspector panel"
+      role="region"
+      aria-labelledby="fub-panel-inspector-heading"
+      id="fub-panel-inspector"
+      tabIndex={-1}
+    >
+      <div className="fub-panel-header" id="fub-panel-inspector-heading">
         <strong>Inspector</strong>
       </div>
       <div className="fub-panel-body">

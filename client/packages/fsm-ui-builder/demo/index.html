@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FSM UI Builder Demo Host</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b1014;
+        color: #d9e6ef;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+      .demo-wrap {
+        margin: 0 auto;
+        max-width: 1360px;
+        padding: 16px;
+      }
+      .demo-header {
+        margin-bottom: 12px;
+      }
+      .demo-header h1 {
+        margin: 0 0 4px;
+        font-size: 1.1rem;
+      }
+      .demo-header p {
+        margin: 0;
+        color: #8fa2b1;
+        font-size: 0.9rem;
+      }
+      #builder-root {
+        min-height: 760px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="demo-wrap">
+      <div class="demo-header">
+        <h1>FSM UI Builder Demo Host</h1>
+        <p>Mounted package with runtime + authoring adapters wired to <code>POST /rpc</code>.</p>
+      </div>
+      <div id="builder-root"></div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+

@@ -19,7 +19,11 @@ function isTransitionSelected(selection: Selection, transitionIndex: number): bo
   return false
 }
 
-export function Explorer() {
+export interface ExplorerProps {
+  readOnly?: boolean
+}
+
+export function Explorer(props: ExplorerProps) {
   const states = useMachineStore((state) => state.document.definition.states)
   const transitions = useMachineStore((state) => state.document.definition.transitions)
   const selection = useMachineStore((state) => state.selection)
@@ -28,15 +32,24 @@ export function Explorer() {
   const addState = useMachineStore((state) => state.addState)
   const addTransition = useMachineStore((state) => state.addTransition)
 
+  const readOnly = Boolean(props.readOnly)
+
   return (
-    <section className="fub-panel fub-explorer" aria-label="Explorer panel">
-      <div className="fub-panel-header">
+    <section
+      className="fub-panel fub-explorer"
+      aria-label="Explorer panel"
+      role="region"
+      aria-labelledby="fub-panel-explorer-heading"
+      id="fub-panel-explorer"
+      tabIndex={-1}
+    >
+      <div className="fub-panel-header" id="fub-panel-explorer-heading">
         <strong>Explorer</strong>
         <div className="fub-inline-actions">
-          <button type="button" className="fub-mini-btn" onClick={addState}>
+          <button type="button" className="fub-mini-btn" onClick={addState} disabled={readOnly}>
             + State
           </button>
-          <button type="button" className="fub-mini-btn" onClick={addTransition}>
+          <button type="button" className="fub-mini-btn" onClick={addTransition} disabled={readOnly}>
             + Transition
           </button>
         </div>

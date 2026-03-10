@@ -2,6 +2,9 @@ import { createStore, type StoreApi } from "zustand/vanilla"
 
 const PERSIST_KEY = "fsm-ui-builder.panel-layout"
 
+export type ViewportMode = "desktop" | "compact" | "mobile-readonly"
+export type MobilePanel = "explorer" | "canvas" | "inspector" | "console"
+
 export interface PanelLayoutState {
   explorerWidth: number
   inspectorWidth: number
@@ -9,12 +12,23 @@ export interface PanelLayoutState {
   explorerCollapsed: boolean
   inspectorCollapsed: boolean
   consoleCollapsed: boolean
+  canvasZoom: number
+  canvasOffsetX: number
+  canvasOffsetY: number
 }
 
 export interface UIStoreState extends PanelLayoutState {
+  viewportMode: ViewportMode
+  mobilePanel: MobilePanel
   setPanelWidth(panel: "explorer" | "inspector", width: number): void
   setConsoleHeight(height: number): void
+  setPanelCollapsed(panel: "explorer" | "inspector" | "console", collapsed: boolean): void
   togglePanel(panel: "explorer" | "inspector" | "console"): void
+  zoomCanvas(delta: number): void
+  panCanvas(deltaX: number, deltaY: number): void
+  resetCanvasView(): void
+  setViewportMode(mode: ViewportMode): void
+  setMobilePanel(panel: MobilePanel): void
 }
 
 export type UIStore = StoreApi<UIStoreState>
@@ -33,7 +47,10 @@ function defaultLayout(): PanelLayoutState {
     consoleHeight: 140,
     explorerCollapsed: false,
     inspectorCollapsed: false,
-    consoleCollapsed: false
+    consoleCollapsed: false,
+    canvasZoom: 1,
+    canvasOffsetX: 0,
+    canvasOffsetY: 0
   }
 }
 
@@ -63,7 +80,10 @@ function readPersistedLayout(): PanelLayoutState {
       consoleHeight: clamp(parsed.consoleHeight ?? 140, 80, 300),
       explorerCollapsed: Boolean(parsed.explorerCollapsed),
       inspectorCollapsed: Boolean(parsed.inspectorCollapsed),
-      consoleCollapsed: Boolean(parsed.consoleCollapsed)
+      consoleCollapsed: Boolean(parsed.consoleCollapsed),
+      canvasZoom: clamp(parsed.canvasZoom ?? 1, 0.25, 2),
+      canvasOffsetX: Number.isFinite(parsed.canvasOffsetX) ? Number(parsed.canvasOffsetX) : 0,
+      canvasOffsetY: Number.isFinite(parsed.canvasOffsetY) ? Number(parsed.canvasOffsetY) : 0
     }
   } catch {
     return defaultLayout()
@@ -82,6 +102,8 @@ export function createUIStore(): UIStore {
 
   return createStore<UIStoreState>((set) => ({
     ...initial,
+    viewportMode: "desktop",
+    mobilePanel: "canvas",
     setPanelWidth(panel, width) {
       set((state) => {
         const next = {
@@ -105,6 +127,18 @@ export function createUIStore(): UIStore {
         return next
       })
     },
+    setPanelCollapsed(panel, collapsed) {
+      set((state) => {
+        const next = {
+          ...state,
+          explorerCollapsed: panel === "explorer" ? collapsed : state.explorerCollapsed,
+          inspectorCollapsed: panel === "inspector" ? collapsed : state.inspectorCollapsed,
+          consoleCollapsed: panel === "console" ? collapsed : state.consoleCollapsed
+        }
+        persistLayout(next)
+        return next
+      })
+    },
     togglePanel(panel) {
       set((state) => {
         const next = {
@@ -116,6 +150,45 @@ export function createUIStore(): UIStore {
         persistLayout(next)
         return next
       })
+    },
+    zoomCanvas(delta) {
+      set((state) => {
+        const next = {
+          ...state,
+          canvasZoom: clamp(state.canvasZoom + delta, 0.25, 2)
+        }
+        persistLayout(next)
+        return next
+      })
+    },
+    panCanvas(deltaX, deltaY) {
+      set((state) => {
+        const next = {
+          ...state,
+          canvasOffsetX: state.canvasOffsetX + deltaX,
+          canvasOffsetY: state.canvasOffsetY + deltaY
+        }
+        persistLayout(next)
+        return next
+      })
+    },
+    resetCanvasView() {
+      set((state) => {
+        const next = {
+          ...state,
+          canvasZoom: 1,
+          canvasOffsetX: 0,
+          canvasOffsetY: 0
+        }
+        persistLayout(next)
+        return next
+      })
+    },
+    setViewportMode(mode) {
+      set({ viewportMode: mode })
+    },
+    setMobilePanel(panel) {
+      set({ mobilePanel: panel })
     }
   }))
 }

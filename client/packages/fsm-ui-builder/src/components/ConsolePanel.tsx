@@ -10,8 +10,15 @@ export function ConsolePanel() {
   const errors = useSimulationStore((state) => state.errors)
 
   return (
-    <section className="fub-panel fub-console" aria-label="Console panel">
-      <div className="fub-panel-header">
+    <section
+      className="fub-panel fub-console"
+      aria-label="Console panel"
+      role="region"
+      aria-labelledby="fub-panel-console-heading"
+      id="fub-panel-console"
+      tabIndex={-1}
+    >
+      <div className="fub-panel-header" id="fub-panel-console-heading">
         <strong>Console</strong>
         <span className="fub-muted">Problems + simulation output</span>
       </div>
@@ -23,7 +30,20 @@ export function ConsolePanel() {
             {diagnostics.length === 0 ? <li className="fub-muted">No diagnostics.</li> : null}
             {diagnostics.map((diagnostic, index) => (
               <li key={`${diagnostic.code}-${diagnostic.path}-${index}`}>
-                <button type="button" className="fub-list-item" onClick={() => focusDiagnostic(diagnostic)}>
+                <button
+                  type="button"
+                  className="fub-list-item"
+                  onClick={() => {
+                    focusDiagnostic(diagnostic)
+                    const raf =
+                      typeof window.requestAnimationFrame === "function"
+                        ? window.requestAnimationFrame.bind(window)
+                        : (callback: FrameRequestCallback) => window.setTimeout(callback, 0)
+                    raf(() => {
+                      document.getElementById("fub-panel-inspector")?.focus()
+                    })
+                  }}
+                >
                   <strong>{diagnostic.code}</strong> {diagnostic.message}
                 </button>
               </li>
@@ -91,7 +111,7 @@ export function ConsolePanel() {
             </ul>
           </div>
 
-          <ul>
+          <ul role="log" aria-live="polite" aria-label="Simulation log">
             {simulationLog.length === 0 ? <li className="fub-muted">No simulation runs yet.</li> : null}
             {simulationLog.map((entry) => (
               <li key={entry.id} className={`fub-log-${entry.level}`}>

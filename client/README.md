@@ -1,10 +1,11 @@
 # go-command TypeScript Client
 
-TypeScript client toolkit for `go-command` split into three libraries:
+TypeScript client toolkit for `go-command` split into four libraries:
 
 1. `@goliatone/go-command-rpc` (generic RPC clients)
 2. `@goliatone/go-command-fsm` (FSM projection runtime + REST transport)
 3. `@goliatone/go-command-fsm-rpc` (FSM RPC transport adapter)
+4. `@goliatone/go-command-fsm-ui-builder` (mountable FSM authoring UI)
 
 ## Install and run
 
@@ -45,6 +46,44 @@ Use these for server-authoritative FSM state projection from `@goliatone/go-comm
 - `bootstrapClientFSM`, `readHydratedSnapshot`
 
 `RPCTransport` lives in `@goliatone/go-command-fsm-rpc`.
+
+### FSM UI Builder (mountable package)
+
+Use `@goliatone/go-command-fsm-ui-builder` when you need authoring/simulation UI against the frozen RPC contract (`POST /rpc`):
+
+- mountable React UI surface (`mountFSMUIBuilder`, `FSMUIBuilder`)
+- runtime adapter (`fsm.apply_event` dry-run, `fsm.snapshot`)
+- authoring adapter (`fsm.authoring.*`)
+- keyboard baseline (`Ctrl/Cmd+S`, `Ctrl/Cmd+Enter`, undo/redo, panel focus, zoom helpers)
+- accessibility/responsive baseline (focus shortcuts, ARIA semantics, live regions, read-only narrow/mobile mode)
+
+Quick mount example:
+
+```ts
+import {
+  createBuilderAuthoringRPC,
+  createBuilderRPCClient,
+  createBuilderRuntimeRPC,
+  mountFSMUIBuilder,
+} from "@goliatone/go-command-fsm-ui-builder";
+
+const rpc = createBuilderRPCClient({ endpoint: "/rpc" });
+
+mountFSMUIBuilder(document.getElementById("app")!, {
+  machineId: "orders",
+  runtimeRPC: createBuilderRuntimeRPC(rpc),
+  authoringRPC: createBuilderAuthoringRPC(rpc),
+});
+```
+
+Demo host (workspace):
+
+```bash
+cd client/packages/fsm-ui-builder
+npm run demo
+```
+
+Demo source lives in `client/packages/fsm-ui-builder/demo/` and wires builder runtime + authoring adapters to `/rpc`.
 
 ## Quick start: standalone RPC
 

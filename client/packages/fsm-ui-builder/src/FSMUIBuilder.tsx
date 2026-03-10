@@ -331,15 +331,19 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     const roundTripDraft = buildRoundTripDraft()
 
     if (!authoringRPC) {
-      markSaved()
-      await persistenceStore.save({
-        machineId: machineID,
-        updatedAt: new Date().toISOString(),
-        document: deepClone(roundTripDraft)
-      })
-      baseRoundTripDocumentRef.current = deepClone(roundTripDraft)
-      setRecoveryDraft(null)
-      pushSimulationInfo("Saved locally (authoring RPC unavailable).")
+      try {
+        await persistenceStore.save({
+          machineId: machineID,
+          updatedAt: new Date().toISOString(),
+          document: deepClone(roundTripDraft)
+        })
+        markSaved()
+        baseRoundTripDocumentRef.current = deepClone(roundTripDraft)
+        setRecoveryDraft(null)
+        pushSimulationInfo("Saved locally (authoring RPC unavailable).")
+      } catch (error) {
+        handleOperationError(error)
+      }
       return
     }
 

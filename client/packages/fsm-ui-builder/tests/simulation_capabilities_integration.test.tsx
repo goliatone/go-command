@@ -61,7 +61,7 @@ function makeDocument(): DraftMachineDocument {
   }
 }
 
-describe("fsm-ui-builder phase 2 integrations", () => {
+describe("fsm-ui-builder simulation and capability integrations", () => {
   afterEach(() => {
     cleanup()
   })
@@ -138,7 +138,7 @@ describe("fsm-ui-builder phase 2 integrations", () => {
     await user.click(screen.getByRole("button", { name: "Export RPC" }))
 
     await waitFor(() => {
-      expect(screen.getByText(/RPC export unavailable/i)).toBeTruthy()
+      expect(screen.getAllByText(/RPC export unavailable/i).length).toBeGreaterThan(0)
     })
   })
 
@@ -221,5 +221,46 @@ describe("fsm-ui-builder phase 2 integrations", () => {
         saveCalls.some((entry) => entry.document.definition.states[0]?.name === "pending")
       ).toBe(true)
     })
+  })
+
+  it("keeps dirty state when local save fails", async () => {
+    const user = userEvent.setup()
+    const persistenceStore: PersistenceStore = {
+      async list() {
+        return []
+      },
+      async load() {
+        return null
+      },
+      async save() {
+        throw new Error("disk full")
+      },
+      async delete() {
+        // not used in this test
+      }
+    }
+
+    render(
+      <FSMUIBuilder
+        initialDocument={makeDocument()}
+        persistenceStore={persistenceStore}
+        autosaveDebounceMs={60_000}
+      />
+    )
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /draft/i }))
+    const stateName = screen.getByLabelText("State name") as HTMLInputElement
+    await user.clear(stateName)
+    await user.type(stateName, "pending")
+
+    expect(screen.getByLabelText("Unsaved changes")).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/disk full/i).length).toBeGreaterThan(0)
+    })
+    expect(screen.getByLabelText("Unsaved changes")).toBeTruthy()
   })
 })
