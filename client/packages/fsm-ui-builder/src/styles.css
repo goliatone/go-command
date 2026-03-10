@@ -74,6 +74,12 @@
   outline-offset: 1px;
 }
 
+.fub-textarea {
+  min-height: 112px;
+  resize: vertical;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
 .fub-dirty-dot {
   width: 8px;
   height: 8px;
@@ -267,6 +273,20 @@
   font-size: 0.75rem;
 }
 
+.fub-guardrail,
+.fub-guardrail-banner {
+  color: var(--fub-warn);
+}
+
+.fub-guardrail-banner {
+  align-items: center;
+  display: flex;
+  font-size: 0.78rem;
+  padding: 0 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--fub-warn) 35%, var(--fub-border));
+  background: color-mix(in oklab, var(--fub-bg-1) 70%, #000);
+}
+
 .fub-console-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -285,6 +305,19 @@
 
 .fub-log-error {
   color: var(--fub-danger);
+}
+
+.fub-console-card {
+  border: 1px solid var(--fub-border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--fub-bg-2) 82%, black);
+  margin-bottom: 10px;
+  padding: 8px;
+}
+
+.fub-console-card code,
+.fub-guardrail code {
+  color: var(--fub-accent);
 }
 
 .fub-muted {

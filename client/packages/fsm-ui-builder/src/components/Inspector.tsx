@@ -1,5 +1,13 @@
+import { useEffect, useMemo, useState } from "react"
+
+import type { ActionCatalogItem, ActionCatalogProvider } from "../adapters/actionCatalog"
 import type { TransitionDefinition, WorkflowNodeDefinition } from "../contracts"
-import { diagnosticsForSelection, diagnosticsForSelectionField } from "../document"
+import {
+  UNSUPPORTED_WORKFLOW_NODE_KINDS,
+  diagnosticsForSelection,
+  diagnosticsForSelectionField,
+  isSupportedWorkflowNodeKind
+} from "../document"
 import { useMachineStore } from "../store/provider"
 
 function InlineDiagnostics(props: { messages: string[] }) {
@@ -20,7 +28,7 @@ function toMessages(list: Array<{ message: string }>): string[] {
 }
 
 function transitionTargetKind(transition: TransitionDefinition): "static" | "dynamic" {
-  if (transition.dynamic_to?.resolver) {
+  if (transition.dynamic_to) {
     return "dynamic"
   }
   return "static"
@@ -36,7 +44,109 @@ function renderWorkflowNodeSummary(node: WorkflowNodeDefinition): string {
   return `${node.kind}: unsupported`
 }
 
-export function Inspector() {
+function metadataToText(metadata: Record<string, unknown> | undefined): string {
+  return JSON.stringify(metadata ?? {}, null, 2)
+}
+
+function parseMetadataText(raw: string): { value?: Record<string, unknown>; error?: string } {
+  if (raw.trim() === "") {
+    return { value: {} }
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: "metadata must be a JSON object" }
+    }
+    return { value: parsed as Record<string, unknown> }
+  } catch {
+    return { error: "metadata must be valid JSON" }
+  }
+}
+
+function StepMetadataEditor(props: {
+  metadata: Record<string, unknown> | undefined
+  onCommit: (metadata: Record<string, unknown>) => void
+}) {
+  const serializedMetadata = useMemo(() => metadataToText(props.metadata), [props.metadata])
+  const [text, setText] = useState(serializedMetadata)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setText(serializedMetadata)
+    setError(null)
+  }, [serializedMetadata])
+
+  const commit = () => {
+    const result = parseMetadataText(text)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    setError(null)
+    props.onCommit(result.value ?? {})
+  }
+
+  return (
+    <label className="fub-field">
+      <span>Metadata (JSON object)</span>
+      <textarea
+        aria-label="Workflow metadata"
+        className="fub-input fub-textarea"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+      />
+      {error ? <InlineDiagnostics messages={[error]} /> : null}
+    </label>
+  )
+}
+
+function useActionCatalog(provider: ActionCatalogProvider | null | undefined): {
+  actions: ActionCatalogItem[]
+  unavailableReason: string | null
+} {
+  const [actions, setActions] = useState<ActionCatalogItem[]>([])
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!provider) {
+      setActions([])
+      setUnavailableReason("Action catalog unavailable.")
+      return
+    }
+
+    provider
+      .listActions()
+      .then((items) => {
+        if (cancelled) {
+          return
+        }
+        setActions(items)
+        setUnavailableReason(items.length === 0 ? "Action catalog is empty." : null)
+      })
+      .catch(() => {
+        if (cancelled) {
+          return
+        }
+        setActions([])
+        setUnavailableReason("Action catalog unavailable.")
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [provider])
+
+  return { actions, unavailableReason }
+}
+
+export interface InspectorProps {
+  actionCatalogProvider?: ActionCatalogProvider | null
+}
+
+export function Inspector(props: InspectorProps) {
   const definition = useMachineStore((state) => state.document.definition)
   const selection = useMachineStore((state) => state.selection)
   const diagnostics = useMachineStore((state) => state.diagnostics)
@@ -52,8 +162,10 @@ export function Inspector() {
   const removeWorkflowNode = useMachineStore((state) => state.removeWorkflowNode)
   const selectWorkflowNode = useMachineStore((state) => state.selectWorkflowNode)
   const updateWorkflowNodeField = useMachineStore((state) => state.updateWorkflowNodeField)
+  const updateWorkflowNodeMetadata = useMachineStore((state) => state.updateWorkflowNodeMetadata)
 
   const selectionDiagnostics = diagnosticsForSelection(diagnostics, selection)
+  const catalog = useActionCatalog(props.actionCatalogProvider)
 
   if (selection.kind === "state") {
     const state = definition.states[selection.stateIndex]
@@ -251,15 +363,15 @@ export function Inspector() {
             </div>
             <ul>
               {transition.workflow.nodes.map((node, nodeIndex) => {
-                const selectedNode = false
                 return (
                   <li key={node.id || `${node.kind}-${nodeIndex}`}>
                     <button
                       type="button"
-                      className={`fub-list-item${selectedNode ? " is-selected" : ""}`}
+                      className="fub-list-item"
                       onClick={() => selectWorkflowNode(selection.transitionIndex, nodeIndex)}
                     >
-                      {renderWorkflowNodeSummary(node)}
+                      <span>{renderWorkflowNodeSummary(node)}</span>
+                      {!isSupportedWorkflowNodeKind(node.kind) ? <span className="fub-item-meta">unsupported</span> : null}
                     </button>
                   </li>
                 )
@@ -288,6 +400,27 @@ export function Inspector() {
       )
     }
 
+    if (!isSupportedWorkflowNodeKind(node.kind)) {
+      return (
+        <section className="fub-panel fub-inspector" aria-label="Inspector panel">
+          <div className="fub-panel-header">
+            <strong>Workflow Node</strong>
+          </div>
+          <div className="fub-panel-body">
+            <p className="fub-guardrail">
+              Node kind <code>{node.kind}</code> is unsupported in builder v1 and is read-only.
+            </p>
+            <p className="fub-muted">
+              Unsupported kinds: {UNSUPPORTED_WORKFLOW_NODE_KINDS.join(", ")}
+            </p>
+            <InlineDiagnostics messages={toMessages(selectionDiagnostics)} />
+          </div>
+        </section>
+      )
+    }
+
+    const actionListID = `fub-action-catalog-${selection.transitionIndex}-${selection.nodeIndex}`
+
     return (
       <section className="fub-panel fub-inspector" aria-label="Inspector panel">
         <div className="fub-panel-header">
@@ -311,11 +444,22 @@ export function Inspector() {
                 <input
                   aria-label="Workflow action id"
                   className="fub-input"
+                  list={catalog.actions.length > 0 ? actionListID : undefined}
                   value={node.step?.action_id ?? ""}
                   onChange={(event) =>
                     updateWorkflowNodeField(selection.transitionIndex, selection.nodeIndex, "action_id", event.target.value)
                   }
                 />
+                {catalog.actions.length > 0 ? (
+                  <datalist id={actionListID}>
+                    {catalog.actions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label ?? item.id}
+                      </option>
+                    ))}
+                  </datalist>
+                ) : null}
+                {catalog.unavailableReason ? <p className="fub-muted">{catalog.unavailableReason}</p> : null}
                 <InlineDiagnostics
                   messages={toMessages(
                     diagnosticsForSelectionField(diagnostics, selection, "action_id")
@@ -357,6 +501,13 @@ export function Inspector() {
                   }
                 />
               </label>
+
+              <StepMetadataEditor
+                metadata={node.step?.metadata}
+                onCommit={(metadata) =>
+                  updateWorkflowNodeMetadata(selection.transitionIndex, selection.nodeIndex, metadata)
+                }
+              />
             </>
           ) : (
             <label className="fub-field">

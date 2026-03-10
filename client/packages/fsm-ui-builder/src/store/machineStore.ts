@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
 
 import type {
+  DraftState,
   DraftMachineDocument,
   MachineDefinition,
   TransitionDefinition,
@@ -8,6 +9,7 @@ import type {
   WorkflowNodeDefinition
 } from "../contracts"
 import {
+  isSupportedWorkflowNodeKind,
   deepClone,
   defaultDraftMachineDocument,
   mapDiagnosticToSelection,
@@ -20,18 +22,28 @@ interface HistoryEntry {
   document: DraftMachineDocument
   selection: Selection
   diagnostics: ValidationDiagnostic[]
+  targetCache: TargetCache
   transaction: string
 }
+
+interface TransitionTargetCacheEntry {
+  staticTo?: string
+  dynamicTarget?: TransitionDefinition["dynamic_to"]
+}
+
+type TargetCache = Record<string, TransitionTargetCacheEntry>
 
 export interface MachineStoreState {
   document: DraftMachineDocument
   selection: Selection
   diagnostics: ValidationDiagnostic[]
+  targetCache: TargetCache
   history: HistoryEntry[]
   historyIndex: number
   baselineHash: string
   isDirty: boolean
   setSelection(selection: Selection): void
+  replaceDocument(document: DraftMachineDocument, diagnostics?: ValidationDiagnostic[]): void
   setDiagnostics(diagnostics: ValidationDiagnostic[]): void
   focusDiagnostic(diagnostic: ValidationDiagnostic): void
   setMachineName(name: string): void
@@ -56,9 +68,11 @@ export interface MachineStoreState {
     field: "action_id" | "async" | "delay" | "timeout" | "expr",
     value: string | boolean
   ): void
+  updateWorkflowNodeMetadata(transitionIndex: number, nodeIndex: number, metadata: Record<string, unknown>): void
   undo(): void
   redo(): void
   markSaved(): void
+  applyRemoteSave(version: string, draftState: DraftState, diagnostics: ValidationDiagnostic[]): void
 }
 
 export type MachineStore = StoreApi<MachineStoreState>
@@ -83,9 +97,81 @@ function normalizeDiagnostics(document: DraftMachineDocument, external: Validati
   return [...external, ...validated]
 }
 
+function transitionCacheKey(transition: TransitionDefinition, transitionIndex: number): string {
+  const id = transition.id.trim()
+  if (id !== "") {
+    return `id:${id}`
+  }
+  return `index:${transitionIndex}`
+}
+
+function cloneTargetCache(input: TargetCache): TargetCache {
+  const output: TargetCache = {}
+  for (const [key, entry] of Object.entries(input)) {
+    output[key] = {
+      staticTo: entry.staticTo,
+      dynamicTarget: entry.dynamicTarget ? deepClone(entry.dynamicTarget) : undefined
+    }
+  }
+  return output
+}
+
+function buildTargetCache(document: DraftMachineDocument): TargetCache {
+  const cache: TargetCache = {}
+  document.definition.transitions.forEach((transition, transitionIndex) => {
+    cache[transitionCacheKey(transition, transitionIndex)] = {
+      staticTo: transition.to,
+      dynamicTarget: transition.dynamic_to ? deepClone(transition.dynamic_to) : undefined
+    }
+  })
+  return cache
+}
+
+function ensureTargetCacheEntry(
+  cache: TargetCache,
+  transition: TransitionDefinition,
+  transitionIndex: number
+): TransitionTargetCacheEntry {
+  const key = transitionCacheKey(transition, transitionIndex)
+  const entry = cache[key]
+  if (entry) {
+    return entry
+  }
+  const created: TransitionTargetCacheEntry = {
+    staticTo: transition.to,
+    dynamicTarget: transition.dynamic_to ? deepClone(transition.dynamic_to) : undefined
+  }
+  cache[key] = created
+  return created
+}
+
+function reindexTargetCacheAfterRemoval(cache: TargetCache, removedIndex: number): TargetCache {
+  const next: TargetCache = {}
+  for (const [key, entry] of Object.entries(cache)) {
+    if (!key.startsWith("index:")) {
+      next[key] = entry
+      continue
+    }
+    const rawIndex = Number.parseInt(key.slice("index:".length), 10)
+    if (Number.isNaN(rawIndex)) {
+      next[key] = entry
+      continue
+    }
+    if (rawIndex === removedIndex) {
+      continue
+    }
+    if (rawIndex > removedIndex) {
+      next[`index:${rawIndex - 1}`] = entry
+      continue
+    }
+    next[key] = entry
+  }
+  return next
+}
+
 function nextStateFromHistory(history: HistoryEntry[], historyIndex: number, baselineHash: string): Pick<
   MachineStoreState,
-  "document" | "selection" | "diagnostics" | "history" | "historyIndex" | "baselineHash" | "isDirty"
+  "document" | "selection" | "diagnostics" | "targetCache" | "history" | "historyIndex" | "baselineHash" | "isDirty"
 > {
   const safeIndex = clampIndex(historyIndex, history.length)
   const current = history[safeIndex]
@@ -94,6 +180,7 @@ function nextStateFromHistory(history: HistoryEntry[], historyIndex: number, bas
     document: deepClone(current.document),
     selection: current.selection,
     diagnostics: [...current.diagnostics],
+    targetCache: cloneTargetCache(current.targetCache),
     history,
     historyIndex: safeIndex,
     baselineHash,
@@ -114,12 +201,13 @@ function ensureTransitionWorkflow(transition: TransitionDefinition): TransitionD
 function commitTransaction(
   store: MachineStore,
   transaction: string,
-  produceDocument: (document: DraftMachineDocument, state: MachineStoreState) => void,
+  produceDocument: (document: DraftMachineDocument, state: MachineStoreState, targetCache: TargetCache) => void,
   nextSelectionResolver?: (document: DraftMachineDocument, state: MachineStoreState) => Selection
 ): void {
   store.setState((state) => {
     const document = deepClone(state.document)
-    produceDocument(document, state)
+    const targetCache = cloneTargetCache(state.targetCache)
+    produceDocument(document, state, targetCache)
 
     const diagnostics = normalizeDiagnostics(document)
     const selection = nextSelectionResolver ? nextSelectionResolver(document, state) : state.selection
@@ -129,6 +217,7 @@ function commitTransaction(
       document,
       selection,
       diagnostics,
+      targetCache,
       transaction
     })
 
@@ -171,6 +260,7 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
   const initialDocument = deepClone(input.document ?? defaultDraftMachineDocument())
   const initialSelection: Selection = { kind: "machine" }
   const initialDiagnostics = normalizeDiagnostics(initialDocument, input.diagnostics)
+  const initialTargetCache = buildTargetCache(initialDocument)
   const baselineHash = serializeDraftDocument(initialDocument)
 
   const initialHistory: HistoryEntry[] = [
@@ -178,6 +268,7 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
       document: initialDocument,
       selection: initialSelection,
       diagnostics: initialDiagnostics,
+      targetCache: cloneTargetCache(initialTargetCache),
       transaction: "init"
     }
   ]
@@ -186,12 +277,42 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
     document: deepClone(initialDocument),
     selection: initialSelection,
     diagnostics: [...initialDiagnostics],
+    targetCache: cloneTargetCache(initialTargetCache),
     history: initialHistory,
     historyIndex: 0,
     baselineHash,
     isDirty: false,
     setSelection(selection) {
       set({ selection })
+    },
+    replaceDocument(document, diagnostics) {
+      set(() => {
+        const nextDocument = deepClone(document)
+        const normalized = normalizeDiagnostics(nextDocument, diagnostics)
+        const targetCache = buildTargetCache(nextDocument)
+        const nextSelection: Selection = { kind: "machine" }
+        const nextHistory: HistoryEntry[] = [
+          {
+            document: nextDocument,
+            selection: nextSelection,
+            diagnostics: normalized,
+            targetCache: cloneTargetCache(targetCache),
+            transaction: "replace-document"
+          }
+        ]
+        const nextBaseline = serializeDraftDocument(nextDocument)
+
+        return {
+          document: deepClone(nextDocument),
+          selection: nextSelection,
+          diagnostics: normalized,
+          targetCache: cloneTargetCache(targetCache),
+          history: nextHistory,
+          historyIndex: 0,
+          baselineHash: nextBaseline,
+          isDirty: false
+        }
+      })
     },
     setDiagnostics(diagnostics) {
       set((state) => {
@@ -293,11 +414,11 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
       commitTransaction(
         store,
         "add-transition",
-        (document) => {
+        (document, _state, targetCache) => {
           const from = findDefaultStateName(document.definition)
           const to = document.definition.states[1]?.name ?? from
           const transitionIndex = document.definition.transitions.length + 1
-          document.definition.transitions.push({
+          const transition: TransitionDefinition = {
             id: `transition_${transitionIndex}`,
             event: `event_${transitionIndex}`,
             from,
@@ -306,7 +427,11 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
               nodes: [buildDefaultWorkflowNode("step", 0)]
             },
             metadata: {}
-          })
+          }
+          document.definition.transitions.push(transition)
+          targetCache[transitionCacheKey(transition, document.definition.transitions.length - 1)] = {
+            staticTo: transition.to
+          }
         },
         (document) => ({ kind: "transition", transitionIndex: Math.max(0, document.definition.transitions.length - 1) })
       )
@@ -315,11 +440,20 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
       commitTransaction(
         store,
         "remove-transition",
-        (document) => {
+        (document, _state, targetCache) => {
           if (transitionIndex < 0 || transitionIndex >= document.definition.transitions.length) {
             return
           }
+          const removedTransition = document.definition.transitions[transitionIndex]
+          if (removedTransition) {
+            delete targetCache[transitionCacheKey(removedTransition, transitionIndex)]
+          }
           document.definition.transitions.splice(transitionIndex, 1)
+          const reindexedCache = reindexTargetCacheAfterRemoval(targetCache, transitionIndex)
+          Object.keys(targetCache).forEach((key) => {
+            delete targetCache[key]
+          })
+          Object.assign(targetCache, reindexedCache)
         },
         (document) => {
           if (document.definition.transitions.length === 0) {
@@ -333,11 +467,12 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
       )
     },
     updateTransition(transitionIndex, field, value) {
-      commitTransaction(store, `update-transition-${field}`, (document) => {
+      commitTransaction(store, `update-transition-${field}`, (document, _state, targetCache) => {
         const transition = document.definition.transitions[transitionIndex]
         if (!transition) {
           return
         }
+        const targetEntry = ensureTargetCacheEntry(targetCache, transition, transitionIndex)
 
         if (field === "event") {
           transition.event = value
@@ -349,31 +484,40 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         }
         if (field === "to") {
           transition.to = value
+          targetEntry.staticTo = value
           return
         }
         if (field === "dynamic_to.resolver") {
-          transition.dynamic_to = {
-            ...(transition.dynamic_to ?? { resolver: "" }),
+          const dynamicTarget = {
+            ...(transition.dynamic_to ?? targetEntry.dynamicTarget ?? { resolver: "" }),
             resolver: value
           }
+          transition.dynamic_to = dynamicTarget
+          targetEntry.dynamicTarget = deepClone(dynamicTarget)
         }
       })
     },
     updateTransitionTargetKind(transitionIndex, kind) {
-      commitTransaction(store, "update-transition-target-kind", (document) => {
+      commitTransaction(store, "update-transition-target-kind", (document, _state, targetCache) => {
         const transition = document.definition.transitions[transitionIndex]
         if (!transition) {
           return
         }
+        const targetEntry = ensureTargetCacheEntry(targetCache, transition, transitionIndex)
+        if (transition.to && transition.to.trim() !== "") {
+          targetEntry.staticTo = transition.to
+        }
+        if (transition.dynamic_to?.resolver && transition.dynamic_to.resolver.trim() !== "") {
+          targetEntry.dynamicTarget = deepClone(transition.dynamic_to)
+        }
         if (kind === "static") {
           transition.dynamic_to = undefined
-          if (!transition.to) {
-            transition.to = findDefaultStateName(document.definition)
-          }
+          const cachedTo = targetEntry.staticTo?.trim() ?? ""
+          transition.to = cachedTo || findDefaultStateName(document.definition)
           return
         }
         transition.to = undefined
-        transition.dynamic_to = transition.dynamic_to ?? { resolver: "" }
+        transition.dynamic_to = deepClone(targetEntry.dynamicTarget ?? { resolver: "" })
       })
     },
     addWorkflowNode(transitionIndex, kind) {
@@ -449,6 +593,9 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         if (!node) {
           return
         }
+        if (!isSupportedWorkflowNodeKind(node.kind)) {
+          return
+        }
 
         if (field === "expr") {
           node.expr = String(value)
@@ -480,6 +627,30 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         }
       })
     },
+    updateWorkflowNodeMetadata(transitionIndex, nodeIndex, metadata) {
+      commitTransaction(store, "update-workflow-node-metadata", (document) => {
+        const transition = document.definition.transitions[transitionIndex]
+        if (!transition) {
+          return
+        }
+        ensureTransitionWorkflow(transition)
+        const node = transition.workflow.nodes[nodeIndex]
+        if (!node) {
+          return
+        }
+        if (node.kind !== "step") {
+          return
+        }
+        node.step = node.step ?? {
+          action_id: "",
+          async: false,
+          delay: "",
+          timeout: "",
+          metadata: {}
+        }
+        node.step.metadata = deepClone(metadata)
+      })
+    },
     undo() {
       const state = get()
       if (state.historyIndex === 0) {
@@ -503,6 +674,27 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
           baselineHash: baseline,
           isDirty: false
         }
+      })
+    },
+    applyRemoteSave(version, draftState, diagnostics) {
+      set((state) => {
+        const document = deepClone(state.document)
+        document.definition.version = version
+        document.draft_state = deepClone(draftState)
+
+        const mergedDiagnostics = normalizeDiagnostics(document, diagnostics)
+        const targetCache = buildTargetCache(document)
+        const entry: HistoryEntry = {
+          document,
+          selection: state.selection,
+          diagnostics: mergedDiagnostics,
+          targetCache: cloneTargetCache(targetCache),
+          transaction: "apply-remote-save"
+        }
+        const history = state.history.slice(0, state.historyIndex + 1)
+        history.push(entry)
+        const baseline = serializeDraftDocument(document)
+        return nextStateFromHistory(history, history.length - 1, baseline)
       })
     }
   }))

@@ -1,20 +1,28 @@
 import { useMemo } from "react"
 
+import type { ActionCatalogProvider } from "../adapters/actionCatalog"
+import { collectUnsupportedWorkflowKinds } from "../document"
 import { usePanelResize } from "../hooks/usePanelResize"
-import { useUIStore } from "../store/provider"
+import { useMachineStore, useUIStore } from "../store/provider"
 import { Canvas } from "./Canvas"
 import { ConsolePanel } from "./ConsolePanel"
 import { Explorer } from "./Explorer"
-import { Header } from "./Header"
+import { Header, type HeaderProps } from "./Header"
 import { Inspector } from "./Inspector"
 
-export function BuilderShell() {
+export interface BuilderShellProps extends HeaderProps {
+  actionCatalogProvider?: ActionCatalogProvider | null
+}
+
+export function BuilderShell(props: BuilderShellProps) {
   const explorerWidth = useUIStore((state) => state.explorerWidth)
   const inspectorWidth = useUIStore((state) => state.inspectorWidth)
   const consoleHeight = useUIStore((state) => state.consoleHeight)
   const explorerCollapsed = useUIStore((state) => state.explorerCollapsed)
   const inspectorCollapsed = useUIStore((state) => state.inspectorCollapsed)
   const consoleCollapsed = useUIStore((state) => state.consoleCollapsed)
+  const definition = useMachineStore((state) => state.document.definition)
+  const unsupportedKinds = useMemo(() => collectUnsupportedWorkflowKinds(definition), [definition])
 
   const resizeExplorer = usePanelResize("explorer")
   const resizeInspector = usePanelResize("inspector")
@@ -29,16 +37,23 @@ export function BuilderShell() {
   }, [explorerCollapsed, explorerWidth, inspectorCollapsed, inspectorWidth])
 
   const rows = useMemo(() => {
+    const unsupportedRow = unsupportedKinds.length > 0 ? "32px" : "0px"
     const consoleRow = consoleCollapsed ? "0px" : `${consoleHeight}px`
     const handle = consoleCollapsed ? "0px" : "6px"
-    return `48px minmax(360px,1fr) ${handle} ${consoleRow}`
-  }, [consoleCollapsed, consoleHeight])
+    return `48px ${unsupportedRow} minmax(360px,1fr) ${handle} ${consoleRow}`
+  }, [consoleCollapsed, consoleHeight, unsupportedKinds.length])
 
   return (
     <div className="fub-root" style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}>
       <div className="fub-slot-header" style={{ gridColumn: "1 / -1" }}>
-        <Header />
+        <Header {...props} />
       </div>
+
+      {unsupportedKinds.length > 0 ? (
+        <div className="fub-guardrail-banner" style={{ gridColumn: "1 / -1" }} role="status" aria-live="polite">
+          Unsupported workflow nodes are read-only: {unsupportedKinds.join(", ")}
+        </div>
+      ) : null}
 
       {!explorerCollapsed ? <Explorer /> : null}
       {!explorerCollapsed ? (
@@ -60,7 +75,7 @@ export function BuilderShell() {
           onPointerDown={resizeInspector}
         />
       ) : null}
-      {!inspectorCollapsed ? <Inspector /> : null}
+      {!inspectorCollapsed ? <Inspector actionCatalogProvider={props.actionCatalogProvider} /> : null}
 
       {!consoleCollapsed ? (
         <div

@@ -50,3 +50,24 @@ export type { BuilderRPCClientOptions } from "./rpc"
 
 export { normalizeRuntimeApplyEvent, normalizeRuntimeSnapshot } from "./normalization/runtime"
 export { createBuilderRuntimeRPC, useRuntimeRPC } from "./hooks/useRPC"
+export type { BuilderRuntimeRPC } from "./hooks/useRPC"
+export { createBuilderAuthoringRPC, useAuthoringRPC } from "./adapters/authoring"
+export type { BuilderAuthoringRPC } from "./adapters/authoring"
+
+export { createLocalStoragePersistenceStore } from "./adapters/persistence"
+export type {
+  MachineDraftSummary,
+  PersistedMachineDraft,
+  PersistenceStore
+} from "./adapters/persistence"
+
+export { createDefaultExportAdapter, definitionFromDraft, isRPCExportAvailable } from "./adapters/export"
+export type { ExportAdapter, ExportRPCResult } from "./adapters/export"
+
+export { createStaticActionCatalogProvider } from "./adapters/actionCatalog"
+export type { ActionCatalogItem, ActionCatalogProvider } from "./adapters/actionCatalog"
+
+export { formatHandledBuilderError, toHandledBuilderError } from "./errorHandling"
+export type { HandledBuilderError } from "./errorHandling"
+
+export { loadDraftDocumentForEditing, prepareDraftDocumentForSave } from "./transforms/roundtrip"

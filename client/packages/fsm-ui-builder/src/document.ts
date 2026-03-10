@@ -6,6 +6,31 @@ import type {
   WorkflowNodeDefinition
 } from "./contracts"
 
+export const SUPPORTED_WORKFLOW_NODE_KINDS = ["step", "when"] as const
+export const UNSUPPORTED_WORKFLOW_NODE_KINDS = ["parallel", "join", "batch", "compensation"] as const
+
+type SupportedWorkflowNodeKind = (typeof SUPPORTED_WORKFLOW_NODE_KINDS)[number]
+
+export function isSupportedWorkflowNodeKind(kind: string): kind is SupportedWorkflowNodeKind {
+  return (SUPPORTED_WORKFLOW_NODE_KINDS as readonly string[]).includes(kind)
+}
+
+export function isExplicitlyUnsupportedWorkflowNodeKind(kind: string): boolean {
+  return (UNSUPPORTED_WORKFLOW_NODE_KINDS as readonly string[]).includes(kind)
+}
+
+export function collectUnsupportedWorkflowKinds(definition: MachineDefinition): string[] {
+  const found = new Set<string>()
+  for (const transition of definition.transitions) {
+    for (const node of transition.workflow?.nodes ?? []) {
+      if (isExplicitlyUnsupportedWorkflowNodeKind(node.kind)) {
+        found.add(node.kind)
+      }
+    }
+  }
+  return [...found]
+}
+
 export function defaultDraftMachineDocument(): DraftMachineDocument {
   const definition: MachineDefinition = {
     id: "machine",
@@ -205,11 +230,14 @@ function validateWorkflowNode(
 ): void {
   const basePath = `$.transitions[${transitionIndex}].workflow.nodes[${nodeIndex}]`
 
-  if (node.kind !== "step" && node.kind !== "when") {
+  if (!isSupportedWorkflowNodeKind(node.kind)) {
+    const unsupported = isExplicitlyUnsupportedWorkflowNodeKind(node.kind)
+      ? `${node.kind} is unsupported in builder v1`
+      : `unsupported workflow node kind ${node.kind}`
     out.push(
       makeDiagnostic({
         code: "FSM002_INVALID_WORKFLOW_NODE",
-        message: `unsupported workflow node kind ${node.kind}`,
+        message: unsupported,
         path: `${basePath}.kind`,
         nodeID: node.id,
         field: "kind"

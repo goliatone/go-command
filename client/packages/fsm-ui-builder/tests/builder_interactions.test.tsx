@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { FSMUIBuilder, mountFSMUIBuilder, type DraftMachineDocument } from "../src"
@@ -29,7 +29,8 @@ function makeDocument(): DraftMachineDocument {
                   action_id: "audit.log",
                   async: false,
                   delay: "",
-                  timeout: ""
+                  timeout: "",
+                  metadata: {}
                 },
                 next: ["when-1"]
               },
@@ -114,6 +115,12 @@ describe("fsm-ui-builder shell and interactions", () => {
     await user.type(actionID, "audit.transition")
     expect(actionID.value).toBe("audit.transition")
 
+    const metadataInput = screen.getByLabelText("Workflow metadata") as HTMLTextAreaElement
+    await user.clear(metadataInput)
+    fireEvent.change(metadataInput, { target: { value: "{\"team\":\"ops\"}" } })
+    fireEvent.blur(metadataInput)
+    expect(metadataInput.value).toContain("\"team\": \"ops\"")
+
     await user.click(within(explorer).getByRole("button", { name: /review -> approved/i }))
     const whenNodeButton = await screen.findByRole("button", { name: /when:amount > 0/i })
     await user.click(whenNodeButton)
@@ -147,6 +154,55 @@ describe("fsm-ui-builder shell and interactions", () => {
 
     expect(screen.getByLabelText("Workflow action id")).toBeTruthy()
     expect(screen.getAllByText("step action_id is required").length).toBeGreaterThan(0)
+  })
+
+  it("preserves static and dynamic transition targets when toggling kind", async () => {
+    const user = userEvent.setup()
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} />)
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /approve -> approved/i }))
+
+    await user.click(screen.getByRole("radio", { name: "Dynamic" }))
+    const resolverInput = screen.getByLabelText("Dynamic resolver") as HTMLInputElement
+    await user.clear(resolverInput)
+    await user.type(resolverInput, "pick_target")
+    expect(resolverInput.value).toBe("pick_target")
+
+    await user.click(screen.getByRole("radio", { name: "Static" }))
+    const staticTarget = screen.getByLabelText("Transition target") as HTMLSelectElement
+    expect(staticTarget.value).toBe("approved")
+
+    await user.click(screen.getByRole("radio", { name: "Dynamic" }))
+    expect((screen.getByLabelText("Dynamic resolver") as HTMLInputElement).value).toBe("pick_target")
+  })
+
+  it("commits step metadata edits into the draft document", async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} onChange={onChange} />)
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /approve -> approved/i }))
+    await user.click(screen.getByRole("button", { name: /step:audit.log/i }))
+
+    const metadataInput = screen.getByLabelText("Workflow metadata") as HTMLTextAreaElement
+    await user.clear(metadataInput)
+    fireEvent.change(metadataInput, { target: { value: "{\"team\":\"ops\",\"risk\":\"high\"}" } })
+    fireEvent.blur(metadataInput)
+
+    await waitFor(() => {
+      const call = onChange.mock.calls.at(-1)?.[0] as
+        | {
+            document: DraftMachineDocument
+          }
+        | undefined
+      const metadata =
+        call?.document.definition.transitions[0]?.workflow.nodes[0]?.step?.metadata as Record<string, unknown> | undefined
+      expect(metadata).toEqual({ team: "ops", risk: "high" })
+    })
   })
 
   it("supports undo/redo and dirty-state tracking", async () => {
