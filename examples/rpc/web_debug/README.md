@@ -15,6 +15,9 @@ Registered methods:
 - `counter.reset` (execute)
 - `counter.snapshot` (query)
 
+This demo intentionally does not register `fsm.*` endpoints or mount the FSM UI Builder assets.
+For builder + authoring/runtime RPC integration, use `examples/fsm_ui_builder_web_chat`.
+
 ## Run
 
 From repository root:
