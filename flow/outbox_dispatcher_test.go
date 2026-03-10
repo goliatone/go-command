@@ -208,6 +208,43 @@ func TestOutboxDispatcherDeadLetterClassification(t *testing.T) {
 	}
 }
 
+func TestOutboxDispatcherReportIncludesEnqueueReceiptMetadata(t *testing.T) {
+	store := NewInMemoryStateStore()
+	err := store.RunInTransaction(context.Background(), func(tx TxStore) error {
+		return tx.AppendOutbox(context.Background(), OutboxEntry{
+			ID:       "outbox-receipt",
+			EntityID: "1",
+			Event:    "approve",
+			Effect:   CommandEffect{ActionID: "ok"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("append outbox failed: %v", err)
+	}
+
+	dispatcher := NewOutboxDispatcher(
+		store,
+		NewInMemoryJobScheduler(),
+		WithOutboxWorkerID("worker-receipt"),
+	)
+	report, runErr := dispatcher.RunOnce(context.Background())
+	if runErr != nil {
+		t.Fatalf("run once failed: %v", runErr)
+	}
+	if len(report.Outcomes) != 1 {
+		t.Fatalf("expected one outcome, got %d", len(report.Outcomes))
+	}
+	if report.Outcomes[0].Metadata == nil {
+		t.Fatalf("expected receipt metadata")
+	}
+	if report.Outcomes[0].Metadata["dispatch_id"] == "" {
+		t.Fatalf("expected dispatch_id metadata")
+	}
+	if _, ok := report.Outcomes[0].Metadata["enqueued_at"]; !ok {
+		t.Fatalf("expected enqueued_at metadata")
+	}
+}
+
 func TestOutboxDispatcherRunStopStatusHealthHooksAndMetrics(t *testing.T) {
 	store := NewInMemoryStateStore()
 	err := store.RunInTransaction(context.Background(), func(tx TxStore) error {
