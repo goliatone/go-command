@@ -136,6 +136,66 @@ machine onboarding version v2 {
 	}
 }
 
+func TestMachineDefinitionFromUISchemaReverseMapsStepMetadata(t *testing.T) {
+	ui := &MachineUISchema{
+		Layout: "graph",
+		Nodes: []StateNodeSchema{
+			{ID: "draft", Initial: true, UI: UIComponent{Component: "state.node"}},
+			{ID: "approved", UI: UIComponent{Component: "state.node"}},
+		},
+		Edges: []TransitionSchema{
+			{
+				ID:    "approve",
+				Event: "approve",
+				From:  "draft",
+				Target: TargetUISchema{
+					Kind: "static",
+					To:   "approved",
+				},
+				Workflow: WorkflowUISchema{
+					Nodes: []WorkflowNodeUISchema{
+						{
+							ID:   "node-1",
+							Kind: "step",
+							Step: &StepUISchema{
+								Type: "command",
+								Properties: map[string]any{
+									"action_id": "publishAudit",
+									"async":     true,
+									"delay":     "1s",
+									"timeout":   "5s",
+									"metadata": map[string]any{
+										"team": "ops",
+										"risk": "high",
+									},
+								},
+								UI: UIComponent{Component: "workflow.step"},
+							},
+							UI: UIComponent{Component: "workflow.node"},
+						},
+					},
+				},
+			},
+		},
+		Inspector: InspectorSchema{},
+	}
+	def := MachineDefinitionFromUISchema(ui, "orders", "v2")
+	if len(def.Transitions) != 1 {
+		t.Fatalf("expected one transition")
+	}
+	nodes := def.Transitions[0].Workflow.Nodes
+	if len(nodes) != 1 || nodes[0].Step == nil {
+		t.Fatalf("expected one workflow step node")
+	}
+	step := nodes[0].Step
+	if step.Metadata == nil {
+		t.Fatalf("expected metadata to be reverse mapped")
+	}
+	if step.Metadata["team"] != "ops" || step.Metadata["risk"] != "high" {
+		t.Fatalf("unexpected metadata payload: %#v", step.Metadata)
+	}
+}
+
 func TestGraphLayoutUnknownFieldPreservation(t *testing.T) {
 	raw := `{"viewport":{"x":0,"y":0,"zoom":1},"nodes":{},"edges":{},"future_field":{"hello":"world"}}`
 	var layout GraphLayout
@@ -151,6 +211,66 @@ func TestGraphLayoutUnknownFieldPreservation(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), "future_field") {
 		t.Fatalf("expected unknown field in marshaled output: %s", string(encoded))
+	}
+}
+
+func TestMachineUISchemaUnknownFieldRoundTripPreservation(t *testing.T) {
+	raw := `{
+		"layout": "graph",
+		"nodes": [{
+			"id": "draft",
+			"label": "Draft",
+			"terminal": false,
+			"ui": {"component":"state.node","vendor_ext":{"s":"1"}},
+			"unknown_node_field": {"k":"v"}
+		}],
+		"edges": [{
+			"id": "approve",
+			"event": "approve",
+			"from": "draft",
+			"target": {"kind":"static","to":"approved","future_target":"x"},
+			"workflow": {
+				"nodes": [{
+					"id":"n1",
+					"kind":"step",
+					"step":{"type":"command","properties":{"action_id":"publishAudit"},"future_step":true},
+					"ui":{"component":"workflow.node"},
+					"future_workflow_node":"z"
+				}],
+				"workflow_future":"y"
+			},
+			"future_edge":{"a":1}
+		}],
+		"inspector": {"sections":[{"id":"machine","label":"Machine","future_section":"ok"}],"future_inspector":"ok"},
+		"graph_layout":{"viewport":{"x":0,"y":0,"zoom":1},"nodes":{},"edges":{},"future_graph_field":"ok"},
+		"future_top_level": {"new":"field"}
+	}`
+	var ui MachineUISchema
+	if err := json.Unmarshal([]byte(raw), &ui); err != nil {
+		t.Fatalf("unmarshal ui schema: %v", err)
+	}
+	ui.Layout = "flow"
+	encoded, err := json.Marshal(ui)
+	if err != nil {
+		t.Fatalf("marshal ui schema: %v", err)
+	}
+	output := string(encoded)
+	for _, token := range []string{
+		"future_top_level",
+		"unknown_node_field",
+		"future_edge",
+		"future_target",
+		"future_workflow_node",
+		"workflow_future",
+		"future_step",
+		"future_section",
+		"future_inspector",
+		"future_graph_field",
+		"vendor_ext",
+	} {
+		if !strings.Contains(output, token) {
+			t.Fatalf("expected unknown field %q to be preserved in %s", token, output)
+		}
 	}
 }
 
