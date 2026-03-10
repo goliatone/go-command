@@ -25,6 +25,56 @@ jobs:
       - name: Unit tests
         run: go test ./...
 
+  builder-delivery:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build core client artifacts
+        run: ./taskfile client:build
+
+      - name: Capture core artifact checksums
+        run: |
+          sha256sum data/client/rpc/index.js \
+            data/client/fsm/index.js \
+            data/client/fsm-rpc/index.js > /tmp/core-assets.before.sha
+
+      - name: Build builder artifacts
+        run: ./taskfile client:build:builder
+
+      - name: Verify builder artifact output
+        run: |
+          test -s data/client-builder/fsm-ui-builder/index.js
+          test -f data/client-builder/fsm-ui-builder/index.css
+
+      - name: Verify core artifacts are unchanged by builder build
+        run: |
+          sha256sum data/client/rpc/index.js \
+            data/client/fsm/index.js \
+            data/client/fsm-rpc/index.js > /tmp/core-assets.after.sha
+          diff -u /tmp/core-assets.before.sha /tmp/core-assets.after.sha
+
+      - name: Run data embed boundary tests
+        run: go test ./data ./data/builder
+
+      - name: Run builder FE interaction/simulation/a11y/responsive suites
+        working-directory: client
+        run: npm run test --workspace packages/fsm-ui-builder
+
   race:
     runs-on: ubuntu-latest
     steps:
