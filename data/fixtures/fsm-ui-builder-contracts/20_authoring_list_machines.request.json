@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-list-1",
+  "method": "fsm.authoring.list_machines",
+  "params": {
+    "data": {
+      "query": "orders",
+      "includeDrafts": true,
+      "limit": 50,
+      "cursor": "cursor-1"
+    },
+    "meta": {
+      "actorId": "dev-1",
+      "tenant": "acme"
+    }
+  }
+}

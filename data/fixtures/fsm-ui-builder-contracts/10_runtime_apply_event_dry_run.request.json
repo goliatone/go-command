@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "id": "runtime-apply-1",
+  "method": "fsm.apply_event",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "entityId": "order-1",
+      "event": "approve",
+      "msg": {
+        "amount": 99
+      },
+      "expectedState": "draft",
+      "expectedVersion": 11,
+      "idempotencyKey": "apply-ord-1-approve",
+      "metadata": {
+        "source": "fsm-ui-builder"
+      },
+      "dryRun": true
+    },
+    "meta": {
+      "actorId": "admin-1",
+      "roles": ["admin"],
+      "tenant": "acme"
+    }
+  }
+}

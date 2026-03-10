@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-delete-1",
+  "result": {
+    "data": {
+      "machineId": "orders",
+      "deleted": true
+    }
+  }
+}

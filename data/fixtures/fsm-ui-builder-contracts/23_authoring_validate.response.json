@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-validate-1",
+  "result": {
+    "data": {
+      "valid": true,
+      "diagnostics": []
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": "err-2",
+  "result": {
+    "error": {
+      "code": "FSM_GUARD_REJECTED",
+      "message": "guard rejected",
+      "category": "bad_input",
+      "retryable": false,
+      "details": {
+        "runtime_code": "FSM_GUARD_REJECTED"
+      }
+    }
+  }
+}

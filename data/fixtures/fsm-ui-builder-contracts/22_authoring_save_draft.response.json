@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-save-1",
+  "result": {
+    "data": {
+      "machineId": "orders",
+      "version": "v13",
+      "draftState": {
+        "is_draft": true,
+        "last_saved_at": "2026-03-10T00:03:00Z"
+      },
+      "diagnostics": [],
+      "etag": "orders-v13"
+    }
+  }
+}

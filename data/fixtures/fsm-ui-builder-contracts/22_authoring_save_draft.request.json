@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-save-1",
+  "method": "fsm.authoring.save_draft",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "baseVersion": "v12",
+      "draft": {
+        "definition": {
+          "id": "orders",
+          "name": "Orders",
+          "version": "v12",
+          "states": [
+            { "name": "draft", "initial": true },
+            { "name": "approved" }
+          ],
+          "transitions": []
+        },
+        "ui_schema": {
+          "layout": "flow",
+          "nodes": [],
+          "edges": [],
+          "inspector": {}
+        },
+        "draft_state": {
+          "is_draft": true,
+          "last_saved_at": "2026-03-10T00:00:00Z"
+        }
+      },
+      "validate": true
+    }
+  }
+}

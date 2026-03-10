@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "method": "fsm.authoring.get_machine",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "preferDraft": true
+    },
+    "meta": {
+      "actorId": "dev-1",
+      "roles": ["admin"],
+      "tenant": "acme",
+      "requestId": "req-1",
+      "correlationId": "corr-1"
+    }
+  }
+}

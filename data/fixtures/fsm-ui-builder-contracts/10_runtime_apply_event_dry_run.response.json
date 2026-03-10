@@ -1,0 +1,68 @@
+{
+  "jsonrpc": "2.0",
+  "id": "runtime-apply-1",
+  "result": {
+    "data": {
+      "EventID": "evt-100",
+      "Version": 12,
+      "Transition": {
+        "PreviousState": "draft",
+        "CurrentState": "approved",
+        "Effects": [
+          {
+            "ActionID": "audit.log",
+            "Payload": {
+              "orderId": "order-1"
+            },
+            "Async": true,
+            "Delay": 250000000,
+            "Timeout": 5000000000
+          }
+        ]
+      },
+      "Snapshot": {
+        "EntityID": "order-1",
+        "CurrentState": "approved",
+        "AllowedTransitions": [
+          {
+            "ID": "fulfill",
+            "Event": "fulfill",
+            "Allowed": true,
+            "Target": {
+              "Kind": "static",
+              "To": "fulfilled",
+              "Resolved": false
+            }
+          },
+          {
+            "ID": "reroute",
+            "Event": "reroute",
+            "Allowed": false,
+            "Target": {
+              "Kind": "dynamic",
+              "Resolver": "resolve_target",
+              "Resolved": false,
+              "Candidates": ["review", "approved"]
+            },
+            "Rejections": [
+              {
+                "Code": "FSM_GUARD_REJECTED",
+                "Category": "bad_input",
+                "Retryable": false,
+                "RequiresAction": true,
+                "Message": "approval threshold exceeded",
+                "RemediationHint": "request manual approval"
+              }
+            ]
+          }
+        ]
+      },
+      "Execution": {
+        "ExecutionID": "exec-1",
+        "Policy": "orchestrated",
+        "Status": "running"
+      },
+      "IdempotencyHit": false
+    }
+  }
+}

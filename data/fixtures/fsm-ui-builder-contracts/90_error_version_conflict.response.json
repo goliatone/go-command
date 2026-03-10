@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": "err-1",
+  "result": {
+    "error": {
+      "code": "FSM_VERSION_CONFLICT",
+      "message": "version conflict",
+      "category": "conflict",
+      "retryable": false,
+      "details": {
+        "runtime_code": "FSM_VERSION_CONFLICT"
+      }
+    }
+  }
+}

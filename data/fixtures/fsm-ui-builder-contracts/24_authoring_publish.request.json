@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-publish-1",
+  "method": "fsm.authoring.publish",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "expectedVersion": "v13"
+    }
+  }
+}

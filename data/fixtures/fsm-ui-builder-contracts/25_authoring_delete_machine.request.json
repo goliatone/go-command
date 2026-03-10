@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-delete-1",
+  "method": "fsm.authoring.delete_machine",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "expectedVersion": "v14",
+      "hardDelete": false
+    }
+  }
+}

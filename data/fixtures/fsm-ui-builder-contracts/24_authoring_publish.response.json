@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-publish-1",
+  "result": {
+    "data": {
+      "machineId": "orders",
+      "version": "v14",
+      "publishedAt": "2026-03-10T00:04:00Z",
+      "diagnostics": []
+    }
+  }
+}

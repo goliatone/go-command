@@ -1,0 +1,47 @@
+{
+  "jsonrpc": "2.0",
+  "id": "runtime-snapshot-1",
+  "result": {
+    "data": {
+      "EntityID": "order-1",
+      "CurrentState": "approved",
+      "AllowedTransitions": [
+        {
+          "ID": "fulfill",
+          "Event": "fulfill",
+          "Allowed": true,
+          "Target": {
+            "Kind": "static",
+            "To": "fulfilled",
+            "Resolved": false
+          }
+        },
+        {
+          "ID": "reroute",
+          "Event": "reroute",
+          "Allowed": false,
+          "Target": {
+            "Kind": "dynamic",
+            "Resolver": "resolve_target",
+            "Resolved": false,
+            "Candidates": ["review", "approved"]
+          },
+          "Rejections": [
+            {
+              "Code": "FSM_GUARD_REJECTED",
+              "Category": "bad_input",
+              "Retryable": false,
+              "RequiresAction": true,
+              "Message": "approval threshold exceeded",
+              "RemediationHint": "request manual approval"
+            }
+          ]
+        }
+      ],
+      "Metadata": {
+        "machine": "orders",
+        "version": "v12"
+      }
+    }
+  }
+}

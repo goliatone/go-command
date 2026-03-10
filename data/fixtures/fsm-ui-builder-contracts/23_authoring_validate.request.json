@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-validate-1",
+  "method": "fsm.authoring.validate",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "scope": {
+        "nodeIds": ["node-approve"]
+      }
+    }
+  }
+}

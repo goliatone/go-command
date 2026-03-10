@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": "err-3",
+  "result": {
+    "error": {
+      "code": "FSM_AUTHORING_NOT_FOUND",
+      "message": "machine not found",
+      "category": "bad_input",
+      "retryable": false,
+      "details": {
+        "machineId": "orders"
+      }
+    }
+  }
+}
