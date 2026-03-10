@@ -57,14 +57,42 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 	ctxOpts, _ := command.DispatchOptionsFromContext(ctx)
 	mergedOpts := mergeDispatchOptions(ctxOpts, opts)
 
-	effectiveMode, err := resolveDispatchMode(ctx, commandID, opts.Mode, ctxOpts.Mode)
+	resolver := getModeResolver()
+	requiresCanonicalForResolution, err := shouldUseCanonicalForResolution(opts.Mode, ctxOpts.Mode, resolver != nil)
 	if err != nil {
 		return command.DispatchReceipt{}, err
+	}
+
+	canonicalID := ""
+	resolveCommandID := commandID
+	if requiresCanonicalForResolution {
+		canonicalID, err = command.CanonicalCommandID(msg)
+		if err != nil {
+			return command.DispatchReceipt{}, err
+		}
+		resolveCommandID = canonicalID
+	}
+
+	effectiveMode, err := resolveDispatchMode(ctx, resolveCommandID, opts.Mode, ctxOpts.Mode)
+	if err != nil {
+		return command.DispatchReceipt{}, err
+	}
+
+	if effectiveMode == command.ExecutionModeQueued {
+		if canonicalID == "" {
+			canonicalID, err = command.CanonicalCommandID(msg)
+			if err != nil {
+				return command.DispatchReceipt{}, err
+			}
+		}
+		commandID = canonicalID
 	}
 
 	if err := command.ValidateDispatchOptions(effectiveMode, mergedOpts); err != nil {
 		return command.DispatchReceipt{}, err
 	}
+
+	mergedOpts.Mode = effectiveMode
 
 	if effectiveMode == command.ExecutionModeQueued {
 		if count := commandHandlerCount(commandID); count > 1 {
@@ -183,11 +211,15 @@ func resolveDispatchMode(
 				})
 		}
 
+		if !found {
+			return command.ExecutionModeInline, nil
+		}
+
 		if mode, ok, err := parseModeCandidate(mode); err != nil {
 			return "", err
 		} else if ok {
 			return mode, nil
-		} else if found {
+		} else {
 			return "", errors.New("invalid execution mode", errors.CategoryValidation).
 				WithTextCode(command.TextCodeInvalidExecutionMode).
 				WithMetadata(map[string]any{
@@ -199,6 +231,26 @@ func resolveDispatchMode(
 	}
 
 	return command.ExecutionModeInline, nil
+}
+
+func shouldUseCanonicalForResolution(
+	explicitMode command.ExecutionMode,
+	contextMode command.ExecutionMode,
+	hasResolver bool,
+) (bool, error) {
+	if mode, ok, err := parseModeCandidate(explicitMode); err != nil {
+		return false, err
+	} else if ok {
+		return mode == command.ExecutionModeQueued, nil
+	}
+
+	if mode, ok, err := parseModeCandidate(contextMode); err != nil {
+		return false, err
+	} else if ok {
+		return mode == command.ExecutionModeQueued, nil
+	}
+
+	return hasResolver, nil
 }
 
 func parseModeCandidate(mode command.ExecutionMode) (command.ExecutionMode, bool, error) {
