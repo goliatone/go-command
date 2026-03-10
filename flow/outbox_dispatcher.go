@@ -17,11 +17,17 @@ type ExecutionMessage struct {
 	CreatedAt time.Time
 }
 
+// EnqueueReceipt captures scheduler acceptance metadata for one dispatched message.
+type EnqueueReceipt struct {
+	DispatchID string
+	EnqueuedAt time.Time
+}
+
 // JobScheduler enqueues execution messages for durable workers.
 type JobScheduler interface {
-	Enqueue(ctx context.Context, msg *ExecutionMessage) error
-	EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) error
-	EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) error
+	Enqueue(ctx context.Context, msg *ExecutionMessage) (EnqueueReceipt, error)
+	EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) (EnqueueReceipt, error)
+	EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) (EnqueueReceipt, error)
 }
 
 // DeadLetterScope constrains dead-letter inspection queries.
@@ -466,7 +472,7 @@ func (d *OutboxDispatcher) RunOnce(ctx context.Context) (DispatchReport, error) 
 			continue
 		}
 
-		enqueueErr := d.enqueueEntry(ctx, msg, entry)
+		enqueueReceipt, enqueueErr := d.enqueueEntry(ctx, msg, entry)
 		if enqueueErr != nil {
 			classified, classErr := d.handleDispatchFailure(ctx, claimed, enqueueErr)
 			logger.Warn("outbox enqueue failed: %v", enqueueErr)
@@ -479,6 +485,15 @@ func (d *OutboxDispatcher) RunOnce(ctx context.Context) (DispatchReport, error) 
 				dispatchErr = enqueueErr
 			}
 			continue
+		}
+		if result.Metadata == nil {
+			result.Metadata = make(map[string]any)
+		}
+		if strings.TrimSpace(enqueueReceipt.DispatchID) != "" {
+			result.Metadata["dispatch_id"] = strings.TrimSpace(enqueueReceipt.DispatchID)
+		}
+		if !enqueueReceipt.EnqueuedAt.IsZero() {
+			result.Metadata["enqueued_at"] = enqueueReceipt.EnqueuedAt.UTC()
 		}
 
 		if err := d.store.MarkCompleted(ctx, entry.ID, claimed.LeaseToken); err != nil {
@@ -737,7 +752,7 @@ func mergeDispatchResult(base DispatchEntryResult, patch DispatchEntryResult) Di
 	return base
 }
 
-func (d *OutboxDispatcher) enqueueEntry(ctx context.Context, msg *ExecutionMessage, entry OutboxEntry) error {
+func (d *OutboxDispatcher) enqueueEntry(ctx context.Context, msg *ExecutionMessage, entry OutboxEntry) (EnqueueReceipt, error) {
 	now := d.now()
 	if !entry.RetryAt.IsZero() && entry.RetryAt.After(now) {
 		return d.scheduler.EnqueueAt(ctx, msg, entry.RetryAt)
@@ -780,6 +795,7 @@ type ScheduledExecutionMessage struct {
 type InMemoryJobScheduler struct {
 	mu        sync.RWMutex
 	enqueued  []ScheduledExecutionMessage
+	counter   int64
 	enqueueFn func(*ExecutionMessage) error
 }
 
@@ -798,15 +814,15 @@ func (s *InMemoryJobScheduler) SetEnqueueHook(fn func(*ExecutionMessage) error) 
 	s.enqueueFn = fn
 }
 
-func (s *InMemoryJobScheduler) Enqueue(ctx context.Context, msg *ExecutionMessage) error {
+func (s *InMemoryJobScheduler) Enqueue(ctx context.Context, msg *ExecutionMessage) (EnqueueReceipt, error) {
 	return s.enqueue(ctx, msg, time.Now().UTC())
 }
 
-func (s *InMemoryJobScheduler) EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) error {
+func (s *InMemoryJobScheduler) EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) (EnqueueReceipt, error) {
 	return s.enqueue(ctx, msg, at.UTC())
 }
 
-func (s *InMemoryJobScheduler) EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) error {
+func (s *InMemoryJobScheduler) EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) (EnqueueReceipt, error) {
 	at := time.Now().UTC()
 	if delay > 0 {
 		at = at.Add(delay)
@@ -814,17 +830,17 @@ func (s *InMemoryJobScheduler) EnqueueAfter(ctx context.Context, msg *ExecutionM
 	return s.enqueue(ctx, msg, at)
 }
 
-func (s *InMemoryJobScheduler) enqueue(ctx context.Context, msg *ExecutionMessage, at time.Time) error {
+func (s *InMemoryJobScheduler) enqueue(ctx context.Context, msg *ExecutionMessage, at time.Time) (EnqueueReceipt, error) {
 	if s == nil {
-		return fmt.Errorf("in-memory scheduler not configured")
+		return EnqueueReceipt{}, fmt.Errorf("in-memory scheduler not configured")
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return EnqueueReceipt{}, ctx.Err()
 	default:
 	}
 	if msg == nil {
-		return fmt.Errorf("execution message required")
+		return EnqueueReceipt{}, fmt.Errorf("execution message required")
 	}
 
 	cp := *msg
@@ -835,14 +851,22 @@ func (s *InMemoryJobScheduler) enqueue(ctx context.Context, msg *ExecutionMessag
 	defer s.mu.Unlock()
 	if s.enqueueFn != nil {
 		if err := s.enqueueFn(&cp); err != nil {
-			return err
+			return EnqueueReceipt{}, err
 		}
+	}
+	s.counter++
+	dispatchID := strings.TrimSpace(cp.ID)
+	if dispatchID == "" {
+		dispatchID = fmt.Sprintf("dispatch-%d", s.counter)
 	}
 	s.enqueued = append(s.enqueued, ScheduledExecutionMessage{
 		Message:   &cp,
 		ExecuteAt: at,
 	})
-	return nil
+	return EnqueueReceipt{
+		DispatchID: dispatchID,
+		EnqueuedAt: at.UTC(),
+	}, nil
 }
 
 // Messages returns a copy of all enqueued messages.
