@@ -53,12 +53,19 @@ func (r *captureResolver) ResolveMode(_ context.Context, commandID string) (comm
 func setupDispatchRoutingTest(t *testing.T) {
 	t.Helper()
 	Reset()
-	setTestMuxes(router.NewMux(), router.NewMux())
+	setTestMuxes(
+		router.NewMux(router.WithMatcher(exactRouteMatcher)),
+		router.NewMux(router.WithMatcher(exactRouteMatcher)),
+	)
 	ExitOnErr = false
 	t.Cleanup(func() {
 		Reset()
 		ExitOnErr = false
 	})
+}
+
+type routingUntypedMessage struct {
+	Value string
 }
 
 func TestDispatchWithExplicitModeWinsOverContextAndResolver(t *testing.T) {
@@ -161,6 +168,26 @@ func TestDispatchWithResolverModeWhenNoExplicitOrContextMode(t *testing.T) {
 	assert.Equal(t, 1, resolver.calls)
 	assert.Equal(t, "routing.dispatch.test", resolver.lastID)
 	assert.Equal(t, command.ExecutionModeQueued, receipt.Mode)
+}
+
+func TestDispatchWithResolverIgnoresModeValueWhenNotFound(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	var inlineCalled bool
+	SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(ctx context.Context, msg routingDispatchMessage) error {
+		inlineCalled = true
+		return nil
+	}))
+
+	SetModeResolver(&captureResolver{
+		mode:  command.ExecutionMode("bad-mode"),
+		found: false,
+	})
+
+	receipt, err := DispatchWith(context.Background(), routingDispatchMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	assert.True(t, inlineCalled)
+	assert.Equal(t, command.ExecutionModeInline, receipt.Mode)
 }
 
 func TestDispatchWithFallsBackToInlineWhenModeMissingEverywhere(t *testing.T) {
@@ -311,6 +338,49 @@ func TestDispatchWithQueuedModeUsesExecutorWhenSingleHandler(t *testing.T) {
 	assert.Equal(t, "corr-queued", receipt.CorrelationID)
 	assert.Equal(t, "dispatch-single", receipt.DispatchID)
 	require.NotNil(t, receipt.EnqueuedAt)
+}
+
+func TestDispatchWithQueuedModeRequiresCanonicalCommandID(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	queuedExec := &captureExecutor{}
+	require.NoError(t, RegisterExecutor(command.ExecutionModeQueued, queuedExec))
+
+	_, err := DispatchWith(context.Background(), routingUntypedMessage{}, command.DispatchOptions{
+		Mode: command.ExecutionModeQueued,
+	})
+	gerr := mustGoError(t, err)
+	assert.Equal(t, command.TextCodeInvalidCommandID, gerr.TextCode)
+	assert.False(t, queuedExec.called)
+}
+
+func TestDispatchWithInlineCompatibilityAllowsNonCanonicalMessage(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	var inlineCalled bool
+	SubscribeCommand(command.CommandFunc[routingUntypedMessage](func(ctx context.Context, msg routingUntypedMessage) error {
+		inlineCalled = true
+		return nil
+	}))
+
+	receipt, err := DispatchWith(context.Background(), routingUntypedMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	assert.True(t, inlineCalled)
+	assert.True(t, receipt.Accepted)
+	assert.Equal(t, command.ExecutionModeInline, receipt.Mode)
+}
+
+func TestDispatchWithResolverPolicyPathRequiresCanonicalCommandID(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	SetModeResolver(&captureResolver{
+		mode:  command.ExecutionModeInline,
+		found: false,
+	})
+
+	_, err := DispatchWith(context.Background(), routingUntypedMessage{}, command.DispatchOptions{})
+	gerr := mustGoError(t, err)
+	assert.Equal(t, command.TextCodeInvalidCommandID, gerr.TextCode)
 }
 
 func TestDispatchWithQueuedExecutorNotConfigured(t *testing.T) {
