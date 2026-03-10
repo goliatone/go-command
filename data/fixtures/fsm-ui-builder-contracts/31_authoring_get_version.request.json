@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-get-version-1",
+  "method": "fsm.authoring.get_version",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "version": "v14"
+    }
+  }
+}

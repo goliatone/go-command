@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-get-large-1",
+  "method": "fsm.authoring.get_machine",
+  "params": {
+    "data": {
+      "machineId": "orders_large",
+      "preferDraft": true
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-save-conflict-1",
+  "result": {
+    "error": {
+      "code": "FSM_VERSION_CONFLICT",
+      "message": "version conflict",
+      "category": "conflict",
+      "retryable": false,
+      "details": {
+        "machineId": "orders",
+        "expectedVersion": "v12",
+        "actualVersion": "v14",
+        "actualEtag": "orders-v14"
+      }
+    }
+  }
+}

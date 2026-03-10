@@ -25,11 +25,11 @@ function a(n, e, t) {
   };
   return e !== void 0 && (s.params = e), t.rpcVersion === "2.0" && (s.jsonrpc = "2.0"), s;
 }
-function d(n) {
+function l(n) {
   return !!n && typeof n == "object" && !Array.isArray(n);
 }
 function h(n, e) {
-  if (!d(e))
+  if (!l(e))
     return e;
   if (e.error)
     throw new c({
@@ -40,9 +40,14 @@ function h(n, e) {
     });
   return "result" in e ? e.result : e;
 }
-class f {
+function p() {
+  if (typeof globalThis.fetch != "function")
+    throw new Error("global fetch is unavailable; provide fetchImpl explicitly");
+  return globalThis.fetch.bind(globalThis);
+}
+class g {
   constructor(e) {
-    this.options = e, this.fetchImpl = e.fetchImpl ?? fetch;
+    this.options = e, this.fetchImpl = e.fetchImpl ?? p();
   }
   fetchImpl;
   async call(e, t) {
@@ -56,7 +61,7 @@ class f {
       body: s
     }), o = await r.json().catch(() => null);
     if (!r.ok)
-      throw d(o) && o.error ? new c({
+      throw l(o) && o.error ? new c({
         method: e,
         message: o.error.message || `rpc call failed (${r.status})`,
         code: o.error.code,
@@ -71,8 +76,8 @@ class f {
     return h(e, o);
   }
 }
-const p = 1;
-class g {
+const f = 1;
+class w {
   constructor(e, t = {}) {
     this.url = e, this.options = t, this.timeoutMs = t.requestTimeoutMs ?? 1e4, this.socketFactory = t.socketFactory ?? ((s, r) => new WebSocket(s, r));
   }
@@ -85,10 +90,10 @@ class g {
     if (await this.ensureConnected(), !this.socket)
       throw new Error("websocket rpc client is not connected");
     const s = a(e, t, this.options), r = new Promise((o, i) => {
-      const l = setTimeout(() => {
+      const d = setTimeout(() => {
         this.pending.delete(s.id), i(new Error(`websocket rpc request timed out (${this.timeoutMs}ms)`));
       }, this.timeoutMs);
-      this.pending.set(s.id, { method: e, resolve: o, reject: i, timeout: l });
+      this.pending.set(s.id, { method: e, resolve: o, reject: i, timeout: d });
     });
     return this.socket.send(JSON.stringify(s)), r;
   }
@@ -96,7 +101,7 @@ class g {
     this.socket?.close(e, t), this.socket = null, this.connectPromise = null;
   }
   async ensureConnected() {
-    if (!(this.socket && this.socket.readyState === p))
+    if (!(this.socket && this.socket.readyState === f))
       return this.connectPromise ? this.connectPromise : (this.connectPromise = new Promise((e, t) => {
         const s = this.socketFactory(this.url, this.options.protocols);
         this.socket = s;
@@ -135,9 +140,9 @@ class g {
 }
 export {
   m as FunctionRPCClient,
-  f as HTTPRPCClient,
+  g as HTTPRPCClient,
   c as RPCClientError,
-  g as WebSocketRPCClient,
+  w as WebSocketRPCClient,
   u as defaultRPCID,
   h as extractRPCResult,
   a as toRPCRequestEnvelope

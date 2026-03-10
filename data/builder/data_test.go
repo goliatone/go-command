@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"bytes"
 	"io/fs"
 	"testing"
 )
@@ -34,5 +35,18 @@ func TestClientFSMUIBuilderFSIsSubRooted(t *testing.T) {
 
 	if _, err := fs.ReadFile(builderFS, "fsm-ui-builder/index.js"); err == nil {
 		t.Fatal("builder fs should be rooted at data/client-builder/fsm-ui-builder")
+	}
+}
+
+func TestClientFSMUIBuilderFSDoesNotExposeRawProcessEnvNodeEnvChecks(t *testing.T) {
+	builderFS := ClientFSMUIBuilderFS()
+
+	content, err := fs.ReadFile(builderFS, "index.js")
+	if err != nil {
+		t.Fatalf("read index.js from builder fs: %v", err)
+	}
+
+	if bytes.Contains(content, []byte("process.env.NODE_ENV")) {
+		t.Fatal("embedded builder index.js still contains raw process.env.NODE_ENV checks")
 	}
 }

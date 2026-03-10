@@ -16,7 +16,7 @@ function y(e, t) {
       return o;
   }
 }
-function m(e, t, n = !1) {
+function h(e, t, n = !1) {
   for (const o of t) {
     const r = e[o];
     if (typeof r == "boolean")
@@ -49,26 +49,26 @@ function v(e) {
   if (typeof e == "number")
     return e / 1e6;
 }
-function R(e) {
+function b(e) {
   return {
     ActorID: e.actorId,
     Roles: [...e.roles],
     Tenant: e.tenant
   };
 }
-function T(e) {
+function g(e) {
   return {
     actorId: e.actorId,
     roles: [...e.roles],
     tenant: e.tenant
   };
 }
-function g(e) {
+function T(e) {
   const t = {
     EntityID: e.entityId,
     Event: e.event,
     Msg: e.payload,
-    ExecCtx: R(e.execCtx)
+    ExecCtx: b(e.execCtx)
   };
   return e.expectedState !== void 0 && (t.ExpectedState = e.expectedState), e.expectedVersion !== void 0 && (t.ExpectedVersion = e.expectedVersion), t;
 }
@@ -80,10 +80,10 @@ function P(e) {
   };
   return e.expectedState !== void 0 && (t.expectedState = e.expectedState), e.expectedVersion !== void 0 && (t.expectedVersion = e.expectedVersion), {
     data: t,
-    meta: T(e.execCtx)
+    meta: g(e.execCtx)
   };
 }
-function F(e) {
+function N(e) {
   const t = i(e) ?? {}, n = S(t, ["roles", "Roles"]) ?? [];
   return {
     actorId: a(t, ["actorId", "ActorID"]),
@@ -91,24 +91,24 @@ function F(e) {
     tenant: a(t, ["tenant", "Tenant"])
   };
 }
-function A(e) {
+function R(e) {
   const t = i(e) ?? {};
   return {
     kind: a(t, ["kind", "Kind"]),
     to: a(t, ["to", "To"]) || void 0,
     resolver: a(t, ["resolver", "Resolver"]) || void 0,
-    resolved: m(t, ["resolved", "Resolved"]),
+    resolved: h(t, ["resolved", "Resolved"]),
     resolvedTo: a(t, ["resolvedTo", "ResolvedTo"]) || void 0,
     candidates: S(t, ["candidates", "Candidates"])
   };
 }
-function b(e) {
+function A(e) {
   const t = i(e) ?? {}, n = t.rejections ?? t.Rejections, o = Array.isArray(n) ? n.map((r) => M(r)) : void 0;
   return {
     id: a(t, ["id", "ID"]),
     event: a(t, ["event", "Event"]),
-    target: A(t.target ?? t.Target),
-    allowed: m(t, ["allowed", "Allowed"], !0),
+    target: R(t.target ?? t.Target),
+    allowed: h(t, ["allowed", "Allowed"], !0),
     rejections: o,
     metadata: u(t, ["metadata", "Metadata"])
   };
@@ -118,8 +118,8 @@ function M(e) {
   return {
     code: a(t, ["code", "Code"]),
     category: a(t, ["category", "Category"]),
-    retryable: m(t, ["retryable", "Retryable"]),
-    requiresAction: m(t, ["requiresAction", "RequiresAction"]),
+    retryable: h(t, ["retryable", "Retryable"]),
+    requiresAction: h(t, ["requiresAction", "RequiresAction"]),
     message: a(t, ["message", "Message"]),
     remediationHint: a(t, ["remediationHint", "RemediationHint"]) || void 0,
     metadata: u(t, ["metadata", "Metadata"])
@@ -128,14 +128,14 @@ function M(e) {
 function C(e) {
   const t = i(e) ?? {}, n = a(t, ["kind", "Kind"]), o = a(t, ["actionId", "ActionID"]);
   if (n === "command" || o !== "") {
-    const s = y(t, ["delayMs", "DelayMs"]), d = y(t, ["timeoutMs", "TimeoutMs"]), c = s ?? v(y(t, ["Delay", "delay"])), l = d ?? v(y(t, ["Timeout", "timeout"])), f = {
+    const s = y(t, ["delayMs", "DelayMs"]), d = y(t, ["timeoutMs", "TimeoutMs"]), c = s ?? v(y(t, ["Delay", "delay"])), l = d ?? v(y(t, ["Timeout", "timeout"])), p = {
       kind: "command",
       actionId: o,
       payload: u(t, ["payload", "Payload"]) ?? {},
-      async: m(t, ["async", "Async"]),
+      async: h(t, ["async", "Async"]),
       metadata: u(t, ["metadata", "Metadata"])
     };
-    return c !== void 0 && (f.delayMs = c), l !== void 0 && (f.timeoutMs = l), f;
+    return c !== void 0 && (p.delayMs = c), l !== void 0 && (p.timeoutMs = l), p;
   }
   return {
     kind: "emit_event",
@@ -152,8 +152,8 @@ function D(e) {
     effects: o
   };
 }
-function p(e) {
-  const t = i(e) ?? {}, n = t.allowedTransitions ?? t.AllowedTransitions, o = Array.isArray(n) ? n.map((r) => b(r)) : [];
+function f(e) {
+  const t = i(e) ?? {}, n = t.allowedTransitions ?? t.AllowedTransitions, o = Array.isArray(n) ? n.map((r) => A(r)) : [];
   return {
     entityId: a(t, ["entityId", "EntityID"]),
     currentState: a(t, ["currentState", "CurrentState"]),
@@ -188,7 +188,7 @@ function k(e) {
     eventId: a(s, ["eventId", "EventID"]),
     version: y(s, ["version", "Version"]) ?? 0,
     transition: D(d),
-    snapshot: p(c),
+    snapshot: f(c),
     execution: l ? j(l) : void 0,
     idempotencyHit: w(s, ["idempotencyHit", "IdempotencyHit"])
   };
@@ -200,7 +200,7 @@ const H = {
 };
 class z {
   constructor(t) {
-    this.options = t, this.snapshotState = p(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? H;
+    this.options = t, this.snapshotState = f(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? H;
   }
   snapshotState;
   defaultExecCtx;
@@ -213,7 +213,7 @@ class z {
       o,
       r
     );
-    return this.snapshotState = p(s.snapshot), s;
+    return this.snapshotState = f(s.snapshot), s;
   }
   get state() {
     return this.snapshotState.currentState;
@@ -222,10 +222,10 @@ class z {
     return this.snapshotState.allowedTransitions;
   }
   get snapshot() {
-    return p(this.snapshotState);
+    return f(this.snapshotState);
   }
   replaceSnapshot(t) {
-    this.snapshotState = p(t);
+    this.snapshotState = f(t);
   }
 }
 const E = "__FSM__";
@@ -249,12 +249,12 @@ function q(e = globalThis) {
   if (!_(n))
     return null;
   try {
-    return p(n);
+    return f(n);
   } catch {
     return null;
   }
 }
-function N(e) {
+function O(e) {
   const t = q(e.scope ?? globalThis);
   return t ? new z({
     machine: e.machine,
@@ -263,33 +263,38 @@ function N(e) {
     defaultExecCtx: e.defaultExecCtx
   }) : null;
 }
-class O {
+function F() {
+  if (typeof globalThis.fetch != "function")
+    throw new Error("global fetch is unavailable; provide fetchImpl explicitly");
+  return globalThis.fetch.bind(globalThis);
+}
+class U {
   constructor(t = {}) {
-    this.options = t, this.fetchImpl = t.fetchImpl ?? fetch, this.endpoint = t.endpoint ?? ((n) => `/fsm/${encodeURIComponent(n)}/apply-event`);
+    this.options = t, this.fetchImpl = t.fetchImpl ?? F(), this.endpoint = t.endpoint ?? ((n) => `/fsm/${encodeURIComponent(n)}/apply-event`);
   }
   fetchImpl;
   endpoint;
   async applyEvent(t, n, o, r, s, d = {}) {
-    const c = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, l = this.options.baseUrl ? new URL(c, this.options.baseUrl).toString() : c, f = g({
+    const c = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, l = this.options.baseUrl ? new URL(c, this.options.baseUrl).toString() : c, p = T({
       entityId: n,
       event: o,
       payload: r,
       execCtx: s,
       expectedState: d.expectedState,
       expectedVersion: d.expectedVersion
-    }), h = await this.fetchImpl(l, {
+    }), m = await this.fetchImpl(l, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...this.options.headers ?? {}
       },
-      body: JSON.stringify(f)
+      body: JSON.stringify(p)
     });
-    if (!h.ok) {
-      const I = await h.text().catch(() => "");
-      throw new Error(`rest applyEvent failed (${h.status}): ${I}`);
+    if (!m.ok) {
+      const I = await m.text().catch(() => "");
+      throw new Error(`rest applyEvent failed (${m.status}): ${I}`);
     }
-    const x = await h.json();
+    const x = await m.json();
     return k(x);
   }
 }
@@ -297,18 +302,18 @@ export {
   z as ClientFSM,
   H as DEFAULT_EXECUTION_CONTEXT,
   E as FSM_HYDRATION_KEY,
-  O as RESTTransport,
-  N as bootstrapClientFSM,
+  U as RESTTransport,
+  O as bootstrapClientFSM,
   k as normalizeApplyEventResponse,
-  F as normalizeExecutionContext,
+  N as normalizeExecutionContext,
   j as normalizeExecutionHandle,
-  p as normalizeSnapshot,
-  A as normalizeTargetInfo,
-  b as normalizeTransitionInfo,
+  f as normalizeSnapshot,
+  R as normalizeTargetInfo,
+  A as normalizeTransitionInfo,
   D as normalizeTransitionResult,
   q as readHydratedSnapshot,
-  g as toWireApplyEventRequest,
-  R as toWireExecutionContext,
+  T as toWireApplyEventRequest,
+  b as toWireExecutionContext,
   P as toWireRPCApplyEventRequest,
-  T as toWireRPCRequestMeta
+  g as toWireRPCRequestMeta
 };

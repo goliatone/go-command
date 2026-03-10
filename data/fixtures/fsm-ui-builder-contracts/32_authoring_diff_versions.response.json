@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-diff-versions-1",
+  "result": {
+    "data": {
+      "machineId": "orders",
+      "baseVersion": "v12",
+      "targetVersion": "v14",
+      "hasConflicts": true,
+      "changes": [
+        {
+          "path": "$.states[2]",
+          "changeType": "added"
+        },
+        {
+          "path": "$.transitions[0].workflow.nodes[1]",
+          "changeType": "added"
+        }
+      ],
+      "conflictPaths": [
+        "$.transitions[0].workflow.nodes[0].step.action_id"
+      ]
+    }
+  }
+}

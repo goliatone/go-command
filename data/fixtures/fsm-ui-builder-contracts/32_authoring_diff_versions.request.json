@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-diff-versions-1",
+  "method": "fsm.authoring.diff_versions",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "baseVersion": "v12",
+      "targetVersion": "v14"
+    }
+  }
+}

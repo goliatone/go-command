@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-list-versions-1",
+  "method": "fsm.authoring.list_versions",
+  "params": {
+    "data": {
+      "machineId": "orders",
+      "limit": 25,
+      "cursor": "cursor-1"
+    }
+  }
+}

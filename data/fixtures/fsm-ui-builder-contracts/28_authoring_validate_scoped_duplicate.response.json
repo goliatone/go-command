@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-validate-scoped-dup-1",
+  "result": {
+    "data": {
+      "valid": false,
+      "diagnostics": [
+        {
+          "code": "FSM003_DUPLICATE_TRANSITION",
+          "severity": "error",
+          "message": "duplicate transition definition for event/from pair",
+          "path": "$.transitions[1]",
+          "node_id": "approve_duplicate"
+        }
+      ]
+    }
+  }
+}

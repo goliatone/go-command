@@ -1,0 +1,53 @@
+{
+  "jsonrpc": "2.0",
+  "id": "authoring-get-version-1",
+  "result": {
+    "data": {
+      "machineId": "orders",
+      "version": "v14",
+      "draft": {
+        "definition": {
+          "id": "orders",
+          "name": "Orders",
+          "version": "v14",
+          "states": [
+            { "name": "draft", "initial": true },
+            { "name": "review" },
+            { "name": "approved" }
+          ],
+          "transitions": [
+            {
+              "id": "submit",
+              "event": "submit",
+              "from": "draft",
+              "to": "review",
+              "workflow": {
+                "nodes": [
+                  {
+                    "id": "step_1",
+                    "kind": "step",
+                    "step": {
+                      "action_id": "audit.submit"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "ui_schema": {
+          "layout": "flow",
+          "nodes": [],
+          "edges": [],
+          "inspector": {}
+        },
+        "draft_state": {
+          "is_draft": true,
+          "last_saved_at": "2026-03-10T00:16:00Z"
+        }
+      },
+      "diagnostics": [],
+      "etag": "orders-v14"
+    }
+  }
+}
