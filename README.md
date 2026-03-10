@@ -262,6 +262,7 @@ For the global registry helpers, use `registry.AddResolver` and `registry.HasRes
 Migration notes:
 
 - If you switch to resolver based queue registration, you must attach the queue resolver or queue registration will not happen.
+- Choose one queue registration path per command (resolver-driven or direct), not both.
 - Queued routing paths should treat duplicate command id registrations as explicit conflicts (no silent no-op shadowing).
 
 See `docs/GUIDE_RESOLVERS.md` for a deeper guide.

@@ -1,5 +1,49 @@
 # Changelog
 
+# [0.19.0](https://github.com/goliatone/go-command/compare/v0.18.0...v0.19.0) - (2026-03-10)
+
+## ⚠️ Breaking
+
+- `flow.JobScheduler` is now receipt-first:
+  - `Enqueue(ctx, msg) (flow.EnqueueReceipt, error)`
+  - `EnqueueAt(ctx, msg, at) (flow.EnqueueReceipt, error)`
+  - `EnqueueAfter(ctx, msg, delay) (flow.EnqueueReceipt, error)`
+- `flow.OutboxDispatcher` now captures enqueue receipt metadata (`dispatch_id`, `enqueued_at`) in dispatch outcomes.
+
+## ➕ Add
+
+- Added cross-repo compatibility task `dev:test:cross` to validate local `go-command` + `go-job` contract alignment.
+
+## 📚 Migration
+
+Before:
+
+```go
+type JobScheduler interface {
+    Enqueue(ctx context.Context, msg *ExecutionMessage) error
+    EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) error
+    EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) error
+}
+```
+
+After:
+
+```go
+type JobScheduler interface {
+    Enqueue(ctx context.Context, msg *ExecutionMessage) (flow.EnqueueReceipt, error)
+    EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) (flow.EnqueueReceipt, error)
+    EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) (flow.EnqueueReceipt, error)
+}
+```
+
+Resolver registration guidance:
+
+```go
+// Use one registration path per command. Duplicate queue command ids fail fast.
+_ = cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry))
+_, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
+```
+
 # [0.18.0](https://github.com/goliatone/go-command/compare/v0.17.0...v0.18.0) - (2026-03-10)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -597,5 +641,4 @@
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-
 
