@@ -1,48 +1,55 @@
-function s(e) {
+function i(e) {
   return e !== null && typeof e == "object" && !Array.isArray(e) ? e : null;
 }
-function a(e, t, o = "") {
-  for (const n of t) {
-    const r = e[n];
+function a(e, t, n = "") {
+  for (const o of t) {
+    const r = e[o];
     if (typeof r == "string")
       return r;
   }
-  return o;
+  return n;
 }
-function h(e, t) {
-  for (const o of t) {
-    const n = e[o];
-    if (typeof n == "number" && Number.isFinite(n))
-      return n;
+function y(e, t) {
+  for (const n of t) {
+    const o = e[n];
+    if (typeof o == "number" && Number.isFinite(o))
+      return o;
   }
 }
-function S(e, t, o = !1) {
-  for (const n of t) {
-    const r = e[n];
+function m(e, t, n = !1) {
+  for (const o of t) {
+    const r = e[o];
     if (typeof r == "boolean")
       return r;
   }
-  return o;
+  return n;
 }
-function E(e, t) {
-  for (const o of t) {
-    const n = e[o];
-    if (Array.isArray(n))
-      return n.filter((r) => typeof r == "string");
+function w(e, t) {
+  for (const n of t) {
+    const o = e[n];
+    if (typeof o == "boolean")
+      return o;
   }
 }
-function l(e, t) {
-  for (const o of t) {
-    const n = e[o], r = s(n);
+function S(e, t) {
+  for (const n of t) {
+    const o = e[n];
+    if (Array.isArray(o))
+      return o.filter((r) => typeof r == "string");
+  }
+}
+function u(e, t) {
+  for (const n of t) {
+    const o = e[n], r = i(o);
     if (r)
       return { ...r };
   }
 }
-function m(e) {
+function v(e) {
   if (typeof e == "number")
     return e / 1e6;
 }
-function w(e) {
+function R(e) {
   return {
     ActorID: e.actorId,
     Roles: [...e.roles],
@@ -61,7 +68,7 @@ function g(e) {
     EntityID: e.entityId,
     Event: e.event,
     Msg: e.payload,
-    ExecCtx: w(e.execCtx)
+    ExecCtx: R(e.execCtx)
   };
   return e.expectedState !== void 0 && (t.ExpectedState = e.expectedState), e.expectedVersion !== void 0 && (t.ExpectedVersion = e.expectedVersion), t;
 }
@@ -77,116 +84,136 @@ function P(e) {
   };
 }
 function F(e) {
-  const t = s(e) ?? {}, o = E(t, ["roles", "Roles"]) ?? [];
+  const t = i(e) ?? {}, n = S(t, ["roles", "Roles"]) ?? [];
   return {
     actorId: a(t, ["actorId", "ActorID"]),
-    roles: o,
+    roles: n,
     tenant: a(t, ["tenant", "Tenant"])
   };
 }
 function A(e) {
-  const t = s(e) ?? {};
+  const t = i(e) ?? {};
   return {
     kind: a(t, ["kind", "Kind"]),
     to: a(t, ["to", "To"]) || void 0,
     resolver: a(t, ["resolver", "Resolver"]) || void 0,
-    resolved: S(t, ["resolved", "Resolved"]),
+    resolved: m(t, ["resolved", "Resolved"]),
     resolvedTo: a(t, ["resolvedTo", "ResolvedTo"]) || void 0,
-    candidates: E(t, ["candidates", "Candidates"])
+    candidates: S(t, ["candidates", "Candidates"])
   };
 }
 function b(e) {
-  const t = s(e) ?? {};
+  const t = i(e) ?? {}, n = t.rejections ?? t.Rejections, o = Array.isArray(n) ? n.map((r) => M(r)) : void 0;
   return {
     id: a(t, ["id", "ID"]),
     event: a(t, ["event", "Event"]),
     target: A(t.target ?? t.Target),
-    metadata: l(t, ["metadata", "Metadata"])
+    allowed: m(t, ["allowed", "Allowed"], !0),
+    rejections: o,
+    metadata: u(t, ["metadata", "Metadata"])
   };
 }
-function R(e) {
-  const t = s(e) ?? {}, o = a(t, ["kind", "Kind"]), n = a(t, ["actionId", "ActionID"]);
-  if (o === "command" || n !== "") {
-    const i = h(t, ["delayMs", "DelayMs"]), c = h(t, ["timeoutMs", "TimeoutMs"]), u = i ?? m(h(t, ["Delay", "delay"])), p = c ?? m(h(t, ["Timeout", "timeout"])), f = {
+function M(e) {
+  const t = i(e) ?? {};
+  return {
+    code: a(t, ["code", "Code"]),
+    category: a(t, ["category", "Category"]),
+    retryable: m(t, ["retryable", "Retryable"]),
+    requiresAction: m(t, ["requiresAction", "RequiresAction"]),
+    message: a(t, ["message", "Message"]),
+    remediationHint: a(t, ["remediationHint", "RemediationHint"]) || void 0,
+    metadata: u(t, ["metadata", "Metadata"])
+  };
+}
+function C(e) {
+  const t = i(e) ?? {}, n = a(t, ["kind", "Kind"]), o = a(t, ["actionId", "ActionID"]);
+  if (n === "command" || o !== "") {
+    const s = y(t, ["delayMs", "DelayMs"]), d = y(t, ["timeoutMs", "TimeoutMs"]), c = s ?? v(y(t, ["Delay", "delay"])), l = d ?? v(y(t, ["Timeout", "timeout"])), f = {
       kind: "command",
-      actionId: n,
-      payload: l(t, ["payload", "Payload"]) ?? {},
-      async: S(t, ["async", "Async"]),
-      metadata: l(t, ["metadata", "Metadata"])
+      actionId: o,
+      payload: u(t, ["payload", "Payload"]) ?? {},
+      async: m(t, ["async", "Async"]),
+      metadata: u(t, ["metadata", "Metadata"])
     };
-    return u !== void 0 && (f.delayMs = u), p !== void 0 && (f.timeoutMs = p), f;
+    return c !== void 0 && (f.delayMs = c), l !== void 0 && (f.timeoutMs = l), f;
   }
   return {
     kind: "emit_event",
     event: a(t, ["event", "Event"]),
     msg: t.msg ?? t.Msg,
-    metadata: l(t, ["metadata", "Metadata"])
+    metadata: u(t, ["metadata", "Metadata"])
   };
 }
-function M(e) {
-  const t = s(e) ?? {}, o = t.effects ?? t.Effects, n = Array.isArray(o) ? o.map((r) => R(r)) : [];
+function D(e) {
+  const t = i(e) ?? {}, n = t.effects ?? t.Effects, o = Array.isArray(n) ? n.map((r) => C(r)) : [];
   return {
     previousState: a(t, ["previousState", "PreviousState"]),
     currentState: a(t, ["currentState", "CurrentState"]),
-    effects: n
+    effects: o
   };
 }
-function d(e) {
-  const t = s(e) ?? {}, o = t.allowedTransitions ?? t.AllowedTransitions, n = Array.isArray(o) ? o.map((r) => b(r)) : [];
+function p(e) {
+  const t = i(e) ?? {}, n = t.allowedTransitions ?? t.AllowedTransitions, o = Array.isArray(n) ? n.map((r) => b(r)) : [];
   return {
     entityId: a(t, ["entityId", "EntityID"]),
     currentState: a(t, ["currentState", "CurrentState"]),
-    allowedTransitions: n,
-    metadata: l(t, ["metadata", "Metadata"])
+    allowedTransitions: o,
+    metadata: u(t, ["metadata", "Metadata"])
   };
 }
-function C(e) {
-  const t = s(e) ?? {};
+function j(e) {
+  const t = i(e) ?? {};
   return {
     executionId: a(t, ["executionId", "ExecutionID"]),
     policy: a(t, ["policy", "Policy"]) || void 0,
     status: a(t, ["status", "Status"]),
-    metadata: l(t, ["metadata", "Metadata"])
+    metadata: u(t, ["metadata", "Metadata"])
   };
 }
-function D(e) {
-  const t = s(e);
+function k(e) {
+  const t = i(e);
   if (t && (t.error ?? t.Error))
     throw new Error("rpc apply event response contains error envelope");
-  const n = (t ? s(t.data ?? t.Data) : null) ?? t;
-  if (!n)
+  const n = t ? i(t.result ?? t.Result) : null;
+  if (n && (n.error ?? n.Error))
+    throw new Error("rpc apply event response contains result error envelope");
+  const o = t ? i(t.data ?? t.Data) : null, r = n ? i(n.data ?? n.Data) : null, s = o ?? r ?? n ?? t;
+  if (!s)
     throw new Error("invalid apply event response: expected object envelope");
-  const r = n.transition ?? n.Transition, i = n.snapshot ?? n.Snapshot;
-  if (!r || !i)
+  const d = s.transition ?? s.Transition, c = s.snapshot ?? s.Snapshot;
+  if (!d || !c)
     throw new Error("invalid apply event response: transition and snapshot are required");
-  const c = n.execution ?? n.Execution;
+  const l = s.execution ?? s.Execution;
   return {
-    transition: M(r),
-    snapshot: d(i),
-    execution: c ? C(c) : void 0
+    eventId: a(s, ["eventId", "EventID"]),
+    version: y(s, ["version", "Version"]) ?? 0,
+    transition: D(d),
+    snapshot: p(c),
+    execution: l ? j(l) : void 0,
+    idempotencyHit: w(s, ["idempotencyHit", "IdempotencyHit"])
   };
 }
-const k = {
+const H = {
   actorId: "anonymous",
   roles: [],
   tenant: "default"
 };
-class j {
+class z {
   constructor(t) {
-    this.options = t, this.snapshotState = d(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? k;
+    this.options = t, this.snapshotState = p(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? H;
   }
   snapshotState;
   defaultExecCtx;
-  async dispatch(t, o = {}, n = this.defaultExecCtx, r = {}) {
-    const i = await this.options.transport.applyEvent(
+  async dispatch(t, n = {}, o = this.defaultExecCtx, r = {}) {
+    const s = await this.options.transport.applyEvent(
       this.options.machine,
       this.snapshotState.entityId,
       t,
-      o,
       n,
+      o,
       r
     );
-    return this.snapshotState = d(i.snapshot), i;
+    return this.snapshotState = p(s.snapshot), s;
   }
   get state() {
     return this.snapshotState.currentState;
@@ -195,62 +222,62 @@ class j {
     return this.snapshotState.allowedTransitions;
   }
   get snapshot() {
-    return d(this.snapshotState);
+    return p(this.snapshotState);
   }
   replaceSnapshot(t) {
-    this.snapshotState = d(t);
+    this.snapshotState = p(t);
   }
 }
-const v = "__FSM__";
-function _(e) {
+const E = "__FSM__";
+function V(e) {
   if (!e || typeof e != "object")
     return null;
   const t = e;
   return t.window && typeof t.window == "object" ? t.window : t;
 }
-function z(e) {
+function _(e) {
   if (!e || typeof e != "object" || Array.isArray(e))
     return !1;
-  const t = e, o = typeof t.entityId == "string" || typeof t.EntityID == "string", n = typeof t.currentState == "string" || typeof t.CurrentState == "string", r = t.allowedTransitions ?? t.AllowedTransitions;
-  return o && n && Array.isArray(r);
+  const t = e, n = typeof t.entityId == "string" || typeof t.EntityID == "string", o = typeof t.currentState == "string" || typeof t.CurrentState == "string", r = t.allowedTransitions ?? t.AllowedTransitions;
+  return n && o && Array.isArray(r);
 }
-function V(e = globalThis) {
-  const t = _(e);
-  if (!t || !(v in t))
+function q(e = globalThis) {
+  const t = V(e);
+  if (!t || !(E in t))
     return null;
-  const o = t[v];
-  if (!z(o))
+  const n = t[E];
+  if (!_(n))
     return null;
   try {
-    return d(o);
+    return p(n);
   } catch {
     return null;
   }
 }
 function N(e) {
-  const t = V(e.scope ?? globalThis);
-  return t ? new j({
+  const t = q(e.scope ?? globalThis);
+  return t ? new z({
     machine: e.machine,
     snapshot: t,
     transport: e.transport,
     defaultExecCtx: e.defaultExecCtx
   }) : null;
 }
-class U {
+class O {
   constructor(t = {}) {
-    this.options = t, this.fetchImpl = t.fetchImpl ?? fetch, this.endpoint = t.endpoint ?? ((o) => `/fsm/${encodeURIComponent(o)}/apply-event`);
+    this.options = t, this.fetchImpl = t.fetchImpl ?? fetch, this.endpoint = t.endpoint ?? ((n) => `/fsm/${encodeURIComponent(n)}/apply-event`);
   }
   fetchImpl;
   endpoint;
-  async applyEvent(t, o, n, r, i, c = {}) {
-    const u = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, p = this.options.baseUrl ? new URL(u, this.options.baseUrl).toString() : u, f = g({
-      entityId: o,
-      event: n,
+  async applyEvent(t, n, o, r, s, d = {}) {
+    const c = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, l = this.options.baseUrl ? new URL(c, this.options.baseUrl).toString() : c, f = g({
+      entityId: n,
+      event: o,
       payload: r,
-      execCtx: i,
-      expectedState: c.expectedState,
-      expectedVersion: c.expectedVersion
-    }), y = await this.fetchImpl(p, {
+      execCtx: s,
+      expectedState: d.expectedState,
+      expectedVersion: d.expectedVersion
+    }), h = await this.fetchImpl(l, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -258,30 +285,30 @@ class U {
       },
       body: JSON.stringify(f)
     });
-    if (!y.ok) {
-      const I = await y.text().catch(() => "");
-      throw new Error(`rest applyEvent failed (${y.status}): ${I}`);
+    if (!h.ok) {
+      const I = await h.text().catch(() => "");
+      throw new Error(`rest applyEvent failed (${h.status}): ${I}`);
     }
-    const x = await y.json();
-    return D(x);
+    const x = await h.json();
+    return k(x);
   }
 }
 export {
-  j as ClientFSM,
-  k as DEFAULT_EXECUTION_CONTEXT,
-  v as FSM_HYDRATION_KEY,
-  U as RESTTransport,
+  z as ClientFSM,
+  H as DEFAULT_EXECUTION_CONTEXT,
+  E as FSM_HYDRATION_KEY,
+  O as RESTTransport,
   N as bootstrapClientFSM,
-  D as normalizeApplyEventResponse,
+  k as normalizeApplyEventResponse,
   F as normalizeExecutionContext,
-  C as normalizeExecutionHandle,
-  d as normalizeSnapshot,
+  j as normalizeExecutionHandle,
+  p as normalizeSnapshot,
   A as normalizeTargetInfo,
   b as normalizeTransitionInfo,
-  M as normalizeTransitionResult,
-  V as readHydratedSnapshot,
+  D as normalizeTransitionResult,
+  q as readHydratedSnapshot,
   g as toWireApplyEventRequest,
-  w as toWireExecutionContext,
+  R as toWireExecutionContext,
   P as toWireRPCApplyEventRequest,
   T as toWireRPCRequestMeta
 };
