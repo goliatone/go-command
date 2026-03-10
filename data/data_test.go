@@ -64,3 +64,11 @@ func TestClientFSMRPCFSIsSubRooted(t *testing.T) {
 		t.Fatal("fsm-rpc fs should be rooted at data/client/fsm-rpc (unexpected nested fsm-rpc/ path)")
 	}
 }
+
+func TestClientFSExcludesBuilderArtifacts(t *testing.T) {
+	clientFS := ClientFS()
+
+	if _, err := fs.ReadFile(clientFS, "client-builder/fsm-ui-builder/index.js"); err == nil {
+		t.Fatal("data client fs should not expose builder artifacts")
+	}
+}
