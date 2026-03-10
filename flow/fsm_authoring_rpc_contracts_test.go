@@ -18,6 +18,7 @@ func TestFSMAuthoringMethodConstants(t *testing.T) {
 	assert.Equal(t, "fsm.authoring.validate", FSMRPCMethodAuthoringValidate)
 	assert.Equal(t, "fsm.authoring.publish", FSMRPCMethodAuthoringPublish)
 	assert.Equal(t, "fsm.authoring.delete_machine", FSMRPCMethodAuthoringDeleteMachine)
+	assert.Equal(t, "fsm.authoring.export", FSMRPCMethodAuthoringExport)
 }
 
 func TestFSMAuthoringListMachinesEnvelopeJSONShape(t *testing.T) {

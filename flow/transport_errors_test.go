@@ -38,6 +38,20 @@ func TestMapRuntimeErrorCategories(t *testing.T) {
 			rpcCode:    ErrCodeStateNotFound,
 		},
 		{
+			name:       "authoring not found",
+			err:        cloneRuntimeError(ErrAuthoringNotFound, "machine not found", nil, nil),
+			httpStatus: 404,
+			grpcCode:   GRPCCodeNotFound,
+			rpcCode:    ErrCodeAuthoringNotFound,
+		},
+		{
+			name:       "authoring validation failed",
+			err:        cloneRuntimeError(ErrAuthoringValidationFailed, "publish blocked by diagnostics", nil, nil),
+			httpStatus: 412,
+			grpcCode:   GRPCCodeFailedPrecondition,
+			rpcCode:    ErrCodeAuthoringValidationFailed,
+		},
+		{
 			name:       "version conflict",
 			err:        cloneRuntimeError(ErrVersionConflict, "conflict", nil, nil),
 			httpStatus: 409,
