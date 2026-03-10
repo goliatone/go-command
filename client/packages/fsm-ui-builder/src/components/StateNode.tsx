@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion"
 
 export interface StateNodeData extends Record<string, unknown> {
   name: string
@@ -7,6 +8,7 @@ export interface StateNodeData extends Record<string, unknown> {
   terminal?: boolean
   stateIndex: number
   transitionCount?: number
+  simulationRole?: "current" | "projected" | "current-projected"
 }
 
 // SVG Icons for node types
@@ -54,7 +56,8 @@ function CircleIcon() {
 
 function StateNodeComponent({ data, selected }: NodeProps) {
   const nodeData = data as StateNodeData
-  const { name, initial, terminal, transitionCount } = nodeData
+  const { name, initial, terminal, transitionCount, simulationRole } = nodeData
+  const prefersReducedMotion = usePrefersReducedMotion()
 
   const getNodeType = (): "initial" | "terminal" | "regular" => {
     if (initial) return "initial"
@@ -76,9 +79,21 @@ function StateNodeComponent({ data, selected }: NodeProps) {
     return <CircleIcon />
   }
 
+  const simulationBadgeText =
+    simulationRole === "current-projected"
+      ? "Current + Projected"
+      : simulationRole === "current"
+        ? "Current"
+        : simulationRole === "projected"
+          ? "Projected"
+          : null
+
+  const animationClass = selected && !prefersReducedMotion ? " fub-node--selected-animated" : ""
+  const simulationClass = simulationRole ? ` fub-node--simulation-${simulationRole}` : ""
+
   return (
     <div
-      className={`fub-node fub-node--${nodeType}${selected ? " fub-node--selected" : ""}`}
+      className={`fub-node fub-node--${nodeType}${selected ? " fub-node--selected" : ""}${animationClass}${simulationClass}`}
       data-node-type={nodeType}
     >
       {/* Target handle (input) - top */}
@@ -98,6 +113,7 @@ function StateNodeComponent({ data, selected }: NodeProps) {
 
       {/* Node body with metadata */}
       <div className="fub-node-body">
+        {simulationBadgeText ? <div className="fub-node-sim-pill">{simulationBadgeText}</div> : null}
         {transitionCount !== undefined && transitionCount > 0 ? (
           <div className="fub-node-meta">
             <span className="fub-node-meta-item">

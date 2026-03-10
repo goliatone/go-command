@@ -59,6 +59,7 @@ export function BuilderShell(props: BuilderShellProps) {
   const simulationLog = useSimulationStore((state) => state.log)
   const simulationErrors = useSimulationStore((state) => state.errors)
   const projectedOutcome = useSimulationStore((state) => state.projectedOutcome)
+  const snapshotResult = useSimulationStore((state) => state.snapshotResult)
   const unsupportedKinds = useMemo(() => collectUnsupportedWorkflowKinds(definition), [definition])
   const viewportMode = useViewportMode()
   const readOnly = viewportMode === "mobile-readonly"
@@ -183,11 +184,12 @@ export function BuilderShell(props: BuilderShellProps) {
     const latestLog = simulationLog.at(-1)
     return latestLog?.message ?? "Simulation idle."
   }, [projectedOutcome, simulationErrors, simulationLog])
+  const simulationModeActive = Boolean(projectedOutcome || snapshotResult)
 
   if (viewportMode === "mobile-readonly") {
     return (
       <>
-        <div className="fub-root fub-root-mobile" data-theme={theme}>
+        <div className={`fub-root fub-root-mobile${simulationModeActive ? " fub-shell--simulation" : ""}`} data-theme={theme}>
           <div className="fub-slot-header">
             <Header {...props} readOnly onPanelToggle={onPanelToggle} />
           </div>
@@ -251,7 +253,11 @@ export function BuilderShell(props: BuilderShellProps) {
 
   return (
     <>
-      <div className="fub-root" data-theme={theme} style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}>
+      <div
+        className={`fub-root${simulationModeActive ? " fub-shell--simulation" : ""}`}
+        data-theme={theme}
+        style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}
+      >
         {/* Row 1: Header - spans all columns */}
         <div className="fub-slot-header" style={{ gridColumn: "1 / -1", gridRow: 1 }}>
           <Header {...props} readOnly={false} onPanelToggle={onPanelToggle} />

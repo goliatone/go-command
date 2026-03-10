@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { FSMUIBuilder, mountFSMUIBuilder, type DraftMachineDocument } from "../src"
+import { FSMUIBuilder, createStaticActionCatalogProvider, mountFSMUIBuilder, type DraftMachineDocument } from "../src"
 
 function makeDocument(): DraftMachineDocument {
   return {
@@ -150,6 +150,49 @@ describe("fsm-ui-builder shell and interactions", () => {
     await user.clear(whenExpr)
     await user.type(whenExpr, "amount > 10")
     expect(whenExpr.value).toBe("amount > 10")
+  })
+
+  it("uses searchable keyboard-accessible action catalog dropdown", async () => {
+    const user = userEvent.setup()
+    const actionCatalogProvider = createStaticActionCatalogProvider([
+      {
+        id: "audit.log",
+        label: "Audit Log",
+        description: "Persist machine audit entry",
+        metadata: {
+          tags: ["audit", "ops"]
+        }
+      },
+      {
+        id: "notify.slack",
+        label: "Slack Notify",
+        description: "Send Slack notification",
+        metadata: {
+          tags: ["notify", "chatops"]
+        }
+      }
+    ])
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} actionCatalogProvider={actionCatalogProvider} />)
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /approve -> approved/i }))
+    await user.click(screen.getByRole("button", { name: /step:audit.log/i }))
+
+    const actionInput = screen.getByRole("combobox", { name: "Workflow action id" }) as HTMLInputElement
+    await user.clear(actionInput)
+    await user.type(actionInput, "notify")
+
+    const listbox = await screen.findByRole("listbox")
+    expect(within(listbox).getByText("Send Slack notification")).toBeTruthy()
+    expect(within(listbox).getByText("notify, chatops")).toBeTruthy()
+
+    fireEvent.keyDown(actionInput, { key: "ArrowDown" })
+    fireEvent.keyDown(actionInput, { key: "Enter" })
+
+    expect((screen.getByRole("combobox", { name: "Workflow action id" }) as HTMLInputElement).value).toBe(
+      "notify.slack"
+    )
   })
 
   it("maps diagnostics from console to inspector selection", async () => {

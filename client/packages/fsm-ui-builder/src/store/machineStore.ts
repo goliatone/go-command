@@ -17,6 +17,13 @@ import {
   type Selection,
   validateDefinition
 } from "../document"
+import {
+  readGraphNodePositions,
+  reindexGraphNodePositionsAfterStateRemoval,
+  stableStateNodeID,
+  withGraphNodePositions,
+  type GraphNodePosition
+} from "../utils/graphLayout"
 
 interface HistoryEntry {
   document: DraftMachineDocument
@@ -69,6 +76,7 @@ export interface MachineStoreState {
     value: string | boolean
   ): void
   updateWorkflowNodeMetadata(transitionIndex: number, nodeIndex: number, metadata: Record<string, unknown>): void
+  setGraphNodePosition(stateIndex: number, position: GraphNodePosition): void
   undo(): void
   redo(): void
   markSaved(): void
@@ -256,6 +264,19 @@ function buildDefaultWorkflowNode(kind: "step" | "when", index: number): Workflo
   }
 }
 
+function setGraphNodePositionForState(
+  document: DraftMachineDocument,
+  stateIndex: number,
+  position: GraphNodePosition
+): void {
+  const positions = readGraphNodePositions(document.ui_schema)
+  positions[stableStateNodeID(stateIndex)] = {
+    x: position.x,
+    y: position.y
+  }
+  document.ui_schema = withGraphNodePositions(document.ui_schema, positions)
+}
+
 export function createMachineStore(input: CreateMachineStoreInput = {}): MachineStore {
   const initialDocument = deepClone(input.document ?? defaultDraftMachineDocument())
   const initialSelection: Selection = { kind: "machine" }
@@ -365,6 +386,9 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
               }
             })
           }
+          const positions = readGraphNodePositions(document.ui_schema)
+          const reindexedPositions = reindexGraphNodePositionsAfterStateRemoval(positions, stateIndex)
+          document.ui_schema = withGraphNodePositions(document.ui_schema, reindexedPositions)
         },
         (document, state) => {
           if (document.definition.states.length === 0) {
@@ -649,6 +673,15 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
           metadata: {}
         }
         node.step.metadata = deepClone(metadata)
+      })
+    },
+    setGraphNodePosition(stateIndex, position) {
+      commitTransaction(store, "set-graph-node-position", (document) => {
+        const state = document.definition.states[stateIndex]
+        if (!state) {
+          return
+        }
+        setGraphNodePositionForState(document, stateIndex, position)
       })
     },
     undo() {

@@ -88,6 +88,7 @@
 .fub-root {
   display: grid;
   width: 100%;
+  height: 100%;
   min-height: 720px;
   background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
   color: var(--fub-text);
@@ -99,6 +100,10 @@
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.fub-shell--simulation {
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--fub-accent) 22%, transparent);
 }
 
 .fub-root-mobile {
@@ -528,6 +533,11 @@
   color: var(--fub-accent);
 }
 
+.fub-badge-simulation {
+  background: color-mix(in oklab, var(--fub-accent) 10%, var(--fub-bg-2));
+  border-color: color-mix(in oklab, var(--fub-accent) 38%, var(--fub-border));
+}
+
 /* ============================================
    Panel Styles
    ============================================ */
@@ -762,6 +772,64 @@ kbd {
   flex-direction: column;
   gap: var(--fub-space-2);
   margin-bottom: var(--fub-space-3);
+}
+
+.fub-action-catalog {
+  position: relative;
+}
+
+.fub-action-catalog-listbox {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: var(--fub-space-1);
+  max-height: 220px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-md);
+  background: var(--fub-bg-2);
+  box-shadow: var(--fub-shadow-md);
+}
+
+.fub-action-catalog-option {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--fub-radius-sm);
+  background: transparent;
+  color: var(--fub-text);
+  text-align: left;
+  padding: var(--fub-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--fub-space-1);
+  cursor: pointer;
+}
+
+.fub-action-catalog-option:hover,
+.fub-action-catalog-option.is-active {
+  border-color: color-mix(in oklab, var(--fub-accent) 30%, var(--fub-border));
+  background: color-mix(in oklab, var(--fub-accent) 10%, var(--fub-bg-2));
+}
+
+.fub-action-catalog-option-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fub-space-2);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.fub-action-catalog-option-title code {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+.fub-action-catalog-option-tags {
+  color: var(--fub-text-muted);
+  font-size: 0.72rem;
 }
 
 .fub-checkbox-row {
@@ -1108,6 +1176,49 @@ kbd {
   border-color: var(--fub-accent);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--fub-accent) 20%, transparent),
               var(--fub-shadow-md);
+}
+
+.fub-node--selected-animated {
+  animation: fub-node-select-pop var(--fub-transition-normal) ease-out;
+}
+
+@keyframes fub-node-select-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.fub-node-sim-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--fub-accent) 30%, var(--fub-border));
+  background: color-mix(in oklab, var(--fub-accent) 10%, var(--fub-bg-2));
+  color: var(--fub-accent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: var(--fub-space-2);
+}
+
+.fub-node--simulation-current .fub-node-header {
+  border-bottom-color: color-mix(in oklab, var(--fub-accent) 45%, var(--fub-border));
+}
+
+.fub-node--simulation-projected .fub-node-header {
+  border-bottom-color: color-mix(in oklab, var(--fub-success) 45%, var(--fub-border));
+}
+
+.fub-node--simulation-current-projected .fub-node-header {
+  border-bottom-color: color-mix(in oklab, var(--fub-accent) 35%, var(--fub-success));
 }
 
 /* Node header with type-based accent */
@@ -1801,6 +1912,14 @@ kbd {
   animation: fub-pulse-border 1.5s ease-in-out infinite;
 }
 
+.fub-canvas--simulation .fub-panel-header {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--fub-accent) 9%, var(--fub-bg-1)) 0%,
+    color-mix(in oklab, var(--fub-success) 7%, var(--fub-bg-1)) 100%
+  );
+}
+
 @keyframes fub-pulse-border {
   0%, 100% {
     opacity: 0.6;
@@ -1861,6 +1980,22 @@ kbd {
 .fub-root[data-theme="dark"] .fub-empty-state,
 .fub-root.fub-theme-dark .fub-empty-state {
   background: color-mix(in oklab, var(--fub-bg-2) 76%, black);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fub-root *,
+  .fub-root *::before,
+  .fub-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .fub-node:hover,
+  .fub-palette-item:hover {
+    transform: none;
+  }
 }
 
 .fub-root[data-theme="dark"] .fub-state-card,

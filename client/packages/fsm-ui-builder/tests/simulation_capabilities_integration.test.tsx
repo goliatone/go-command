@@ -86,6 +86,7 @@ describe("fsm-ui-builder simulation and capability integrations", () => {
     }
 
     render(<FSMUIBuilder initialDocument={makeDocument()} runtimeRPC={runtimeRPC} />)
+    expect(screen.getByLabelText("Canvas panel").className).not.toContain("fub-canvas--simulation")
 
     await user.click(screen.getByRole("button", { name: "Simulate" }))
 
@@ -96,6 +97,8 @@ describe("fsm-ui-builder simulation and capability integrations", () => {
     expect(screen.getByText(/Event:/i).textContent).toContain("approve")
     expect(screen.getByText(/State:/i).textContent).toContain("draft")
     expect(screen.getByText(/Status:/i).textContent).toContain("running")
+    expect(screen.getByLabelText("Canvas panel").className).toContain("fub-canvas--simulation")
+    expect(document.querySelector(".fub-root")?.className).toContain("fub-shell--simulation")
 
     const blocked = screen.getByLabelText("Blocked transitions")
     expect(within(blocked).getAllByText(/reroute/i).length).toBeGreaterThan(0)

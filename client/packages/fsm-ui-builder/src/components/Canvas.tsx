@@ -22,7 +22,8 @@ import {
 } from "@xyflow/react"
 import dagre from "@dagrejs/dagre"
 
-import { useMachineStore, useUIStore } from "../store/provider"
+import { useMachineStore, useSimulationStore, useUIStore } from "../store/provider"
+import { readGraphNodePositions, stableStateNodeID } from "../utils/graphLayout"
 import { StateNode, type StateNodeData } from "./StateNode"
 
 import "@xyflow/react/dist/style.css"
@@ -104,6 +105,11 @@ interface EdgeData extends Record<string, unknown> {
   transitionIndex: number
 }
 
+interface SimulationNodeContext {
+  currentStateName?: string
+  projectedStateName?: string
+}
+
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
@@ -171,7 +177,9 @@ function getLayoutedElements(
 
 function buildNodesAndEdges(
   states: Array<{ name: string; initial?: boolean; terminal?: boolean }> | undefined | null,
-  transitions: Array<{ from: string; to?: string; event: string; dynamic_to?: { resolver?: string } }> | undefined | null
+  transitions: Array<{ from: string; to?: string; event: string; dynamic_to?: { resolver?: string } }> | undefined | null,
+  persistedPositions: Record<string, { x: number; y: number }>,
+  simulationContext: SimulationNodeContext
 ): { nodes: Node[]; edges: Edge[] } {
   // Guard against undefined/null states or transitions
   const safeStates = Array.isArray(states) ? states : []
@@ -189,36 +197,47 @@ function buildNodesAndEdges(
     }
   })
 
-  const nodes: Node[] = safeStates.map((state, stateIndex) => ({
-    id: state.name || `state-${stateIndex}`,
-    type: "stateNode",
-    position: { x: 0, y: 0 },
-    data: {
-      name: state.name,
-      initial: state.initial,
-      terminal: state.terminal,
-      stateIndex,
-      transitionCount: transitionCounts[state.name] || 0
-    } satisfies StateNodeData
-  }))
+  const nodeIDByStateName = new Map<string, string>()
+  const nodes: Node[] = safeStates.map((state, stateIndex) => {
+    const stateID = stableStateNodeID(stateIndex)
+    if (!nodeIDByStateName.has(state.name)) {
+      nodeIDByStateName.set(state.name, stateID)
+    }
 
-  const stateNames = new Set(safeStates.map((s) => s.name))
+    const isCurrent = simulationContext.currentStateName === state.name
+    const isProjected = simulationContext.projectedStateName === state.name
+    const simulationRole = isCurrent && isProjected ? "current-projected" : isCurrent ? "current" : isProjected ? "projected" : undefined
+
+    return {
+      id: stateID,
+      type: "stateNode",
+      position: { x: 0, y: 0 },
+      data: {
+        name: state.name,
+        initial: state.initial,
+        terminal: state.terminal,
+        stateIndex,
+        transitionCount: transitionCounts[state.name] || 0,
+        simulationRole
+      } satisfies StateNodeData
+    }
+  })
 
   const edges: Edge[] = []
 
   safeTransitions.forEach((transition, transitionIndex) => {
     const targetState = transition.to || transition.dynamic_to?.resolver
-    const sourceExists = stateNames.has(transition.from)
-    const targetExists = targetState && stateNames.has(targetState)
+    const sourceNodeID = nodeIDByStateName.get(transition.from)
+    const targetNodeID = targetState ? nodeIDByStateName.get(targetState) : undefined
 
-    if (!sourceExists || !targetExists) {
+    if (!sourceNodeID || !targetNodeID) {
       return
     }
 
     edges.push({
       id: `edge-${transitionIndex}`,
-      source: transition.from,
-      target: targetState,
+      source: sourceNodeID,
+      target: targetNodeID,
       label: transition.event || "(event)",
       type: "custom",
       data: {
@@ -227,16 +246,35 @@ function buildNodesAndEdges(
     })
   })
 
-  return getLayoutedElements(nodes, edges)
+  const layouted = getLayoutedElements(nodes, edges)
+  const withPersistedPositions = layouted.nodes.map((node) => {
+    const persisted = persistedPositions[node.id]
+    if (!persisted) {
+      return node
+    }
+    return {
+      ...node,
+      position: {
+        x: persisted.x,
+        y: persisted.y
+      }
+    }
+  })
+
+  return { nodes: withPersistedPositions, edges: layouted.edges }
 }
 
 function CanvasInner(props: CanvasProps) {
-  const definition = useMachineStore((state) => state.document.definition)
+  const document = useMachineStore((state) => state.document)
+  const definition = document.definition
   const selection = useMachineStore((state) => state.selection)
   const setSelection = useMachineStore((state) => state.setSelection)
   const addState = useMachineStore((state) => state.addState)
+  const setGraphNodePosition = useMachineStore((state) => state.setGraphNodePosition)
   const updateStateName = useMachineStore((state) => state.updateStateName)
   const updateStateFlag = useMachineStore((state) => state.updateStateFlag)
+  const projectedOutcome = useSimulationStore((state) => state.projectedOutcome)
+  const snapshotResult = useSimulationStore((state) => state.snapshotResult)
   const canvasZoom = useUIStore((state) => state.canvasZoom)
   const zoomCanvas = useUIStore((state) => state.zoomCanvas)
   const readOnly = Boolean(props.readOnly)
@@ -246,38 +284,49 @@ function CanvasInner(props: CanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useReactFlow()
   const [isDragOver, setIsDragOver] = useState(false)
+  const simulationContext = useMemo<SimulationNodeContext>(() => {
+    return {
+      currentStateName: projectedOutcome?.previousState || snapshotResult?.currentState,
+      projectedStateName: projectedOutcome?.currentState
+    }
+  }, [projectedOutcome, snapshotResult])
+  const simulationModeActive = Boolean(projectedOutcome || snapshotResult)
+  const persistedPositions = useMemo(() => readGraphNodePositions(document.ui_schema), [document.ui_schema])
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => buildNodesAndEdges(states, transitions),
-    [states, transitions]
+    () => buildNodesAndEdges(states, transitions, persistedPositions, simulationContext),
+    [states, transitions, persistedPositions, simulationContext]
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
   useEffect(() => {
-    const { nodes: newNodes, edges: newEdges } = buildNodesAndEdges(states, transitions)
+    const { nodes: newNodes, edges: newEdges } = buildNodesAndEdges(
+      states,
+      transitions,
+      persistedPositions,
+      simulationContext
+    )
     setNodes(newNodes)
     setEdges(newEdges)
-  }, [states, transitions, setNodes, setEdges])
+  }, [states, transitions, persistedPositions, simulationContext, setNodes, setEdges])
 
   useEffect(() => {
     if (selection.kind === "state") {
-      const selectedState = states[selection.stateIndex]
-      if (selectedState) {
-        setNodes((nds) =>
-          nds.map((node) => ({
-            ...node,
-            selected: node.id === selectedState.name
-          }))
-        )
-        setEdges((eds) =>
-          eds.map((edge) => ({
-            ...edge,
-            selected: false
-          }))
-        )
-      }
+      const selectedNodeID = stableStateNodeID(selection.stateIndex)
+      setNodes((nds) =>
+        nds.map((node) => ({
+          ...node,
+          selected: node.id === selectedNodeID
+        }))
+      )
+      setEdges((eds) =>
+        eds.map((edge) => ({
+          ...edge,
+          selected: false
+        }))
+      )
     } else if (selection.kind === "transition" || selection.kind === "workflow-node") {
       const transitionIndex = selection.transitionIndex
       setNodes((nds) =>
@@ -309,7 +358,7 @@ function CanvasInner(props: CanvasProps) {
         }))
       )
     }
-  }, [selection, states, setNodes, setEdges])
+  }, [selection, setNodes, setEdges])
 
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
@@ -343,6 +392,20 @@ function CanvasInner(props: CanvasProps) {
       }
     },
     [edges, onEdgesChange, setSelection]
+  )
+
+  const handleNodeDragStop = useCallback(
+    (_event: unknown, node: Node) => {
+      if (readOnly) {
+        return
+      }
+      const nodeData = node.data as StateNodeData | undefined
+      if (typeof nodeData?.stateIndex !== "number") {
+        return
+      }
+      setGraphNodePosition(nodeData.stateIndex, node.position)
+    },
+    [readOnly, setGraphNodePosition]
   )
 
   const handleMoveEnd = useCallback(
@@ -402,10 +465,7 @@ function CanvasInner(props: CanvasProps) {
         return
       }
 
-      // Calculate drop position in flow coordinates (for future use with positioning)
-      // Note: Currently the layout is auto-calculated by dagre, but position could be used
-      // for manual positioning in the future
-      void reactFlowInstance.screenToFlowPosition({
+      const dropPosition = reactFlowInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY
       })
@@ -428,6 +488,7 @@ function CanvasInner(props: CanvasProps) {
         const stateName = `${baseName}_${newStateIndex + 1}`
 
         updateStateName(newStateIndex, stateName)
+        setGraphNodePosition(newStateIndex, dropPosition)
 
         // Set initial/terminal flags if specified
         if (droppedData.defaults?.initial) {
@@ -441,12 +502,21 @@ function CanvasInner(props: CanvasProps) {
         setSelection({ kind: "state", stateIndex: newStateIndex })
       }, 0)
     },
-    [readOnly, reactFlowInstance, addState, states.length, updateStateName, updateStateFlag, setSelection]
+    [
+      readOnly,
+      reactFlowInstance,
+      addState,
+      states.length,
+      updateStateName,
+      updateStateFlag,
+      setSelection,
+      setGraphNodePosition
+    ]
   )
 
   return (
     <section
-      className="fub-panel fub-canvas"
+      className={`fub-panel fub-canvas${simulationModeActive ? " fub-canvas--simulation" : ""}`}
       aria-label="Canvas panel"
       role="region"
       aria-labelledby="fub-panel-canvas-heading"
@@ -460,6 +530,7 @@ function CanvasInner(props: CanvasProps) {
           <span className="fub-badge fub-canvas-zoom" aria-live="polite">
             Zoom: {Math.round(canvasZoom * 100)}%
           </span>
+          {simulationModeActive ? <span className="fub-badge fub-badge-simulation">Simulation mode</span> : null}
           {readOnly ? <span className="fub-badge">Read-only</span> : null}
         </div>
       </div>
@@ -517,6 +588,7 @@ function CanvasInner(props: CanvasProps) {
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
+            onNodeDragStop={handleNodeDragStop}
             onMoveEnd={handleMoveEnd}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}

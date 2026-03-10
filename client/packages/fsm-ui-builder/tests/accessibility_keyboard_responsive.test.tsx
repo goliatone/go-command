@@ -62,6 +62,42 @@ function makeDocument(): DraftMachineDocument {
   }
 }
 
+function setReducedMotionPreference(enabled: boolean): () => void {
+  const original = window.matchMedia
+  const listeners = new Set<(event: { matches: boolean; media: string }) => void>()
+
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)" ? enabled : false,
+      media: query,
+      onchange: null,
+      addEventListener: (_event: string, callback: (event: { matches: boolean; media: string }) => void) => {
+        listeners.add(callback)
+      },
+      removeEventListener: (_event: string, callback: (event: { matches: boolean; media: string }) => void) => {
+        listeners.delete(callback)
+      },
+      addListener: (callback: (event: { matches: boolean; media: string }) => void) => {
+        listeners.add(callback)
+      },
+      removeListener: (callback: (event: { matches: boolean; media: string }) => void) => {
+        listeners.delete(callback)
+      },
+      dispatchEvent: () => true
+    }))
+  })
+
+  return () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: original
+    })
+  }
+}
+
 describe("fsm-ui-builder keyboard, accessibility, and responsive behavior", () => {
   afterEach(() => {
     cleanup()
@@ -217,5 +253,25 @@ describe("fsm-ui-builder keyboard, accessibility, and responsive behavior", () =
     expect(screen.queryByLabelText("Explorer panel")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Explorer" }))
     expect(screen.getByLabelText("Explorer panel")).toBeTruthy()
+  })
+
+  it("keeps selection animation disabled when reduced motion is preferred", async () => {
+    const restoreMatchMedia = setReducedMotionPreference(true)
+    const user = userEvent.setup()
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} />)
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /draft/i }))
+
+    await waitFor(() => {
+      const canvas = screen.getByLabelText("Canvas panel")
+      const nodeTitle = within(canvas).getByText("draft")
+      const node = nodeTitle.closest(".fub-node")
+      expect(node?.className).toContain("fub-node--selected")
+      expect(node?.className).not.toContain("fub-node--selected-animated")
+    })
+
+    restoreMatchMedia()
   })
 })

@@ -2,6 +2,10 @@ export interface ActionCatalogItem {
   id: string
   label?: string
   description?: string
+  metadata?: {
+    tags?: string[]
+    [key: string]: unknown
+  }
 }
 
 export interface ActionCatalogProvider {
