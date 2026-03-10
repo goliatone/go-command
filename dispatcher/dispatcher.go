@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
@@ -18,12 +19,35 @@ type Subscription interface {
 var ExitOnErr = false
 
 var (
-	defaultCommandMux = router.NewMux()
-	defaultQueryMux   = router.NewMux()
+	defaultCommandMux = newMuxForRouting(commandRoutingConfig)
+	defaultQueryMux   = newMuxForRouting(commandRoutingConfig)
 	testCommandMux    *router.Mux // Only set during tests for isolation
 	testQueryMux      *router.Mux // Only set during tests for isolation
 	testMuxMu         sync.RWMutex
+
+	commandSubscriptionCount int64
+	querySubscriptionCount   int64
 )
+
+type trackedSubscription struct {
+	inner         Subscription
+	onUnsubscribe func()
+	once          sync.Once
+}
+
+func (s *trackedSubscription) Unsubscribe() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() {
+		if s.inner != nil {
+			s.inner.Unsubscribe()
+		}
+		if s.onUnsubscribe != nil {
+			s.onUnsubscribe()
+		}
+	})
+}
 
 // getCommandMux returns the active command mux (test override or default)
 func getCommandMux() *router.Mux {
@@ -57,10 +81,10 @@ func setTestMuxes(commandMux, queryMux *router.Mux) {
 func Reset() {
 	testMuxMu.Lock()
 	defer testMuxMu.Unlock()
-	defaultCommandMux = router.NewMux()
-	defaultQueryMux = router.NewMux()
+	resetRoutingConfigLocked()
 	testCommandMux = nil
 	testQueryMux = nil
+	resetSubscriptionCounters()
 	resetDispatchRoutingState()
 }
 
@@ -73,7 +97,14 @@ func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Opti
 		runner: h,
 		cmd:    cmd,
 	}
-	return getCommandMux().Add(command.GetMessageType(msg), wrapper)
+	sub := getCommandMux().Add(command.GetMessageType(msg), wrapper)
+	atomic.AddInt64(&commandSubscriptionCount, 1)
+	return &trackedSubscription{
+		inner: sub,
+		onUnsubscribe: func() {
+			atomic.AddInt64(&commandSubscriptionCount, -1)
+		},
+	}
 }
 
 func SubscribeCommandFunc[T any](handler command.CommandFunc[T], runnerOpts ...runner.Option) Subscription {
@@ -88,7 +119,14 @@ func SubscribeQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runne
 		runner: r,
 		qry:    qry,
 	}
-	return getQueryMux().Add(command.GetMessageType(msg), wrapper)
+	sub := getQueryMux().Add(command.GetMessageType(msg), wrapper)
+	atomic.AddInt64(&querySubscriptionCount, 1)
+	return &trackedSubscription{
+		inner: sub,
+		onUnsubscribe: func() {
+			atomic.AddInt64(&querySubscriptionCount, -1)
+		},
+	}
 }
 
 func SubscribeQueryFunc[T any, R any](qry command.QueryFunc[T, R], runnerOpts ...runner.Option) Subscription {
@@ -307,4 +345,14 @@ func getDispatchHandlers(messageType string) ([]dispatchRunnable, error) {
 	}
 
 	return typedHandlers, nil
+}
+
+func hasTrackedSubscriptions() bool {
+	return atomic.LoadInt64(&commandSubscriptionCount) > 0 ||
+		atomic.LoadInt64(&querySubscriptionCount) > 0
+}
+
+func resetSubscriptionCounters() {
+	atomic.StoreInt64(&commandSubscriptionCount, 0)
+	atomic.StoreInt64(&querySubscriptionCount, 0)
 }
