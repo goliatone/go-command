@@ -19,6 +19,9 @@ func TestFSMAuthoringMethodConstants(t *testing.T) {
 	assert.Equal(t, "fsm.authoring.publish", FSMRPCMethodAuthoringPublish)
 	assert.Equal(t, "fsm.authoring.delete_machine", FSMRPCMethodAuthoringDeleteMachine)
 	assert.Equal(t, "fsm.authoring.export", FSMRPCMethodAuthoringExport)
+	assert.Equal(t, "fsm.authoring.list_versions", FSMRPCMethodAuthoringListVersions)
+	assert.Equal(t, "fsm.authoring.get_version", FSMRPCMethodAuthoringGetVersion)
+	assert.Equal(t, "fsm.authoring.diff_versions", FSMRPCMethodAuthoringDiffVersions)
 }
 
 func TestFSMAuthoringListMachinesEnvelopeJSONShape(t *testing.T) {
@@ -189,6 +192,95 @@ func TestFSMAuthoringValidateAndDeleteEnvelopeJSONShape(t *testing.T) {
 	deleteResData := requireMap(t, deleteResDecoded, "data")
 	assert.Equal(t, "orders", deleteResData["machineId"])
 	assert.Equal(t, true, deleteResData["deleted"])
+}
+
+func TestFSMAuthoringOptionalHistoryAndDiffEnvelopeJSONShape(t *testing.T) {
+	limit := 25
+	listReq := rpc.RequestEnvelope[FSMAuthoringListVersionsRequest]{
+		Data: FSMAuthoringListVersionsRequest{
+			MachineID: "orders",
+			Limit:     &limit,
+			Cursor:    "cursor-1",
+		},
+	}
+	listReqDecoded := decodeJSONMap(t, mustJSONMarshal(t, listReq))
+	listReqData := requireMap(t, listReqDecoded, "data")
+	assert.Equal(t, "orders", listReqData["machineId"])
+	assert.Equal(t, float64(25), listReqData["limit"])
+	assert.Equal(t, "cursor-1", listReqData["cursor"])
+
+	listRes := rpc.ResponseEnvelope[FSMAuthoringListVersionsResponse]{
+		Data: FSMAuthoringListVersionsResponse{
+			MachineID: "orders",
+			Items: []FSMAuthoringVersionSummary{
+				{
+					Version:   "v14",
+					ETag:      "orders-v14",
+					UpdatedAt: "2026-03-10T00:15:00Z",
+					IsDraft:   true,
+				},
+			},
+			NextCursor: "cursor-2",
+		},
+	}
+	listResDecoded := decodeJSONMap(t, mustJSONMarshal(t, listRes))
+	listResData := requireMap(t, listResDecoded, "data")
+	assert.Equal(t, "orders", listResData["machineId"])
+	items, ok := listResData["items"].([]any)
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	item, ok := items[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "v14", item["version"])
+	assert.Equal(t, "orders-v14", item["etag"])
+	assert.Equal(t, "cursor-2", listResData["nextCursor"])
+
+	getReq := rpc.RequestEnvelope[FSMAuthoringGetVersionRequest]{
+		Data: FSMAuthoringGetVersionRequest{
+			MachineID: "orders",
+			Version:   "v12",
+		},
+	}
+	getReqDecoded := decodeJSONMap(t, mustJSONMarshal(t, getReq))
+	getReqData := requireMap(t, getReqDecoded, "data")
+	assert.Equal(t, "orders", getReqData["machineId"])
+	assert.Equal(t, "v12", getReqData["version"])
+
+	diffReq := rpc.RequestEnvelope[FSMAuthoringDiffVersionsRequest]{
+		Data: FSMAuthoringDiffVersionsRequest{
+			MachineID:     "orders",
+			BaseVersion:   "v12",
+			TargetVersion: "v14",
+		},
+	}
+	diffReqDecoded := decodeJSONMap(t, mustJSONMarshal(t, diffReq))
+	diffReqData := requireMap(t, diffReqDecoded, "data")
+	assert.Equal(t, "orders", diffReqData["machineId"])
+	assert.Equal(t, "v12", diffReqData["baseVersion"])
+	assert.Equal(t, "v14", diffReqData["targetVersion"])
+
+	diffRes := rpc.ResponseEnvelope[FSMAuthoringDiffVersionsResponse]{
+		Data: FSMAuthoringDiffVersionsResponse{
+			MachineID:     "orders",
+			BaseVersion:   "v12",
+			TargetVersion: "v14",
+			HasConflicts:  true,
+			Changes: []FSMAuthoringDiffChange{
+				{Path: "$.transitions[0].workflow.nodes[1]", ChangeType: "added"},
+			},
+			ConflictPaths: []string{"$.transitions[0].workflow.nodes[0]"},
+		},
+	}
+	diffResDecoded := decodeJSONMap(t, mustJSONMarshal(t, diffRes))
+	diffResData := requireMap(t, diffResDecoded, "data")
+	assert.Equal(t, true, diffResData["hasConflicts"])
+	changes, ok := diffResData["changes"].([]any)
+	require.True(t, ok)
+	require.Len(t, changes, 1)
+	change, ok := changes[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "$.transitions[0].workflow.nodes[1]", change["path"])
+	assert.Equal(t, "added", change["changeType"])
 }
 
 func mustJSONMarshal(t *testing.T, v any) []byte {

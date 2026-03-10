@@ -8,6 +8,9 @@ const (
 	FSMRPCMethodAuthoringPublish       = "fsm.authoring.publish"
 	FSMRPCMethodAuthoringDeleteMachine = "fsm.authoring.delete_machine"
 	FSMRPCMethodAuthoringExport        = "fsm.authoring.export"
+	FSMRPCMethodAuthoringListVersions  = "fsm.authoring.list_versions"
+	FSMRPCMethodAuthoringGetVersion    = "fsm.authoring.get_version"
+	FSMRPCMethodAuthoringDiffVersions  = "fsm.authoring.diff_versions"
 )
 
 const (
@@ -118,4 +121,62 @@ type FSMAuthoringExportResponse struct {
 	Format      string `json:"format"`
 	ContentType string `json:"contentType,omitempty"`
 	Content     string `json:"content"`
+}
+
+// FSMAuthoringVersionSummary is one revision row for optional version history UIs.
+type FSMAuthoringVersionSummary struct {
+	Version     string `json:"version"`
+	ETag        string `json:"etag,omitempty"`
+	UpdatedAt   string `json:"updatedAt"`
+	PublishedAt string `json:"publishedAt,omitempty"`
+	IsDraft     bool   `json:"isDraft"`
+}
+
+// FSMAuthoringListVersionsRequest is an optional history capability contract.
+type FSMAuthoringListVersionsRequest struct {
+	MachineID string `json:"machineId"`
+	Limit     *int   `json:"limit,omitempty"`
+	Cursor    string `json:"cursor,omitempty"`
+}
+
+type FSMAuthoringListVersionsResponse struct {
+	MachineID  string                       `json:"machineId"`
+	Items      []FSMAuthoringVersionSummary `json:"items"`
+	NextCursor string                       `json:"nextCursor,omitempty"`
+}
+
+// FSMAuthoringGetVersionRequest loads a specific revision snapshot.
+type FSMAuthoringGetVersionRequest struct {
+	MachineID string `json:"machineId"`
+	Version   string `json:"version"`
+}
+
+type FSMAuthoringGetVersionResponse struct {
+	MachineID   string                 `json:"machineId"`
+	Version     string                 `json:"version"`
+	Draft       DraftMachineDocument   `json:"draft"`
+	Diagnostics []ValidationDiagnostic `json:"diagnostics"`
+	ETag        string                 `json:"etag,omitempty"`
+}
+
+// FSMAuthoringDiffChange is one changed JSON path between revisions.
+type FSMAuthoringDiffChange struct {
+	Path       string `json:"path"`
+	ChangeType string `json:"changeType"`
+}
+
+// FSMAuthoringDiffVersionsRequest is an optional merge-assist contract.
+type FSMAuthoringDiffVersionsRequest struct {
+	MachineID     string `json:"machineId"`
+	BaseVersion   string `json:"baseVersion"`
+	TargetVersion string `json:"targetVersion"`
+}
+
+type FSMAuthoringDiffVersionsResponse struct {
+	MachineID     string                   `json:"machineId"`
+	BaseVersion   string                   `json:"baseVersion"`
+	TargetVersion string                   `json:"targetVersion"`
+	HasConflicts  bool                     `json:"hasConflicts"`
+	Changes       []FSMAuthoringDiffChange `json:"changes"`
+	ConflictPaths []string                 `json:"conflictPaths,omitempty"`
 }
