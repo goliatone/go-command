@@ -7,6 +7,7 @@ const (
 	FSMRPCMethodAuthoringValidate      = "fsm.authoring.validate"
 	FSMRPCMethodAuthoringPublish       = "fsm.authoring.publish"
 	FSMRPCMethodAuthoringDeleteMachine = "fsm.authoring.delete_machine"
+	FSMRPCMethodAuthoringExport        = "fsm.authoring.export"
 )
 
 const (
@@ -101,4 +102,20 @@ type FSMAuthoringDeleteMachineRequest struct {
 type FSMAuthoringDeleteMachineResponse struct {
 	MachineID string `json:"machineId"`
 	Deleted   bool   `json:"deleted"`
+}
+
+// FSMAuthoringExportRequest is an optional RPC capability contract.
+// The endpoint may intentionally return an unavailable error when not configured.
+type FSMAuthoringExportRequest struct {
+	MachineID    string                `json:"machineId,omitempty"`
+	Format       string                `json:"format,omitempty"`
+	IncludeDraft bool                  `json:"includeDraft,omitempty"`
+	Draft        *DraftMachineDocument `json:"draft,omitempty"`
+}
+
+type FSMAuthoringExportResponse struct {
+	MachineID   string `json:"machineId"`
+	Format      string `json:"format"`
+	ContentType string `json:"contentType,omitempty"`
+	Content     string `json:"content"`
 }
