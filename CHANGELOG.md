@@ -1,5 +1,30 @@
 # Changelog
 
+# [0.18.0](https://github.com/goliatone/go-command/compare/v0.17.0...v0.18.0) - (2026-03-10)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Initialize/reset matcher, subscrition tracking and mode change lock, enforce canonical IDs ([a4c162a](https://github.com/goliatone/go-command/commit/a4c162a778b4e8e929144d52f9d3274d2b5ede0e))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.18.0 ([4346df6](https://github.com/goliatone/go-command/commit/4346df6a3bc290e5c168c48127b89558c948bb65))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Enforce canonical IDs. fix: resolver semantics ([d8d4568](https://github.com/goliatone/go-command/commit/d8d4568672772032b49ded7de5b19c39a5c35a7d))  - (goliatone)
+- Routing mode API with exact default and rich optin ([7d9b0df](https://github.com/goliatone/go-command/commit/7d9b0df3a14902809d9a69aa5bdeeb3883501f6b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.17.0 ([92b23f5](https://github.com/goliatone/go-command/commit/92b23f52941ff495ca1c97969f20839022adf225))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([fb5e2d9](https://github.com/goliatone/go-command/commit/fb5e2d9d3f99a69de19f82f4d1b7bf7e4526181b))  - (goliatone)
+- Udpate tests ([d164d2e](https://github.com/goliatone/go-command/commit/d164d2ed4445686604a13a0631a6628ae9cc4397))  - (goliatone)
+- Update tasks and deps ([3cfe2e3](https://github.com/goliatone/go-command/commit/3cfe2e3e55d31b8b875a7e64385096b543e84a12))  - (goliatone)
+
 # [0.17.0](https://github.com/goliatone/go-command/compare/v0.16.1...v0.17.0) - (2026-03-09)
 
 ## <!-- 13 -->📦 Bumps
