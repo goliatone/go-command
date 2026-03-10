@@ -181,77 +181,88 @@ type MachineSchema struct {
 
 // MachineUISchema contains editor-facing graph and inspector representations.
 type MachineUISchema struct {
-	Layout    string             `json:"layout"`
-	Nodes     []StateNodeSchema  `json:"nodes"`
-	Edges     []TransitionSchema `json:"edges"`
-	Inspector InspectorSchema    `json:"inspector"`
-	Graph     GraphLayout        `json:"graph_layout,omitempty"`
+	Layout    string                     `json:"layout"`
+	Nodes     []StateNodeSchema          `json:"nodes"`
+	Edges     []TransitionSchema         `json:"edges"`
+	Inspector InspectorSchema            `json:"inspector"`
+	Graph     GraphLayout                `json:"graph_layout,omitempty"`
+	Unknown   map[string]json.RawMessage `json:"-"`
 }
 
 type StateNodeSchema struct {
-	ID       string      `json:"id"`
-	Label    string      `json:"label"`
-	Terminal bool        `json:"terminal"`
-	Initial  bool        `json:"initial,omitempty"`
-	UI       UIComponent `json:"ui"`
+	ID       string                     `json:"id"`
+	Label    string                     `json:"label"`
+	Terminal bool                       `json:"terminal"`
+	Initial  bool                       `json:"initial,omitempty"`
+	UI       UIComponent                `json:"ui"`
+	Unknown  map[string]json.RawMessage `json:"-"`
 }
 
 type TransitionSchema struct {
-	ID       string           `json:"id"`
-	Event    string           `json:"event"`
-	From     string           `json:"from"`
-	Target   TargetUISchema   `json:"target"`
-	Guards   []GuardUISchema  `json:"guards,omitempty"`
-	Workflow WorkflowUISchema `json:"workflow"`
-	Metadata map[string]any   `json:"metadata,omitempty"`
+	ID       string                     `json:"id"`
+	Event    string                     `json:"event"`
+	From     string                     `json:"from"`
+	Target   TargetUISchema             `json:"target"`
+	Guards   []GuardUISchema            `json:"guards,omitempty"`
+	Workflow WorkflowUISchema           `json:"workflow"`
+	Metadata map[string]any             `json:"metadata,omitempty"`
+	Unknown  map[string]json.RawMessage `json:"-"`
 }
 
 type TargetUISchema struct {
-	Kind       string   `json:"kind"`
-	To         string   `json:"to,omitempty"`
-	Resolver   string   `json:"resolver,omitempty"`
-	Candidates []string `json:"candidates,omitempty"`
+	Kind       string                     `json:"kind"`
+	To         string                     `json:"to,omitempty"`
+	Resolver   string                     `json:"resolver,omitempty"`
+	Candidates []string                   `json:"candidates,omitempty"`
+	Unknown    map[string]json.RawMessage `json:"-"`
 }
 
 type GuardUISchema struct {
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties,omitempty"`
-	UI         UIComponent    `json:"ui"`
+	Type       string                     `json:"type"`
+	Properties map[string]any             `json:"properties,omitempty"`
+	UI         UIComponent                `json:"ui"`
+	Unknown    map[string]json.RawMessage `json:"-"`
 }
 
 type StepUISchema struct {
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties,omitempty"`
-	UI         UIComponent    `json:"ui"`
+	Type       string                     `json:"type"`
+	Properties map[string]any             `json:"properties,omitempty"`
+	UI         UIComponent                `json:"ui"`
+	Unknown    map[string]json.RawMessage `json:"-"`
 }
 
 type WorkflowUISchema struct {
-	Nodes []WorkflowNodeUISchema `json:"nodes"`
+	Nodes   []WorkflowNodeUISchema     `json:"nodes"`
+	Unknown map[string]json.RawMessage `json:"-"`
 }
 
 type WorkflowNodeUISchema struct {
-	ID        string        `json:"id"`
-	Kind      string        `json:"kind"`
-	Step      *StepUISchema `json:"step,omitempty"`
-	Condition string        `json:"condition,omitempty"`
-	Next      []string      `json:"next,omitempty"`
-	UI        UIComponent   `json:"ui"`
+	ID        string                     `json:"id"`
+	Kind      string                     `json:"kind"`
+	Step      *StepUISchema              `json:"step,omitempty"`
+	Condition string                     `json:"condition,omitempty"`
+	Next      []string                   `json:"next,omitempty"`
+	UI        UIComponent                `json:"ui"`
+	Unknown   map[string]json.RawMessage `json:"-"`
 }
 
 type UIComponent struct {
-	Component string         `json:"component"`
-	Layout    string         `json:"layout,omitempty"`
-	Config    map[string]any `json:"config,omitempty"`
+	Component string                     `json:"component"`
+	Layout    string                     `json:"layout,omitempty"`
+	Config    map[string]any             `json:"config,omitempty"`
+	Unknown   map[string]json.RawMessage `json:"-"`
 }
 
 type InspectorSchema struct {
-	Sections []InspectorSection `json:"sections,omitempty"`
+	Sections []InspectorSection         `json:"sections,omitempty"`
+	Unknown  map[string]json.RawMessage `json:"-"`
 }
 
 type InspectorSection struct {
-	ID     string   `json:"id"`
-	Label  string   `json:"label"`
-	Fields []string `json:"fields,omitempty"`
+	ID      string                     `json:"id"`
+	Label   string                     `json:"label"`
+	Fields  []string                   `json:"fields,omitempty"`
+	Unknown map[string]json.RawMessage `json:"-"`
 }
 
 // GraphLayout persists visual editor geometry and unknown fields for forward compatibility.
@@ -874,6 +885,9 @@ func MachineDefinitionFromUISchema(ui *MachineUISchema, id, version string) *Mac
 				}
 				if async, ok := wfNode.Step.Properties["async"].(bool); ok {
 					step.Async = async
+				}
+				if metadata, ok := wfNode.Step.Properties["metadata"].(map[string]any); ok {
+					step.Metadata = copyMap(metadata)
 				}
 				node.Step = step
 			}
