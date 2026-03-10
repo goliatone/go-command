@@ -19,6 +19,18 @@ export interface TransitionInfo {
   id: string;
   event: string;
   target: TargetInfo;
+  allowed: boolean;
+  rejections?: GuardRejection[];
+  metadata?: Metadata;
+}
+
+export interface GuardRejection {
+  code: string;
+  category: string;
+  retryable: boolean;
+  requiresAction: boolean;
+  message: string;
+  remediationHint?: string;
   metadata?: Metadata;
 }
 
@@ -62,9 +74,12 @@ export interface ExecutionHandle {
 }
 
 export interface ApplyEventResponse {
+  eventId: string;
+  version: number;
   transition: TransitionResult;
   snapshot: Snapshot;
   execution?: ExecutionHandle;
+  idempotencyHit?: boolean;
 }
 
 export interface ApplyEventOptions {

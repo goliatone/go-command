@@ -44,6 +44,7 @@ export type {
   EmitEventEffect,
   ExecutionContext,
   ExecutionHandle,
+  GuardRejection,
   Metadata,
   Snapshot,
   TargetInfo,

@@ -1,4 +1,6 @@
 {
+  "EventID": "evt-100",
+  "Version": 12,
   "Transition": {
     "PreviousState": "draft",
     "CurrentState": "approved",
@@ -33,6 +35,7 @@
       {
         "ID": "fulfill",
         "Event": "fulfill",
+        "Allowed": true,
         "Target": {
           "Kind": "static",
           "To": "fulfilled",
@@ -45,6 +48,7 @@
       {
         "ID": "route",
         "Event": "route",
+        "Allowed": false,
         "Target": {
           "Kind": "dynamic",
           "Resolver": "pick_target",
@@ -52,6 +56,16 @@
           "ResolvedTo": "review",
           "Candidates": ["review", "approved"]
         },
+        "Rejections": [
+          {
+            "Code": "FSM_GUARD_REJECTED",
+            "Category": "bad_input",
+            "Retryable": false,
+            "RequiresAction": true,
+            "Message": "approval limit exceeded",
+            "RemediationHint": "assign manual reviewer"
+          }
+        ],
         "Metadata": {
           "label": "Route order"
         }
@@ -69,5 +83,6 @@
     "Metadata": {
       "attempt": 1
     }
-  }
+  },
+  "IdempotencyHit": false
 }

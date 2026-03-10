@@ -5,6 +5,7 @@ import type {
   EmitEventEffect,
   ExecutionContext,
   ExecutionHandle,
+  GuardRejection,
   Metadata,
   Snapshot,
   TargetInfo,
@@ -51,6 +52,16 @@ function readBool(record: Record<string, unknown>, keys: string[], fallback = fa
     }
   }
   return fallback;
+}
+
+function readOptionalBool(record: Record<string, unknown>, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function readStringArray(record: Record<string, unknown>, keys: string[]): string[] | undefined {
@@ -174,10 +185,30 @@ export function normalizeTargetInfo(raw: unknown): TargetInfo {
 
 export function normalizeTransitionInfo(raw: unknown): TransitionInfo {
   const record = asRecord(raw) ?? {};
+  const rejectionsRaw = record.rejections ?? record.Rejections;
+  const rejections = Array.isArray(rejectionsRaw)
+    ? rejectionsRaw.map((rejection) => normalizeGuardRejection(rejection))
+    : undefined;
+
   return {
     id: readString(record, ["id", "ID"]),
     event: readString(record, ["event", "Event"]),
     target: normalizeTargetInfo(record.target ?? record.Target),
+    allowed: readBool(record, ["allowed", "Allowed"], true),
+    rejections,
+    metadata: readObject(record, ["metadata", "Metadata"])
+  };
+}
+
+export function normalizeGuardRejection(raw: unknown): GuardRejection {
+  const record = asRecord(raw) ?? {};
+  return {
+    code: readString(record, ["code", "Code"]),
+    category: readString(record, ["category", "Category"]),
+    retryable: readBool(record, ["retryable", "Retryable"]),
+    requiresAction: readBool(record, ["requiresAction", "RequiresAction"]),
+    message: readString(record, ["message", "Message"]),
+    remediationHint: readString(record, ["remediationHint", "RemediationHint"]) || undefined,
     metadata: readObject(record, ["metadata", "Metadata"])
   };
 }
@@ -261,10 +292,19 @@ export function normalizeApplyEventResponse(raw: unknown): ApplyEventResponse {
   if (outerRecord && (outerRecord.error ?? outerRecord.Error)) {
     throw new Error("rpc apply event response contains error envelope");
   }
+  const maybeResultEnvelope = outerRecord
+    ? asRecord(outerRecord.result ?? outerRecord.Result)
+    : null;
+  if (maybeResultEnvelope && (maybeResultEnvelope.error ?? maybeResultEnvelope.Error)) {
+    throw new Error("rpc apply event response contains result error envelope");
+  }
   const maybeDataEnvelope = outerRecord
     ? asRecord(outerRecord.data ?? outerRecord.Data)
     : null;
-  const record = maybeDataEnvelope ?? outerRecord;
+  const maybeResultDataEnvelope = maybeResultEnvelope
+    ? asRecord(maybeResultEnvelope.data ?? maybeResultEnvelope.Data)
+    : null;
+  const record = maybeDataEnvelope ?? maybeResultDataEnvelope ?? maybeResultEnvelope ?? outerRecord;
   if (!record) {
     throw new Error("invalid apply event response: expected object envelope");
   }
@@ -277,8 +317,11 @@ export function normalizeApplyEventResponse(raw: unknown): ApplyEventResponse {
 
   const executionRaw = record.execution ?? record.Execution;
   return {
+    eventId: readString(record, ["eventId", "EventID"]),
+    version: readNumber(record, ["version", "Version"]) ?? 0,
     transition: normalizeTransitionResult(transitionRaw),
     snapshot: normalizeSnapshot(snapshotRaw),
-    execution: executionRaw ? normalizeExecutionHandle(executionRaw) : undefined
+    execution: executionRaw ? normalizeExecutionHandle(executionRaw) : undefined,
+    idempotencyHit: readOptionalBool(record, ["idempotencyHit", "IdempotencyHit"])
   };
 }

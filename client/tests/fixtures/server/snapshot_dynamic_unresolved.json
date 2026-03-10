@@ -5,6 +5,7 @@
     {
       "ID": "route",
       "Event": "route",
+      "Allowed": true,
       "Target": {
         "Kind": "dynamic",
         "Resolver": "pick_target",

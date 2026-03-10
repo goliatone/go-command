@@ -1,0 +1,49 @@
+{
+  "jsonrpc": "2.0",
+  "id": "req-apply-1",
+  "result": {
+    "data": {
+      "EventID": "evt-201",
+      "Version": 21,
+      "Transition": {
+        "PreviousState": "draft",
+        "CurrentState": "approved",
+        "Effects": [
+          {
+            "ActionID": "audit.log",
+            "Payload": {
+              "orderId": "ord-9"
+            },
+            "Async": true
+          }
+        ]
+      },
+      "Snapshot": {
+        "EntityID": "ord-9",
+        "CurrentState": "approved",
+        "AllowedTransitions": [
+          {
+            "ID": "fulfill",
+            "Event": "fulfill",
+            "Allowed": true,
+            "Target": {
+              "Kind": "static",
+              "To": "fulfilled",
+              "Resolved": false
+            }
+          }
+        ],
+        "Metadata": {
+          "machine": "orders",
+          "version": "v3"
+        }
+      },
+      "Execution": {
+        "ExecutionID": "exec-7",
+        "Policy": "orchestrated",
+        "Status": "running"
+      },
+      "IdempotencyHit": true
+    }
+  }
+}

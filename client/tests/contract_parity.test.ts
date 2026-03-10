@@ -14,6 +14,8 @@ describe("contract parity", () => {
 
     const result = normalizeApplyEventResponse(fixture);
 
+    expect(result.eventId).toBe("evt-100");
+    expect(result.version).toBe(12);
     expect(result.transition.previousState).toBe("draft");
     expect(result.transition.currentState).toBe("approved");
     expect(result.transition.effects).toHaveLength(2);
@@ -33,9 +35,14 @@ describe("contract parity", () => {
 
     expect(result.snapshot.entityId).toBe("ord-1");
     expect(result.snapshot.currentState).toBe("approved");
+    expect(result.snapshot.allowedTransitions[0].allowed).toBe(true);
+    expect(result.snapshot.allowedTransitions[1].allowed).toBe(false);
+    expect(result.snapshot.allowedTransitions[1].rejections).toHaveLength(1);
+    expect(result.snapshot.allowedTransitions[1].rejections?.[0].code).toBe("FSM_GUARD_REJECTED");
     expect(result.execution?.executionId).toBe("exec-1");
     expect(result.execution?.policy).toBe("orchestrated");
     expect(result.execution?.status).toBe("running");
+    expect(result.idempotencyHit).toBe(false);
   });
 
   it("preserves target metadata semantics for unresolved and resolved dynamic transitions", () => {
@@ -48,12 +55,33 @@ describe("contract parity", () => {
     expect(unresolved.allowedTransitions[0].target.resolved).toBe(false);
     expect(unresolved.allowedTransitions[0].target.resolvedTo).toBeUndefined();
     expect(unresolved.allowedTransitions[0].target.candidates).toEqual(["review", "approved"]);
+    expect(unresolved.allowedTransitions[0].allowed).toBe(true);
 
     expect(resolved.allowedTransitions).toHaveLength(1);
     expect(resolved.allowedTransitions[0].target.resolver).toBe("pick_target");
     expect(resolved.allowedTransitions[0].target.resolved).toBe(true);
     expect(resolved.allowedTransitions[0].target.resolvedTo).toBe("review");
     expect(resolved.allowedTransitions[0].target.candidates).toEqual(["review", "approved"]);
+    expect(resolved.allowedTransitions[0].allowed).toBe(true);
+  });
+
+  it("normalizes runtime payloads wrapped in json-rpc result.data mixed-case envelopes", () => {
+    const applyFixture = loadServerFixture("apply_event_rpc_result_data_mixed_case.json");
+    const snapshotFixture = loadServerFixture("snapshot_rpc_result_data_mixed_case.json") as {
+      result?: { data?: unknown };
+    };
+
+    const apply = normalizeApplyEventResponse(applyFixture);
+    expect(apply.eventId).toBe("evt-201");
+    expect(apply.version).toBe(21);
+    expect(apply.snapshot.entityId).toBe("ord-9");
+    expect(apply.idempotencyHit).toBe(true);
+
+    const snapshot = normalizeSnapshot(snapshotFixture.result?.data);
+    expect(snapshot.entityId).toBe("ord-9");
+    expect(snapshot.allowedTransitions[0].allowed).toBe(true);
+    expect(snapshot.allowedTransitions[1].allowed).toBe(false);
+    expect(snapshot.allowedTransitions[1].rejections?.[0].remediationHint).toBe("capture payment first");
   });
 
   it("serializes canonical wire ApplyEventRequest envelope", () => {
