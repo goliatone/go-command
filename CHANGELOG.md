@@ -13,6 +13,8 @@
 ## ➕ Add
 
 - Added cross-repo compatibility task `dev:test:cross` to validate local `go-command` + `go-job` contract alignment.
+- Added FSM UI Builder package `@goliatone/go-command-fsm-ui-builder` with frozen RPC integration (`POST /rpc`) for runtime simulation and authoring flows.
+- Added optional builder embed surface under `data/builder` (rooted at `data/client-builder/fsm-ui-builder`) so importing `data` remains core-only.
 
 ## 📚 Migration
 
@@ -43,6 +45,14 @@ Resolver registration guidance:
 _ = cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry))
 _, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
 ```
+
+FSM UI Builder migration notes:
+
+- Use `@goliatone/go-command-fsm-ui-builder` for mountable authoring/simulation UX.
+- Runtime simulation methods: `fsm.apply_event` and `fsm.snapshot`.
+- Authoring methods: `fsm.authoring.list_machines`, `fsm.authoring.get_machine`, `fsm.authoring.save_draft`, `fsm.authoring.validate`, `fsm.authoring.publish`, `fsm.authoring.delete_machine`.
+- Builder embedding is opt-in via `data/builder`; keep `data` imports for core runtime assets only.
+- Adapter behavior is capability-gated: persistence defaults to local autosave; export/action-catalog RPC hooks are optional and degrade gracefully when unavailable.
 
 # [0.18.0](https://github.com/goliatone/go-command/compare/v0.17.0...v0.18.0) - (2026-03-10)
 
@@ -641,4 +651,3 @@ _, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
-

@@ -26,6 +26,7 @@ The TypeScript runtime is split into three client libraries:
 - RPC: `@goliatone/go-command-rpc`
 - FSM core: `@goliatone/go-command-fsm`
 - FSM RPC transport adapter: `@goliatone/go-command-fsm-rpc`
+- FSM UI Builder: `@goliatone/go-command-fsm-ui-builder` (optional authoring UI package)
 
 Build/sync embedded artifacts:
 
@@ -38,6 +39,7 @@ Embedded output paths:
 - `data/client/rpc/index.js`
 - `data/client/fsm/index.js`
 - `data/client/fsm-rpc/index.js`
+- `data/client-builder/fsm-ui-builder/index.js` (builder-only path; produced by `client:build:builder` / `client:build:all`)
 
 Go accessors:
 
@@ -45,6 +47,33 @@ Go accessors:
 - `data.ClientRPCFS()` (rooted at `data/client/rpc`)
 - `data.ClientFSMFS()` (rooted at `data/client/fsm`)
 - `data.ClientFSMRPCFS()` (rooted at `data/client/fsm-rpc`)
+- optional builder-only accessors live under `data/builder` so importing `data` remains core-only
+
+Builder asset serving example (optional embed package):
+
+```go
+import (
+    "io/fs"
+    "net/http"
+
+    builderdata "github.com/goliatone/go-command/data/builder"
+)
+
+func mountBuilderAssets(mux *http.ServeMux) error {
+    builderFS := builderdata.ClientFSMUIBuilderFS()
+    staticFS, err := fs.Sub(builderFS, ".")
+    if err != nil {
+        return err
+    }
+    mux.Handle("/builder/", http.StripPrefix("/builder/", http.FileServer(http.FS(staticFS))))
+    return nil
+}
+```
+
+Builder demo host (mount + `/rpc` adapters) is available at:
+
+- `client/packages/fsm-ui-builder/demo/index.html`
+- `client/packages/fsm-ui-builder/demo/main.ts`
 
 ## Core Concepts
 
