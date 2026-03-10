@@ -53,6 +53,7 @@ export function BuilderShell(props: BuilderShellProps) {
   const setMobilePanel = useUIStore((state) => state.setMobilePanel)
   const setKeyboardHelpOpen = useUIStore((state) => state.setKeyboardHelpOpen)
   const toggleKeyboardHelp = useUIStore((state) => state.toggleKeyboardHelp)
+  const theme = useUIStore((state) => state.theme)
   const definition = useMachineStore((state) => state.document.definition)
   const diagnostics = useMachineStore((state) => state.diagnostics)
   const simulationLog = useSimulationStore((state) => state.log)
@@ -185,7 +186,7 @@ export function BuilderShell(props: BuilderShellProps) {
   if (viewportMode === "mobile-readonly") {
     return (
       <>
-        <div className="fub-root fub-root-mobile">
+        <div className="fub-root fub-root-mobile" data-theme={theme}>
           <div className="fub-slot-header">
             <Header {...props} readOnly onPanelToggle={onPanelToggle} />
           </div>
@@ -244,7 +245,7 @@ export function BuilderShell(props: BuilderShellProps) {
 
   return (
     <>
-      <div className="fub-root" style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}>
+      <div className="fub-root" data-theme={theme} style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}>
         <div className="fub-slot-header" style={{ gridColumn: "1 / -1" }}>
           <Header {...props} readOnly={false} onPanelToggle={onPanelToggle} />
         </div>

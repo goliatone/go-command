@@ -1,9 +1,11 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
 
 const PERSIST_KEY = "fsm-ui-builder.panel-layout"
+const THEME_PERSIST_KEY = "fsm-ui-builder.theme"
 
 export type ViewportMode = "desktop" | "compact" | "mobile-readonly"
 export type MobilePanel = "explorer" | "canvas" | "inspector" | "console"
+export type Theme = "light" | "dark"
 
 export interface PanelLayoutState {
   explorerWidth: number
@@ -21,6 +23,7 @@ export interface UIStoreState extends PanelLayoutState {
   viewportMode: ViewportMode
   mobilePanel: MobilePanel
   keyboardHelpOpen: boolean
+  theme: Theme
   setPanelWidth(panel: "explorer" | "inspector", width: number): void
   setConsoleHeight(height: number): void
   setPanelCollapsed(panel: "explorer" | "inspector" | "console", collapsed: boolean): void
@@ -32,6 +35,8 @@ export interface UIStoreState extends PanelLayoutState {
   resetCanvasView(): void
   setViewportMode(mode: ViewportMode): void
   setMobilePanel(panel: MobilePanel): void
+  setTheme(theme: Theme): void
+  toggleTheme(): void
 }
 
 export type UIStore = StoreApi<UIStoreState>
@@ -100,14 +105,34 @@ function persistLayout(state: PanelLayoutState): void {
   window.localStorage.setItem(PERSIST_KEY, JSON.stringify(state))
 }
 
+function readPersistedTheme(): Theme {
+  if (!canUseStorage()) {
+    return "light"
+  }
+  const raw = window.localStorage.getItem(THEME_PERSIST_KEY)
+  if (raw === "dark") {
+    return "dark"
+  }
+  return "light"
+}
+
+function persistTheme(theme: Theme): void {
+  if (!canUseStorage()) {
+    return
+  }
+  window.localStorage.setItem(THEME_PERSIST_KEY, theme)
+}
+
 export function createUIStore(): UIStore {
   const initial = readPersistedLayout()
+  const initialTheme = readPersistedTheme()
 
   return createStore<UIStoreState>((set) => ({
     ...initial,
     viewportMode: "desktop",
     mobilePanel: "canvas",
     keyboardHelpOpen: false,
+    theme: initialTheme,
     setPanelWidth(panel, width) {
       set((state) => {
         const next = {
@@ -201,6 +226,17 @@ export function createUIStore(): UIStore {
     },
     setMobilePanel(panel) {
       set({ mobilePanel: panel })
+    },
+    setTheme(theme) {
+      persistTheme(theme)
+      set({ theme })
+    },
+    toggleTheme() {
+      set((state) => {
+        const newTheme: Theme = state.theme === "light" ? "dark" : "light"
+        persistTheme(newTheme)
+        return { theme: newTheme }
+      })
     }
   }))
 }

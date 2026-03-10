@@ -1,25 +1,104 @@
+/* ============================================
+   FSM UI Builder - Design System
+   Light theme as default
+   ============================================ */
+
+/* ============================================
+   CSS Variables - Light Theme (Default)
+   ============================================ */
 :root {
+  /* Light theme colors */
+  --fub-bg-0: #f8fafc;
+  --fub-bg-1: #f1f5f9;
+  --fub-bg-2: #ffffff;
+  --fub-border: #e2e8f0;
+  --fub-accent: #3b82f6;
+  --fub-accent-muted: #dbeafe;
+  --fub-accent-hover: #2563eb;
+  --fub-warn: #f59e0b;
+  --fub-danger: #ef4444;
+  --fub-success: #22c55e;
+  --fub-text: #1e293b;
+  --fub-text-muted: #64748b;
+  --fub-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --fub-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --fub-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  /* Node type colors */
+  --fub-node-initial: #22c55e;
+  --fub-node-terminal: #ef4444;
+  --fub-node-regular: #3b82f6;
+  --fub-edge-color: #94a3b8;
+  --fub-edge-hover: #64748b;
+  --fub-edge-selected: var(--fub-accent);
+
+  /* Animation durations */
+  --fub-transition-fast: 150ms;
+  --fub-transition-normal: 200ms;
+  --fub-transition-slow: 300ms;
+
+  /* Border radius scale */
+  --fub-radius-sm: 4px;
+  --fub-radius-md: 6px;
+  --fub-radius-lg: 8px;
+  --fub-radius-xl: 12px;
+
+  /* Spacing scale (4px grid) */
+  --fub-space-1: 4px;
+  --fub-space-2: 8px;
+  --fub-space-3: 12px;
+  --fub-space-4: 16px;
+  --fub-space-6: 24px;
+  --fub-space-8: 32px;
+}
+
+/* ============================================
+   Dark Theme Variables
+   ============================================ */
+.fub-root[data-theme="dark"],
+.fub-root.fub-theme-dark {
   --fub-bg-0: #0f1418;
   --fub-bg-1: #172028;
   --fub-bg-2: #1d2a33;
   --fub-border: #2d3d48;
   --fub-accent: #5ec2ff;
   --fub-accent-muted: #24495f;
+  --fub-accent-hover: #7dcfff;
   --fub-warn: #ffbd45;
   --fub-danger: #ff6f61;
+  --fub-success: #4ade80;
   --fub-text: #e7f0f6;
   --fub-text-muted: #9fb1bf;
+  --fub-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --fub-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --fub-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --fub-edge-color: #4b5563;
+  --fub-edge-hover: #6b7280;
 }
 
+/* Dark theme background */
+.fub-root[data-theme="dark"],
+.fub-root.fub-theme-dark {
+  background: radial-gradient(circle at top right, #1f394a 0%, var(--fub-bg-0) 42%);
+}
+
+/* ============================================
+   Root Container
+   ============================================ */
 .fub-root {
   display: grid;
   width: 100%;
   min-height: 720px;
-  background: radial-gradient(circle at top right, #1f394a 0%, var(--fub-bg-0) 42%);
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
   color: var(--fub-text);
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: "IBM Plex Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .fub-root-mobile {
@@ -33,38 +112,79 @@
   min-width: 0;
 }
 
+/* ============================================
+   Header Styles
+   ============================================ */
 .fub-header {
-  height: 48px;
+  height: 56px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--fub-border);
-  background: color-mix(in oklab, var(--fub-bg-1) 85%, black);
-  padding: 0 12px;
-  gap: 12px;
+  background: var(--fub-bg-2);
+  padding: 0 var(--fub-space-4);
+  gap: var(--fub-space-4);
+  box-shadow: var(--fub-shadow-sm);
 }
 
 .fub-header-left {
   display: flex;
-  gap: 12px;
+  gap: var(--fub-space-3);
   align-items: center;
   min-width: 0;
+  flex-shrink: 0;
+}
+
+.fub-header-center {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.fub-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-3);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.fub-header-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--fub-border);
 }
 
 .fub-brand {
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  color: var(--fub-text);
 }
 
 .fub-machine-name-label {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--fub-space-2);
+}
+
+.fub-machine-input {
+  width: 140px;
+  font-size: 0.875rem;
+}
+
+.fub-problems-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
 }
 
 .fub-save-status {
   font-size: 0.72rem;
   color: var(--fub-text-muted);
   min-height: 1em;
+  transition: color var(--fub-transition-fast) ease;
 }
 
 .fub-save-status-saving {
@@ -75,61 +195,87 @@
   color: var(--fub-danger);
 }
 
-.fub-label {
-  font-size: 0.75rem;
-  color: var(--fub-text-muted);
-}
-
-.fub-input {
-  width: 100%;
-  border: 1px solid var(--fub-border);
-  background: var(--fub-bg-2);
-  color: var(--fub-text);
-  border-radius: 6px;
-  padding: 6px 8px;
-}
-
-.fub-input:focus {
-  outline: 2px solid color-mix(in oklab, var(--fub-accent) 60%, transparent);
-  outline-offset: 1px;
-}
-
-.fub-textarea {
-  min-height: 112px;
-  resize: vertical;
-  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
-}
-
-.fub-dirty-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--fub-warn);
-  display: inline-block;
-}
-
-.fub-header-actions {
+/* ============================================
+   Button Group
+   ============================================ */
+.fub-btn-group {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 2px;
+  background: var(--fub-bg-1);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-md);
+  padding: 2px;
 }
 
+.fub-btn-group .fub-btn,
+.fub-btn-group .fub-icon-btn {
+  border: none;
+  border-radius: var(--fub-radius-sm);
+}
+
+.fub-btn-group .fub-btn:first-child,
+.fub-btn-group .fub-icon-btn:first-child {
+  border-radius: var(--fub-radius-sm) var(--fub-radius-sm) var(--fub-radius-sm) var(--fub-radius-sm);
+}
+
+/* ============================================
+   Button Styles
+   ============================================ */
 .fub-btn,
 .fub-mini-btn {
   border: 1px solid var(--fub-border);
   background: var(--fub-bg-2);
   color: var(--fub-text);
-  border-radius: 6px;
+  border-radius: var(--fub-radius-md);
   cursor: pointer;
+  font-weight: 500;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fub-space-1);
+  transition: all var(--fub-transition-fast) ease;
 }
 
 .fub-btn {
-  padding: 6px 10px;
+  padding: var(--fub-space-2) var(--fub-space-3);
+}
+
+.fub-btn:hover:not(:disabled) {
+  background: var(--fub-bg-1);
+  border-color: color-mix(in oklab, var(--fub-border) 80%, var(--fub-text) 20%);
+}
+
+.fub-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.fub-btn-secondary {
+  background: var(--fub-bg-2);
+  border-color: var(--fub-border);
+}
+
+.fub-btn-secondary:hover:not(:disabled) {
+  background: var(--fub-bg-1);
+}
+
+.fub-btn-primary {
+  background: var(--fub-accent);
+  border-color: var(--fub-accent);
+  color: white;
+  font-weight: 600;
+}
+
+.fub-btn-primary:hover:not(:disabled) {
+  background: var(--fub-accent-hover);
+  border-color: var(--fub-accent-hover);
+}
+
+.fub-btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .fub-mini-btn {
-  padding: 4px 8px;
+  padding: var(--fub-space-1) var(--fub-space-2);
   font-size: 0.78rem;
 }
 
@@ -138,100 +284,348 @@
   color: var(--fub-danger);
 }
 
+.fub-mini-btn.danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--fub-danger) 10%, var(--fub-bg-2));
+}
+
 .fub-btn:disabled,
 .fub-mini-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
+/* ============================================
+   Icon Button Styles
+   ============================================ */
+.fub-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--fub-border);
+  background: var(--fub-bg-2);
+  color: var(--fub-text-muted);
+  border-radius: var(--fub-radius-md);
+  cursor: pointer;
+  transition: all var(--fub-transition-fast) ease;
+}
+
+.fub-icon-btn:hover:not(:disabled) {
+  background: var(--fub-bg-1);
+  color: var(--fub-text);
+}
+
+.fub-icon-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.fub-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.fub-icon-btn--active {
+  background: var(--fub-accent-muted);
+  color: var(--fub-accent);
+  border-color: color-mix(in oklab, var(--fub-accent) 30%, var(--fub-border));
+}
+
+.fub-icon-btn--active:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--fub-accent-muted) 80%, var(--fub-accent) 20%);
+}
+
+/* ============================================
+   Dropdown Menu Styles
+   ============================================ */
+.fub-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.fub-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fub-space-1);
+  padding: var(--fub-space-2) var(--fub-space-3);
+  border: 1px solid var(--fub-border);
+  background: var(--fub-bg-2);
+  color: var(--fub-text);
+  border-radius: var(--fub-radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all var(--fub-transition-fast) ease;
+}
+
+.fub-dropdown-trigger:hover:not(:disabled) {
+  background: var(--fub-bg-1);
+}
+
+.fub-dropdown-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.fub-dropdown-trigger[aria-expanded="true"] {
+  background: var(--fub-bg-1);
+}
+
+.fub-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 160px;
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  box-shadow: var(--fub-shadow-lg);
+  z-index: 50;
+  padding: var(--fub-space-1);
+  animation: fub-dropdown-enter var(--fub-transition-fast) ease-out;
+}
+
+.fub-dropdown-menu--right {
+  left: auto;
+  right: 0;
+}
+
+@keyframes fub-dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fub-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-2);
+  width: 100%;
+  padding: var(--fub-space-2) var(--fub-space-3);
+  border: none;
+  background: transparent;
+  color: var(--fub-text);
+  font-size: 0.875rem;
+  text-align: left;
+  border-radius: var(--fub-radius-md);
+  cursor: pointer;
+  transition: background-color var(--fub-transition-fast) ease;
+}
+
+.fub-dropdown-item:hover:not(:disabled),
+.fub-dropdown-item--focused:not(:disabled) {
+  background: var(--fub-bg-1);
+}
+
+.fub-dropdown-item:active:not(:disabled) {
+  background: var(--fub-accent-muted);
+}
+
+.fub-dropdown-item--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fub-dropdown-item-icon {
+  display: flex;
+  align-items: center;
+  color: var(--fub-text-muted);
+}
+
+.fub-dropdown-item-label {
+  flex: 1;
+}
+
+/* ============================================
+   Form Elements
+   ============================================ */
+.fub-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--fub-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fub-input {
+  width: 100%;
+  border: 1px solid var(--fub-border);
+  background: var(--fub-bg-2);
+  color: var(--fub-text);
+  border-radius: var(--fub-radius-md);
+  padding: var(--fub-space-2) var(--fub-space-2);
+  font-size: 0.875rem;
+  transition: border-color var(--fub-transition-fast) ease,
+              box-shadow var(--fub-transition-fast) ease;
+}
+
+.fub-input:focus {
+  outline: none;
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--fub-accent) 20%, transparent);
+}
+
+.fub-textarea {
+  min-height: 112px;
+  resize: vertical;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.fub-dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fub-warn);
+  display: inline-block;
+  animation: fub-pulse 2s ease-in-out infinite;
+}
+
+@keyframes fub-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ============================================
+   Focus States (Accessibility)
+   ============================================ */
 .fub-btn:focus-visible,
 .fub-mini-btn:focus-visible,
+.fub-icon-btn:focus-visible,
+.fub-dropdown-trigger:focus-visible,
 .fub-list-item:focus-visible,
 .fub-mini-pill:focus-visible,
 .fub-state-card:focus-visible,
 .fub-mobile-tab:focus-visible {
-  outline: 2px solid color-mix(in oklab, var(--fub-accent) 70%, transparent);
-  outline-offset: 1px;
+  outline: 2px solid var(--fub-accent);
+  outline-offset: 2px;
 }
 
+.fub-input:focus-visible {
+  outline: none;
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--fub-accent) 25%, transparent);
+}
+
+/* ============================================
+   Badge Styles
+   ============================================ */
 .fub-badge {
   background: var(--fub-accent-muted);
-  border: 1px solid color-mix(in oklab, var(--fub-accent) 40%, var(--fub-border));
+  border: 1px solid color-mix(in oklab, var(--fub-accent) 30%, var(--fub-border));
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.78rem;
+  padding: var(--fub-space-1) var(--fub-space-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--fub-accent);
 }
 
+/* ============================================
+   Panel Styles
+   ============================================ */
 .fub-panel {
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--fub-border);
   border-bottom: 1px solid var(--fub-border);
-  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+  background: var(--fub-bg-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: transform var(--fub-transition-normal) ease,
+              opacity var(--fub-transition-normal) ease;
 }
 
 .fub-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--fub-space-2);
   border-bottom: 1px solid var(--fub-border);
-  padding: 8px 10px;
-  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+  padding: var(--fub-space-2) var(--fub-space-3);
+  background: var(--fub-bg-1);
+  min-height: 40px;
+}
+
+.fub-panel-header h2 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fub-text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .fub-panel-body {
   overflow: auto;
-  padding: 10px;
+  padding: var(--fub-space-3);
+  scroll-behavior: smooth;
 }
 
 .fub-inline-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--fub-space-2);
 }
 
 .fub-section {
-  margin-bottom: 14px;
+  margin-bottom: var(--fub-space-4);
 }
 
 .fub-section h3 {
-  margin: 6px 0;
-  font-size: 0.82rem;
+  margin: var(--fub-space-2) 0;
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--fub-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
+/* ============================================
+   List Item Styles
+   ============================================ */
 .fub-list-item {
   width: 100%;
   border: 1px solid var(--fub-border);
   background: var(--fub-bg-2);
   color: var(--fub-text);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
+  border-radius: var(--fub-radius-md);
+  padding: var(--fub-space-2) var(--fub-space-3);
+  margin-bottom: var(--fub-space-2);
   text-align: left;
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--fub-space-2);
   cursor: pointer;
+  transition: all var(--fub-transition-fast) ease;
+}
+
+.fub-list-item:hover {
+  background: var(--fub-bg-1);
+  border-color: color-mix(in oklab, var(--fub-border) 70%, var(--fub-accent) 30%);
 }
 
 .fub-list-item.is-selected,
 .fub-mini-pill.is-selected,
 .fub-state-card.is-selected {
   border-color: var(--fub-accent);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--fub-accent) 55%, transparent);
+  background: var(--fub-accent-muted);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 20%, transparent);
 }
 
 .fub-item-main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .fub-item-meta {
@@ -239,53 +633,13 @@
   font-size: 0.72rem;
 }
 
+/* ============================================
+   Canvas Styles
+   ============================================ */
 .fub-canvas-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.fub-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  text-align: center;
-  min-height: 180px;
-  margin-bottom: 10px;
-  padding: 24px 16px;
-  border: 1px dashed var(--fub-border);
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--fub-bg-2) 76%, black);
-}
-
-.fub-empty-state h3 {
-  margin: 0;
-}
-
-.fub-empty-state p {
-  margin: 0;
-}
-
-.fub-empty-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  border: 1px solid var(--fub-border);
-  display: grid;
-  place-items: center;
-  color: var(--fub-accent);
-  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
-}
-
-kbd {
-  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
-  font-size: 0.72rem;
-  border: 1px solid var(--fub-border);
-  border-radius: 4px;
-  padding: 1px 4px;
-  background: var(--fub-bg-2);
+  gap: var(--fub-space-3);
 }
 
 .fub-canvas-viewport {
@@ -298,37 +652,113 @@ kbd {
   text-align: center;
 }
 
+/* ============================================
+   Empty State
+   ============================================ */
+.fub-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fub-space-2);
+  text-align: center;
+  min-height: 180px;
+  margin-bottom: var(--fub-space-3);
+  padding: var(--fub-space-6) var(--fub-space-4);
+  border: 1px dashed var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  background: var(--fub-bg-1);
+}
+
+.fub-empty-state h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.fub-empty-state p {
+  margin: 0;
+  color: var(--fub-text-muted);
+  font-size: 0.875rem;
+}
+
+.fub-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px solid var(--fub-border);
+  background: var(--fub-bg-2);
+  display: grid;
+  place-items: center;
+  color: var(--fub-accent);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+/* ============================================
+   State Card Styles
+   ============================================ */
 .fub-state-card {
   border: 1px solid var(--fub-border);
-  border-radius: 10px;
-  padding: 10px;
-  background: color-mix(in oklab, var(--fub-bg-2) 86%, black);
+  border-radius: var(--fub-radius-lg);
+  padding: var(--fub-space-3);
+  background: var(--fub-bg-2);
   cursor: pointer;
+  transition: all var(--fub-transition-fast) ease;
+  box-shadow: var(--fub-shadow-sm);
+}
+
+.fub-state-card:hover {
+  border-color: color-mix(in oklab, var(--fub-border) 70%, var(--fub-accent) 30%);
+  transform: translateY(-2px);
+  box-shadow: var(--fub-shadow-md);
 }
 
 .fub-state-card header {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--fub-space-2);
+  margin-bottom: var(--fub-space-2);
 }
 
 .fub-mini-pill {
   border: 1px solid var(--fub-border);
   border-radius: 999px;
-  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+  background: var(--fub-bg-1);
   color: var(--fub-text);
-  padding: 4px 8px;
+  padding: var(--fub-space-1) var(--fub-space-2);
   cursor: pointer;
+  font-size: 0.75rem;
+  transition: all var(--fub-transition-fast) ease;
 }
 
+.fub-mini-pill:hover {
+  background: var(--fub-bg-2);
+  border-color: color-mix(in oklab, var(--fub-border) 70%, var(--fub-accent) 30%);
+}
+
+/* ============================================
+   Keyboard Styles
+   ============================================ */
+kbd {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.72rem;
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-sm);
+  padding: 1px 4px;
+  background: var(--fub-bg-1);
+  box-shadow: 0 1px 0 var(--fub-border);
+}
+
+/* ============================================
+   Fieldset and Form Layout
+   ============================================ */
 .fub-field,
 .fub-checkbox-row,
 .fub-fieldset {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: var(--fub-space-2);
+  margin-bottom: var(--fub-space-3);
 }
 
 .fub-checkbox-row {
@@ -338,30 +768,33 @@ kbd {
 
 .fub-fieldset {
   border: 1px solid var(--fub-border);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: var(--fub-radius-lg);
+  padding: var(--fub-space-2);
 }
 
 .fub-subheader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--fub-space-2);
 }
 
 .fub-readonly-note {
-  margin: 0 0 10px;
+  margin: 0 0 var(--fub-space-3);
   color: var(--fub-warn);
   font-size: 0.78rem;
 }
 
 .fub-inline-diags {
   margin: 0;
-  padding-left: 16px;
+  padding-left: var(--fub-space-4);
   color: var(--fub-danger);
   font-size: 0.75rem;
 }
 
+/* ============================================
+   Guardrail Styles
+   ============================================ */
 .fub-guardrail,
 .fub-guardrail-banner {
   color: var(--fub-warn);
@@ -371,22 +804,26 @@ kbd {
   align-items: center;
   display: flex;
   font-size: 0.78rem;
-  padding: 0 12px;
+  padding: 0 var(--fub-space-3);
   border-bottom: 1px solid color-mix(in oklab, var(--fub-warn) 35%, var(--fub-border));
-  background: color-mix(in oklab, var(--fub-bg-1) 70%, #000);
+  background: color-mix(in oklab, var(--fub-warn) 10%, var(--fub-bg-1));
 }
 
+/* ============================================
+   Console Styles
+   ============================================ */
 .fub-console-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 10px;
+  gap: var(--fub-space-3);
+  padding: var(--fub-space-3);
   overflow: auto;
 }
 
 .fub-console-grid h3 {
-  margin: 0 0 6px;
+  margin: 0 0 var(--fub-space-2);
   font-size: 0.78rem;
+  font-weight: 600;
   color: var(--fub-text-muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -398,15 +835,16 @@ kbd {
 
 .fub-console-card {
   border: 1px solid var(--fub-border);
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--fub-bg-2) 82%, black);
-  margin-bottom: 10px;
-  padding: 8px;
+  border-radius: var(--fub-radius-lg);
+  background: var(--fub-bg-2);
+  margin-bottom: var(--fub-space-3);
+  padding: var(--fub-space-2);
 }
 
 .fub-console-card code,
 .fub-guardrail code {
   color: var(--fub-accent);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
 }
 
 .fub-muted {
@@ -414,34 +852,47 @@ kbd {
   font-size: 0.76rem;
 }
 
+/* ============================================
+   Mobile Styles
+   ============================================ */
 .fub-mobile-warning {
   border-bottom: 1px solid color-mix(in oklab, var(--fub-warn) 35%, var(--fub-border));
+  background: color-mix(in oklab, var(--fub-warn) 10%, var(--fub-bg-1));
   color: var(--fub-warn);
   font-size: 0.8rem;
-  padding: 8px 12px;
+  padding: var(--fub-space-2) var(--fub-space-3);
 }
 
 .fub-mobile-tabs {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--fub-space-2);
+  padding: var(--fub-space-2) var(--fub-space-3);
   border-bottom: 1px solid var(--fub-border);
+  background: var(--fub-bg-1);
 }
 
 .fub-mobile-tab {
   border: 1px solid var(--fub-border);
-  border-radius: 6px;
+  border-radius: var(--fub-radius-md);
   background: var(--fub-bg-2);
   color: var(--fub-text);
-  padding: 6px 8px;
+  padding: var(--fub-space-2) var(--fub-space-2);
   cursor: pointer;
   text-transform: capitalize;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all var(--fub-transition-fast) ease;
+}
+
+.fub-mobile-tab:hover {
+  background: var(--fub-bg-1);
 }
 
 .fub-mobile-tab.is-active {
   border-color: var(--fub-accent);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--fub-accent) 55%, transparent);
+  background: var(--fub-accent-muted);
+  color: var(--fub-accent);
 }
 
 .fub-mobile-panel {
@@ -450,18 +901,31 @@ kbd {
   overflow: hidden;
 }
 
+/* ============================================
+   Resizer Styles
+   ============================================ */
 .fub-resizer {
-  background: color-mix(in oklab, var(--fub-border) 70%, black);
+  background: var(--fub-border);
+  transition: background-color var(--fub-transition-fast) ease;
+}
+
+.fub-resizer:hover {
+  background: var(--fub-accent);
 }
 
 .fub-resizer-vertical {
   cursor: ew-resize;
+  width: 6px;
 }
 
 .fub-resizer-horizontal {
   cursor: ns-resize;
+  height: 6px;
 }
 
+/* ============================================
+   Screen Reader Only
+   ============================================ */
 .fub-sr-only {
   position: absolute;
   width: 1px;
@@ -474,44 +938,72 @@ kbd {
   border: 0;
 }
 
+/* ============================================
+   Modal Styles
+   ============================================ */
 .fub-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 30;
-  background: color-mix(in oklab, black 55%, transparent);
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
   display: grid;
   place-items: center;
   padding: 20px;
+  animation: fub-fade-in var(--fub-transition-normal) ease;
+}
+
+@keyframes fub-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .fub-modal {
   width: min(760px, 100%);
   max-height: min(560px, 90vh);
   border: 1px solid var(--fub-border);
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--fub-bg-1) 86%, black);
+  border-radius: var(--fub-radius-xl);
+  background: var(--fub-bg-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: var(--fub-shadow-lg);
+  animation: fub-modal-enter var(--fub-transition-normal) ease;
+}
+
+@keyframes fub-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .fub-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: var(--fub-space-3);
+  padding: var(--fub-space-3) var(--fub-space-4);
   border-bottom: 1px solid var(--fub-border);
+  background: var(--fub-bg-1);
 }
 
 .fub-modal-header h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
 }
 
 .fub-modal-body {
   overflow: auto;
-  padding: 12px;
+  padding: var(--fub-space-4);
 }
 
 .fub-shortcuts-table {
@@ -522,7 +1014,7 @@ kbd {
 .fub-shortcuts-table th,
 .fub-shortcuts-table td {
   text-align: left;
-  padding: 8px;
+  padding: var(--fub-space-2);
   border-bottom: 1px solid var(--fub-border);
   vertical-align: top;
 }
@@ -530,14 +1022,18 @@ kbd {
 .fub-shortcuts-table th {
   color: var(--fub-text-muted);
   font-size: 0.8rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
+/* ============================================
+   Responsive Styles
+   ============================================ */
 @media (max-width: 900px) {
   .fub-root:not(.fub-root-mobile) {
     grid-template-columns: 1fr !important;
-    grid-template-rows: 48px minmax(280px, 1fr) 6px minmax(140px, auto) !important;
+    grid-template-rows: 56px minmax(280px, 1fr) 6px minmax(140px, auto) !important;
   }
 
   .fub-root:not(.fub-root-mobile) .fub-explorer,
@@ -549,9 +1045,19 @@ kbd {
   .fub-console-grid {
     grid-template-columns: 1fr;
   }
+
+  .fub-header-center {
+    display: none;
+  }
+
+  .fub-header {
+    padding: 0 var(--fub-space-3);
+  }
 }
 
-/* ReactFlow Canvas Styles */
+/* ============================================
+   ReactFlow Canvas Styles
+   ============================================ */
 .fub-canvas-flow-container {
   flex: 1;
   min-height: 300px;
@@ -569,15 +1075,340 @@ kbd {
   background: transparent;
 }
 
-/* State Node Styles */
+/* ============================================
+   Professional Node Design System
+   ============================================ */
+
+/* Base node container */
+.fub-node {
+  min-width: 180px;
+  max-width: 240px;
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  box-shadow: var(--fub-shadow-sm);
+  cursor: pointer;
+  overflow: hidden;
+  transition: box-shadow var(--fub-transition-fast) ease,
+              border-color var(--fub-transition-fast) ease,
+              transform var(--fub-transition-fast) ease;
+}
+
+.fub-node:hover {
+  box-shadow: var(--fub-shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Node selection state */
+.fub-node--selected,
+.fub-flow-canvas .react-flow__node.selected .fub-node {
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--fub-accent) 20%, transparent),
+              var(--fub-shadow-md);
+}
+
+/* Node header with type-based accent */
+.fub-node-header {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-2);
+  padding: var(--fub-space-3);
+  border-bottom: 1px solid var(--fub-border);
+  background: var(--fub-bg-1);
+  position: relative;
+}
+
+/* Colored left border accent based on node type */
+.fub-node--initial .fub-node-header {
+  border-left: 3px solid var(--fub-node-initial);
+  padding-left: calc(var(--fub-space-3) - 3px);
+}
+
+.fub-node--terminal .fub-node-header {
+  border-left: 3px solid var(--fub-node-terminal);
+  padding-left: calc(var(--fub-space-3) - 3px);
+}
+
+.fub-node--regular .fub-node-header {
+  border-left: 3px solid var(--fub-node-regular);
+  padding-left: calc(var(--fub-space-3) - 3px);
+}
+
+/* Node icon styling */
+.fub-node-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--fub-radius-md);
+  flex-shrink: 0;
+}
+
+.fub-node--initial .fub-node-icon {
+  background: color-mix(in oklab, var(--fub-node-initial) 15%, transparent);
+  color: var(--fub-node-initial);
+}
+
+.fub-node--terminal .fub-node-icon {
+  background: color-mix(in oklab, var(--fub-node-terminal) 15%, transparent);
+  color: var(--fub-node-terminal);
+}
+
+.fub-node--regular .fub-node-icon {
+  background: color-mix(in oklab, var(--fub-node-regular) 15%, transparent);
+  color: var(--fub-node-regular);
+}
+
+/* Node title */
+.fub-node-title {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--fub-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Node badge (Initial/Final/State) */
+.fub-node-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: var(--fub-radius-sm);
+  flex-shrink: 0;
+}
+
+.fub-node--initial .fub-node-badge {
+  background: color-mix(in oklab, var(--fub-node-initial) 12%, transparent);
+  color: var(--fub-node-initial);
+}
+
+.fub-node--terminal .fub-node-badge {
+  background: color-mix(in oklab, var(--fub-node-terminal) 12%, transparent);
+  color: var(--fub-node-terminal);
+}
+
+.fub-node--regular .fub-node-badge {
+  background: color-mix(in oklab, var(--fub-node-regular) 12%, transparent);
+  color: var(--fub-node-regular);
+}
+
+/* Node body with metadata */
+.fub-node-body {
+  padding: var(--fub-space-2) var(--fub-space-3);
+}
+
+.fub-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fub-space-2);
+}
+
+.fub-node-meta--empty {
+  opacity: 0.6;
+}
+
+.fub-node-meta-item {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-1);
+  font-size: 0.75rem;
+  color: var(--fub-text-muted);
+}
+
+.fub-node-meta-item svg {
+  opacity: 0.7;
+}
+
+/* ============================================
+   Connection Handle Styles
+   ============================================ */
+
+.fub-node-handle {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--fub-bg-2);
+  transition: transform var(--fub-transition-fast) ease,
+              background-color var(--fub-transition-fast) ease,
+              box-shadow var(--fub-transition-fast) ease;
+}
+
+/* Target handle (input) - blue tint */
+.fub-node-handle--target {
+  background: var(--fub-node-regular);
+  top: -6px;
+}
+
+/* Source handle (output) - green tint */
+.fub-node-handle--source {
+  background: var(--fub-node-initial);
+  bottom: -6px;
+}
+
+/* Handle hover states */
+.fub-node:hover .fub-node-handle {
+  transform: scale(1.15);
+}
+
+.fub-node-handle:hover {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--fub-accent) 25%, transparent);
+}
+
+/* ============================================
+   Custom Edge Styles
+   ============================================ */
+
+.fub-edge-path {
+  stroke: var(--fub-edge-color);
+  stroke-width: 2;
+  fill: none;
+  transition: stroke var(--fub-transition-fast) ease,
+              stroke-width var(--fub-transition-fast) ease;
+}
+
+.fub-edge-path:hover {
+  stroke: var(--fub-edge-hover);
+}
+
+.fub-edge-path--selected {
+  stroke: var(--fub-edge-selected);
+  stroke-width: 2.5;
+}
+
+/* Edge label pill styling */
+.fub-edge-label {
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: 12px;
+  padding: var(--fub-space-1) var(--fub-space-3);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fub-text);
+  white-space: nowrap;
+  box-shadow: var(--fub-shadow-sm);
+  transition: all var(--fub-transition-fast) ease;
+  cursor: pointer;
+}
+
+.fub-edge-label:hover {
+  background: var(--fub-bg-1);
+  border-color: color-mix(in oklab, var(--fub-accent) 30%, var(--fub-border));
+}
+
+.fub-edge-label--selected {
+  background: var(--fub-accent-muted);
+  border-color: var(--fub-accent);
+  color: var(--fub-accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 15%, transparent);
+}
+
+/* Default ReactFlow edge styles (fallback) */
+.fub-flow-canvas .react-flow__edge-path {
+  stroke: var(--fub-edge-color);
+  stroke-width: 2;
+}
+
+.fub-flow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--fub-accent);
+  stroke-width: 2.5;
+}
+
+.fub-flow-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--fub-edge-hover);
+}
+
+/* ============================================
+   Controls Styles
+   ============================================ */
+
+.fub-flow-controls {
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  box-shadow: var(--fub-shadow-md);
+  overflow: hidden;
+}
+
+.fub-flow-controls button {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--fub-border);
+  color: var(--fub-text);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color var(--fub-transition-fast) ease;
+}
+
+.fub-flow-controls button:last-child {
+  border-bottom: none;
+}
+
+.fub-flow-controls button:hover {
+  background: var(--fub-bg-1);
+}
+
+.fub-flow-controls button svg {
+  fill: var(--fub-text);
+}
+
+/* ============================================
+   MiniMap Styles
+   ============================================ */
+
+.fub-flow-minimap {
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  overflow: hidden;
+}
+
+.fub-flow-minimap svg {
+  border-radius: var(--fub-radius-lg);
+}
+
+/* Light theme minimap mask */
+.fub-root[data-theme="light"] .fub-flow-minimap .react-flow__minimap-mask,
+.fub-root:not([data-theme="dark"]) .fub-flow-minimap .react-flow__minimap-mask {
+  fill: rgba(241, 245, 249, 0.8);
+}
+
+/* Dark theme minimap mask */
+.fub-root[data-theme="dark"] .fub-flow-minimap .react-flow__minimap-mask {
+  fill: rgba(23, 32, 40, 0.8);
+}
+
+/* ============================================
+   Selection Box Styles
+   ============================================ */
+
+.fub-flow-canvas .react-flow__selection {
+  background: color-mix(in oklab, var(--fub-accent) 10%, transparent);
+  border: 1px dashed var(--fub-accent);
+}
+
+/* ============================================
+   Legacy styles for backward compatibility
+   ============================================ */
+
+/* Old state node styles - kept for any legacy usage */
 .fub-flow-state-node {
   min-width: 160px;
-  padding: 12px 16px;
+  padding: var(--fub-space-3) var(--fub-space-4);
   border: 2px solid var(--fub-border);
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--fub-bg-2) 90%, black);
+  border-radius: var(--fub-radius-lg);
+  background: var(--fub-bg-2);
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--fub-transition-fast) ease,
+              box-shadow var(--fub-transition-fast) ease;
 }
 
 .fub-flow-state-node:hover {
@@ -586,14 +1417,14 @@ kbd {
 
 .fub-flow-state-node.is-selected {
   border-color: var(--fub-accent);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 35%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 25%, transparent);
 }
 
 .fub-flow-state-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: var(--fub-space-2);
 }
 
 .fub-flow-state-name {
@@ -610,103 +1441,466 @@ kbd {
   letter-spacing: 0.05em;
 }
 
-/* Handle Styles */
+/* Old handle styles */
 .fub-flow-handle {
   width: 10px;
   height: 10px;
   background: var(--fub-border);
   border: 2px solid var(--fub-bg-2);
   border-radius: 50%;
+  transition: background-color var(--fub-transition-fast) ease;
 }
 
 .fub-flow-handle:hover {
   background: var(--fub-accent);
 }
 
-/* Edge Styles */
-.fub-flow-canvas .react-flow__edge-path {
-  stroke: var(--fub-border);
-  stroke-width: 2;
-}
+/* ============================================
+   View Toggle Styles
+   ============================================ */
 
-.fub-flow-canvas .react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--fub-accent);
-  stroke-width: 2.5;
-}
-
-.fub-flow-canvas .react-flow__edge:hover .react-flow__edge-path {
-  stroke: color-mix(in oklab, var(--fub-accent) 70%, var(--fub-border));
-}
-
-.fub-flow-canvas .react-flow__edge-textbg {
-  fill: var(--fub-bg-2);
-}
-
-.fub-flow-canvas .react-flow__edge-text {
-  fill: var(--fub-text);
-  font-size: 11px;
-}
-
-.fub-flow-canvas .react-flow__arrowhead path {
-  fill: var(--fub-border);
-}
-
-.fub-flow-canvas .react-flow__edge.selected .react-flow__arrowhead path {
-  fill: var(--fub-accent);
-}
-
-/* Controls Styles */
-.fub-flow-controls {
-  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+.fub-view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--fub-bg-1);
   border: 1px solid var(--fub-border);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border-radius: var(--fub-radius-md);
+  padding: 2px;
 }
 
-.fub-flow-controls button {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--fub-border);
-  color: var(--fub-text);
-  width: 28px;
-  height: 28px;
+.fub-view-toggle-btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 28px;
+  height: 24px;
+  border: none;
+  border-radius: var(--fub-radius-sm);
+  background: transparent;
+  color: var(--fub-text-muted);
   cursor: pointer;
+  transition: all var(--fub-transition-fast) ease;
 }
 
-.fub-flow-controls button:last-child {
-  border-bottom: none;
+.fub-view-toggle-btn:hover {
+  background: var(--fub-bg-2);
+  color: var(--fub-text);
 }
 
-.fub-flow-controls button:hover {
+.fub-view-toggle-btn.is-active {
+  background: var(--fub-accent-muted);
+  color: var(--fub-accent);
+}
+
+.fub-tree-actions {
+  display: flex;
+  gap: var(--fub-space-2);
+  margin-bottom: var(--fub-space-3);
+}
+
+/* ============================================
+   Node Palette Styles
+   ============================================ */
+
+.fub-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fub-space-3);
+}
+
+/* Search input */
+.fub-palette-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fub-palette-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--fub-text-muted);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.fub-palette-search-input {
+  width: 100%;
+  border: 1px solid var(--fub-border);
+  background: var(--fub-bg-2);
+  color: var(--fub-text);
+  border-radius: var(--fub-radius-md);
+  padding: var(--fub-space-2) var(--fub-space-8) var(--fub-space-2) var(--fub-space-8);
+  font-size: 0.85rem;
+}
+
+.fub-palette-search-input::placeholder {
+  color: var(--fub-text-muted);
+}
+
+.fub-palette-search-input:focus {
+  outline: none;
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--fub-accent) 20%, transparent);
+}
+
+.fub-palette-search-clear {
+  position: absolute;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: var(--fub-border);
+  color: var(--fub-text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--fub-transition-fast) ease;
+}
+
+.fub-palette-search-clear:hover {
+  background: var(--fub-accent-muted);
+}
+
+/* Categories */
+.fub-palette-categories {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fub-space-2);
+}
+
+.fub-palette-category {
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-lg);
+  overflow: hidden;
+}
+
+.fub-palette-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--fub-space-2);
+  width: 100%;
+  padding: var(--fub-space-3);
+  border: none;
+  background: var(--fub-bg-1);
+  color: var(--fub-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background-color var(--fub-transition-fast) ease;
+}
+
+.fub-palette-category-header:hover {
   background: var(--fub-bg-2);
 }
 
-.fub-flow-controls button svg {
-  fill: var(--fub-text);
+.fub-palette-chevron {
+  display: flex;
+  align-items: center;
+  transition: transform var(--fub-transition-normal) ease;
 }
 
-/* MiniMap Styles */
-.fub-flow-minimap {
-  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+.fub-palette-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.fub-palette-category-label {
+  flex: 1;
+  text-align: left;
+}
+
+.fub-palette-category-count {
+  color: var(--fub-text-muted);
+  font-size: 0.72rem;
+  background: var(--fub-bg-2);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+/* Palette items grid */
+.fub-palette-items {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--fub-space-2);
+  padding: var(--fub-space-3);
+  background: var(--fub-bg-2);
+}
+
+/* Individual palette item */
+.fub-palette-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--fub-space-2);
+  padding: var(--fub-space-3) var(--fub-space-2);
   border: 1px solid var(--fub-border);
-  border-radius: 8px;
+  border-radius: var(--fub-radius-lg);
+  background: var(--fub-bg-1);
+  cursor: grab;
+  transition: all var(--fub-transition-fast) ease;
 }
 
-.fub-flow-minimap svg {
-  border-radius: 8px;
+.fub-palette-item:hover {
+  border-color: color-mix(in oklab, var(--fub-accent) 40%, var(--fub-border));
+  transform: translateY(-2px);
+  box-shadow: var(--fub-shadow-md);
 }
 
-/* Selection box styles */
-.fub-flow-canvas .react-flow__selection {
+.fub-palette-item:focus-visible {
+  outline: 2px solid var(--fub-accent);
+  outline-offset: 2px;
+}
+
+.fub-palette-item:active {
+  cursor: grabbing;
+}
+
+/* Palette item states */
+.fub-palette-item--dragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+}
+
+.fub-palette-item--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fub-palette-item--disabled:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--fub-border);
+}
+
+/* Palette item icon */
+.fub-palette-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--fub-radius-lg);
+}
+
+/* State type colors */
+.fub-palette-item--initial .fub-palette-item-icon {
+  background: color-mix(in oklab, var(--fub-node-initial) 15%, transparent);
+  color: var(--fub-node-initial);
+}
+
+.fub-palette-item--terminal .fub-palette-item-icon {
+  background: color-mix(in oklab, var(--fub-node-terminal) 15%, transparent);
+  color: var(--fub-node-terminal);
+}
+
+.fub-palette-item--state .fub-palette-item-icon {
+  background: color-mix(in oklab, var(--fub-node-regular) 15%, transparent);
+  color: var(--fub-node-regular);
+}
+
+.fub-palette-item--action .fub-palette-item-icon {
   background: color-mix(in oklab, var(--fub-accent) 15%, transparent);
-  border: 1px dashed var(--fub-accent);
+  color: var(--fub-accent);
 }
 
-/* Node selection indicator via ReactFlow */
-.fub-flow-canvas .react-flow__node.selected .fub-flow-state-node {
-  border-color: var(--fub-accent);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 35%, transparent);
+.fub-palette-item--logic .fub-palette-item-icon {
+  background: color-mix(in oklab, var(--fub-warn) 15%, transparent);
+  color: var(--fub-warn);
+}
+
+/* Palette item label */
+.fub-palette-item-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fub-text);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Tooltip */
+.fub-palette-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--fub-space-2) var(--fub-space-3);
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-md);
+  font-size: 0.72rem;
+  color: var(--fub-text);
+  white-space: nowrap;
+  box-shadow: var(--fub-shadow-md);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.fub-palette-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--fub-border);
+}
+
+/* Empty state */
+.fub-palette-empty {
+  text-align: center;
+  padding: var(--fub-space-6) var(--fub-space-4);
+  color: var(--fub-text-muted);
+  font-size: 0.85rem;
+}
+
+/* Help text */
+.fub-palette-help {
+  padding: var(--fub-space-2) var(--fub-space-3);
+  border: 1px dashed var(--fub-border);
+  border-radius: var(--fub-radius-md);
+  background: var(--fub-bg-1);
+}
+
+.fub-palette-help p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--fub-text-muted);
+  text-align: center;
+}
+
+/* ============================================
+   Canvas Drop Zone Styles
+   ============================================ */
+
+.fub-canvas-drop-target {
+  position: relative;
+}
+
+.fub-canvas-drop-target::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--fub-accent);
+  border-radius: var(--fub-radius-lg);
+  background: color-mix(in oklab, var(--fub-accent) 8%, transparent);
+  pointer-events: none;
+  z-index: 5;
+  animation: fub-pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes fub-pulse-border {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.fub-canvas-drop-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.fub-canvas-drop-indicator-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--fub-space-2);
+  padding: var(--fub-space-4) var(--fub-space-6);
+  background: var(--fub-bg-2);
+  border: 1px solid var(--fub-accent);
+  border-radius: var(--fub-radius-xl);
+  box-shadow: var(--fub-shadow-lg);
+  color: var(--fub-accent);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.fub-canvas-drop-indicator-content svg {
+  opacity: 0.8;
+}
+
+/* ============================================
+   Dark Theme Specific Overrides
+   ============================================ */
+
+.fub-root[data-theme="dark"] .fub-header,
+.fub-root.fub-theme-dark .fub-header {
+  background: color-mix(in oklab, var(--fub-bg-1) 85%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-panel,
+.fub-root.fub-theme-dark .fub-panel {
+  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-panel-header,
+.fub-root.fub-theme-dark .fub-panel-header {
+  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-empty-state,
+.fub-root.fub-theme-dark .fub-empty-state {
+  background: color-mix(in oklab, var(--fub-bg-2) 76%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-state-card,
+.fub-root.fub-theme-dark .fub-state-card {
+  background: color-mix(in oklab, var(--fub-bg-2) 86%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-console-card,
+.fub-root.fub-theme-dark .fub-console-card {
+  background: color-mix(in oklab, var(--fub-bg-2) 82%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-mini-pill,
+.fub-root.fub-theme-dark .fub-mini-pill {
+  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-modal,
+.fub-root.fub-theme-dark .fub-modal {
+  background: color-mix(in oklab, var(--fub-bg-1) 86%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-palette-item,
+.fub-root.fub-theme-dark .fub-palette-item {
+  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-palette-category-header,
+.fub-root.fub-theme-dark .fub-palette-category-header {
+  background: color-mix(in oklab, var(--fub-bg-1) 70%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-palette-category-header:hover,
+.fub-root.fub-theme-dark .fub-palette-category-header:hover {
+  background: color-mix(in oklab, var(--fub-bg-1) 50%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-palette-tooltip,
+.fub-root.fub-theme-dark .fub-palette-tooltip {
+  background: color-mix(in oklab, var(--fub-bg-1) 95%, black);
+}
+
+.fub-root[data-theme="dark"] .fub-canvas-drop-indicator-content,
+.fub-root.fub-theme-dark .fub-canvas-drop-indicator-content {
+  background: color-mix(in oklab, var(--fub-bg-1) 95%, black);
 }
