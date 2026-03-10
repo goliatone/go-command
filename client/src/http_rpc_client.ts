@@ -14,11 +14,19 @@ export interface HTTPRPCClientOptions extends BaseRPCClientOptions {
   requestInit?: Omit<RequestInit, "method" | "headers" | "body">;
 }
 
+function defaultFetchImpl(): typeof fetch {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("global fetch is unavailable; provide fetchImpl explicitly");
+  }
+  // Keep browser fetch invocation bound to the global scope.
+  return globalThis.fetch.bind(globalThis) as typeof fetch;
+}
+
 export class HTTPRPCClient implements RPCClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: HTTPRPCClientOptions) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? defaultFetchImpl();
   }
 
   async call<TResult = unknown, TParams = unknown>(method: string, params?: TParams): Promise<TResult> {

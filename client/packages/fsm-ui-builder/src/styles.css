@@ -61,6 +61,20 @@
   gap: 8px;
 }
 
+.fub-save-status {
+  font-size: 0.72rem;
+  color: var(--fub-text-muted);
+  min-height: 1em;
+}
+
+.fub-save-status-saving {
+  color: var(--fub-accent);
+}
+
+.fub-save-status-error {
+  color: var(--fub-danger);
+}
+
 .fub-label {
   font-size: 0.75rem;
   color: var(--fub-text-muted);
@@ -229,6 +243,49 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.fub-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  min-height: 180px;
+  margin-bottom: 10px;
+  padding: 24px 16px;
+  border: 1px dashed var(--fub-border);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--fub-bg-2) 76%, black);
+}
+
+.fub-empty-state h3 {
+  margin: 0;
+}
+
+.fub-empty-state p {
+  margin: 0;
+}
+
+.fub-empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--fub-border);
+  display: grid;
+  place-items: center;
+  color: var(--fub-accent);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+kbd {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.72rem;
+  border: 1px solid var(--fub-border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: var(--fub-bg-2);
 }
 
 .fub-canvas-viewport {
@@ -417,6 +474,66 @@
   border: 0;
 }
 
+.fub-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in oklab, black 55%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.fub-modal {
+  width: min(760px, 100%);
+  max-height: min(560px, 90vh);
+  border: 1px solid var(--fub-border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--fub-bg-1) 86%, black);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fub-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--fub-border);
+}
+
+.fub-modal-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.fub-modal-body {
+  overflow: auto;
+  padding: 12px;
+}
+
+.fub-shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.fub-shortcuts-table th,
+.fub-shortcuts-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--fub-border);
+  vertical-align: top;
+}
+
+.fub-shortcuts-table th {
+  color: var(--fub-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 @media (max-width: 900px) {
   .fub-root:not(.fub-root-mobile) {
     grid-template-columns: 1fr !important;
@@ -432,4 +549,164 @@
   .fub-console-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ReactFlow Canvas Styles */
+.fub-canvas-flow-container {
+  flex: 1;
+  min-height: 300px;
+  padding: 0;
+  position: relative;
+}
+
+.fub-flow-canvas {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.fub-flow-canvas .react-flow__background {
+  background: transparent;
+}
+
+/* State Node Styles */
+.fub-flow-state-node {
+  min-width: 160px;
+  padding: 12px 16px;
+  border: 2px solid var(--fub-border);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--fub-bg-2) 90%, black);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fub-flow-state-node:hover {
+  border-color: color-mix(in oklab, var(--fub-accent) 50%, var(--fub-border));
+}
+
+.fub-flow-state-node.is-selected {
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 35%, transparent);
+}
+
+.fub-flow-state-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.fub-flow-state-name {
+  font-size: 0.9rem;
+  color: var(--fub-text);
+  text-align: center;
+  word-break: break-word;
+}
+
+.fub-flow-state-badge {
+  font-size: 0.7rem;
+  color: var(--fub-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Handle Styles */
+.fub-flow-handle {
+  width: 10px;
+  height: 10px;
+  background: var(--fub-border);
+  border: 2px solid var(--fub-bg-2);
+  border-radius: 50%;
+}
+
+.fub-flow-handle:hover {
+  background: var(--fub-accent);
+}
+
+/* Edge Styles */
+.fub-flow-canvas .react-flow__edge-path {
+  stroke: var(--fub-border);
+  stroke-width: 2;
+}
+
+.fub-flow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--fub-accent);
+  stroke-width: 2.5;
+}
+
+.fub-flow-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: color-mix(in oklab, var(--fub-accent) 70%, var(--fub-border));
+}
+
+.fub-flow-canvas .react-flow__edge-textbg {
+  fill: var(--fub-bg-2);
+}
+
+.fub-flow-canvas .react-flow__edge-text {
+  fill: var(--fub-text);
+  font-size: 11px;
+}
+
+.fub-flow-canvas .react-flow__arrowhead path {
+  fill: var(--fub-border);
+}
+
+.fub-flow-canvas .react-flow__edge.selected .react-flow__arrowhead path {
+  fill: var(--fub-accent);
+}
+
+/* Controls Styles */
+.fub-flow-controls {
+  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+  border: 1px solid var(--fub-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.fub-flow-controls button {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--fub-border);
+  color: var(--fub-text);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.fub-flow-controls button:last-child {
+  border-bottom: none;
+}
+
+.fub-flow-controls button:hover {
+  background: var(--fub-bg-2);
+}
+
+.fub-flow-controls button svg {
+  fill: var(--fub-text);
+}
+
+/* MiniMap Styles */
+.fub-flow-minimap {
+  background: color-mix(in oklab, var(--fub-bg-1) 90%, black);
+  border: 1px solid var(--fub-border);
+  border-radius: 8px;
+}
+
+.fub-flow-minimap svg {
+  border-radius: 8px;
+}
+
+/* Selection box styles */
+.fub-flow-canvas .react-flow__selection {
+  background: color-mix(in oklab, var(--fub-accent) 15%, transparent);
+  border: 1px dashed var(--fub-accent);
+}
+
+/* Node selection indicator via ReactFlow */
+.fub-flow-canvas .react-flow__node.selected .fub-flow-state-node {
+  border-color: var(--fub-accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 35%, transparent);
 }

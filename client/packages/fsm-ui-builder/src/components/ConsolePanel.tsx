@@ -8,6 +8,7 @@ export function ConsolePanel() {
   const projectedOutcome = useSimulationStore((state) => state.projectedOutcome)
   const blockedTransitions = useSimulationStore((state) => state.blockedTransitions)
   const errors = useSimulationStore((state) => state.errors)
+  const clearSimulation = useSimulationStore((state) => state.clear)
 
   return (
     <section
@@ -20,7 +21,17 @@ export function ConsolePanel() {
     >
       <div className="fub-panel-header" id="fub-panel-console-heading">
         <strong>Console</strong>
-        <span className="fub-muted">Problems + simulation output</span>
+        <div className="fub-inline-actions">
+          <span className="fub-muted">Problems + simulation output</span>
+          <button
+            type="button"
+            className="fub-mini-btn"
+            onClick={clearSimulation}
+            aria-label="Clear console output"
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       <div className="fub-console-grid">

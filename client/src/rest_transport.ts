@@ -8,12 +8,19 @@ export interface RESTTransportOptions {
   fetchImpl?: typeof fetch;
 }
 
+function defaultFetchImpl(): typeof fetch {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("global fetch is unavailable; provide fetchImpl explicitly");
+  }
+  return globalThis.fetch.bind(globalThis) as typeof fetch;
+}
+
 export class RESTTransport implements Transport {
   private readonly fetchImpl: typeof fetch;
   private readonly endpoint: string | ((machine: string) => string);
 
   constructor(private readonly options: RESTTransportOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? defaultFetchImpl();
     this.endpoint = options.endpoint ?? ((machine) => `/fsm/${encodeURIComponent(machine)}/apply-event`);
   }
 

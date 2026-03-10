@@ -58,6 +58,28 @@ function makeDocument(): DraftMachineDocument {
   }
 }
 
+function makeEmptyDocument(): DraftMachineDocument {
+  return {
+    definition: {
+      id: "empty",
+      name: "Empty Machine",
+      version: "v1",
+      states: [],
+      transitions: []
+    },
+    ui_schema: {
+      layout: "flow",
+      nodes: [],
+      edges: [],
+      inspector: {}
+    },
+    draft_state: {
+      is_draft: true,
+      last_saved_at: "2026-03-10T00:00:00Z"
+    }
+  }
+}
+
 describe("fsm-ui-builder shell and interactions", () => {
   afterEach(() => {
     cleanup()
@@ -231,5 +253,50 @@ describe("fsm-ui-builder shell and interactions", () => {
     expect(screen.queryByLabelText("Unsaved changes")).toBeNull()
 
     expect(onChange).toHaveBeenCalled()
+  })
+
+  it("shows autosave status feedback in the header while preserving dirty state", async () => {
+    const user = userEvent.setup()
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} autosaveDebounceMs={5} />)
+
+    const explorer = screen.getByLabelText("Explorer panel")
+    await user.click(within(explorer).getByRole("button", { name: /draft/i }))
+
+    const stateName = screen.getByLabelText("State name") as HTMLInputElement
+    await user.clear(stateName)
+    await user.type(stateName, "pending")
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unsaved changes \(autosaved/i)).toBeTruthy()
+    })
+    expect(screen.getByLabelText("Unsaved changes")).toBeTruthy()
+  })
+
+  it("renders empty-state guidance and creates first state from canvas action", async () => {
+    const user = userEvent.setup()
+
+    render(<FSMUIBuilder initialDocument={makeEmptyDocument()} />)
+
+    expect(screen.getByText("No states yet")).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Create first state/i }))
+    expect(screen.queryByText("No states yet")).toBeNull()
+    expect(screen.getAllByRole("button", { name: /state_1/i }).length).toBeGreaterThan(0)
+  })
+
+  it("clears console output with the clear action", async () => {
+    const user = userEvent.setup()
+
+    render(<FSMUIBuilder initialDocument={makeDocument()} />)
+
+    await user.click(screen.getByRole("button", { name: "Validate" }))
+    await waitFor(() => {
+      expect(screen.getAllByText(/Authoring RPC unavailable/i).length).toBeGreaterThan(0)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Clear console output" }))
+    expect(screen.getByText("No simulation runs yet.")).toBeTruthy()
+    expect(screen.getByText("No dry-run projected outcome yet.")).toBeTruthy()
+    expect(screen.getByText("No runtime/authoring errors.")).toBeTruthy()
   })
 })

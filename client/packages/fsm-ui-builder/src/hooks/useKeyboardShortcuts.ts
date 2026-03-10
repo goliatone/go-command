@@ -8,6 +8,9 @@ export interface KeyboardShortcutHandlers {
   onValidate?: () => void
   onFocusPanel?: (panel: "explorer" | "canvas" | "inspector" | "console") => void
   onToggleConsole?: () => void
+  keyboardHelpOpen?: boolean
+  onToggleKeyboardHelp?: () => void
+  onCloseKeyboardHelp?: () => void
   readOnly?: boolean
 }
 
@@ -80,6 +83,15 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
       const readOnly = Boolean(handlers.readOnly)
       const key = event.key
       const keyLower = key.toLowerCase()
+      const keyboardHelpOpen = Boolean(handlers.keyboardHelpOpen)
+
+      if (keyboardHelpOpen) {
+        if (key === "Escape") {
+          event.preventDefault()
+          handlers.onCloseKeyboardHelp?.()
+        }
+        return
+      }
 
       if (modifier && keyLower === "s") {
         event.preventDefault()
@@ -148,6 +160,12 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
         } else {
           handlers.onFocusPanel?.("console")
         }
+        return
+      }
+
+      if (!modifier && !editable && key === "?") {
+        event.preventDefault()
+        handlers.onToggleKeyboardHelp?.()
         return
       }
 

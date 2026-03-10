@@ -10,6 +10,7 @@ import type { PersistenceStore, PersistedMachineDraft } from "./adapters/persist
 import { createLocalStoragePersistenceStore } from "./adapters/persistence"
 import type { BuilderRequestMeta, DraftMachineDocument, ValidationDiagnostic } from "./contracts"
 import { BuilderShell } from "./components/BuilderShell"
+import type { SaveStatus } from "./components/Header"
 import { defaultDraftMachineDocument, deepClone, validateDefinition, type Selection } from "./document"
 import { toHandledBuilderError } from "./errorHandling"
 import type { BuilderRuntimeRPC } from "./hooks/useRPC"
@@ -129,6 +130,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
 
   const baseRoundTripDocumentRef = useRef<DraftMachineDocument>(loadDraftDocumentForEditing(document))
   const [recoveryDraft, setRecoveryDraft] = useState<PersistedMachineDraft | null>(null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ state: "idle" })
 
   const buildRoundTripDraft = useCallback((): DraftMachineDocument => {
     return prepareDraftDocumentForSave({
@@ -148,6 +150,16 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     },
     [pushSimulationError]
   )
+
+  const markSaveError = useCallback((source: SaveStatus["source"], error: unknown) => {
+    const handled = toHandledBuilderError(error)
+    setSaveStatus({
+      state: "error",
+      source,
+      message: handled.message,
+      updatedAt: new Date().toISOString()
+    })
+  }, [])
 
   useEffect(() => {
     if (!props.onChange) {
@@ -200,6 +212,11 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     }
 
     const timer = window.setTimeout(() => {
+      setSaveStatus({
+        state: "saving",
+        source: "autosave",
+        updatedAt: new Date().toISOString()
+      })
       const draft = buildRoundTripDraft()
       void persistenceStore
         .save({
@@ -208,9 +225,15 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
           document: draft
         })
         .then(() => {
+          setSaveStatus({
+            state: "saved",
+            source: "autosave",
+            updatedAt: new Date().toISOString()
+          })
           pushSimulationInfo("Autosaved draft to persistence store.")
         })
         .catch((error) => {
+          markSaveError("autosave", error)
           const handled = toHandledBuilderError(error)
           pushSimulationError({
             code: handled.code,
@@ -223,7 +246,16 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     return () => {
       window.clearTimeout(timer)
     }
-  }, [autosaveDebounceMs, buildRoundTripDraft, isDirty, machineID, persistenceStore, pushSimulationError, pushSimulationInfo])
+  }, [
+    autosaveDebounceMs,
+    buildRoundTripDraft,
+    isDirty,
+    machineID,
+    markSaveError,
+    persistenceStore,
+    pushSimulationError,
+    pushSimulationInfo
+  ])
 
   const onSimulate = useCallback(async () => {
     if (!runtimeRPC) {
@@ -328,6 +360,11 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
   }, [authoringRPC, buildRoundTripDraft, handleOperationError, machineID, pushSimulationInfo, setDiagnostics])
 
   const onSave = useCallback(async () => {
+    setSaveStatus({
+      state: "saving",
+      source: "manual",
+      updatedAt: new Date().toISOString()
+    })
     const roundTripDraft = buildRoundTripDraft()
 
     if (!authoringRPC) {
@@ -340,8 +377,14 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
         markSaved()
         baseRoundTripDocumentRef.current = deepClone(roundTripDraft)
         setRecoveryDraft(null)
+        setSaveStatus({
+          state: "saved",
+          source: "manual",
+          updatedAt: new Date().toISOString()
+        })
         pushSimulationInfo("Saved locally (authoring RPC unavailable).")
       } catch (error) {
+        markSaveError("manual", error)
         handleOperationError(error)
       }
       return
@@ -375,8 +418,14 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
       })
 
       setRecoveryDraft(null)
+      setSaveStatus({
+        state: "saved",
+        source: "manual",
+        updatedAt: new Date().toISOString()
+      })
       pushSimulationInfo("Draft saved through authoring RPC.")
     } catch (error) {
+      markSaveError("manual", error)
       handleOperationError(error)
     }
   }, [
@@ -384,6 +433,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     authoringRPC,
     buildRoundTripDraft,
     handleOperationError,
+    markSaveError,
     machineID,
     markSaved,
     persistenceStore,
@@ -444,6 +494,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
       recoveryAvailable={Boolean(recoveryDraft)}
       rpcExportAvailable={isRPCExportAvailable(exportAdapter)}
       actionCatalogProvider={props.actionCatalogProvider}
+      saveStatus={saveStatus}
     />
   )
 }

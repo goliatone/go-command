@@ -51,6 +51,51 @@ describe("fsm transports", () => {
     expect(response.execution?.executionId).toBe("exec-1");
   });
 
+  it("RESTTransport binds global fetch when no fetchImpl is provided", async () => {
+    const originalFetch = globalThis.fetch;
+    const fixture = loadServerFixture("apply_event_response.json");
+    const globalRef = globalThis;
+    const fakeFetch = async function(this: unknown): Promise<Response> {
+      if (this !== globalRef) {
+        throw new TypeError("Illegal invocation");
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => fixture,
+        text: async () => ""
+      } as Response;
+    };
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fakeFetch
+    });
+
+    try {
+      const transport = new RESTTransport({
+        baseUrl: "https://api.example.com",
+        endpoint: "/apply"
+      });
+
+      const response = await transport.applyEvent(
+        "orders",
+        "order-42",
+        "approve",
+        { amount: 100 },
+        { actorId: "admin", roles: ["admin"], tenant: "acme" }
+      );
+      expect(response.snapshot.currentState).toBe("approved");
+    } finally {
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: originalFetch
+      });
+    }
+  });
+
   it("RPCTransport delegates to generic RPC client", async () => {
     const fixture = loadServerFixture("apply_event_response.json");
     const invokeSpy = vi.fn(async (..._args: [string, unknown | undefined]) => fixture);

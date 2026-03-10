@@ -2,6 +2,16 @@ import { useState } from "react"
 
 import { useMachineStore, useUIStore } from "../store/provider"
 
+export type SaveStatusState = "idle" | "saving" | "saved" | "error"
+export type SaveStatusSource = "manual" | "autosave"
+
+export interface SaveStatus {
+  state: SaveStatusState
+  source?: SaveStatusSource
+  updatedAt?: string
+  message?: string
+}
+
 export interface HeaderProps {
   onSave?: () => Promise<void> | void
   onValidate?: () => Promise<void> | void
@@ -15,9 +25,44 @@ export interface HeaderProps {
   rpcExportAvailable?: boolean
   readOnly?: boolean
   onPanelToggle?: (panel: "explorer" | "inspector" | "console") => void
+  saveStatus?: SaveStatus
 }
 
 type HeaderAction = (() => Promise<void> | void) | undefined
+const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit"
+})
+
+function formatSaveStatus(status: SaveStatus | undefined, isDirty: boolean): string {
+  const updatedAtLabel =
+    status?.updatedAt && !Number.isNaN(Date.parse(status.updatedAt))
+      ? TIME_FORMATTER.format(new Date(status.updatedAt))
+      : undefined
+  if (isDirty) {
+    if (status?.state === "saving" && status.source === "autosave") {
+      return "Unsaved changes (autosaving...)"
+    }
+    if (status?.state === "saved" && status.source === "autosave" && updatedAtLabel) {
+      return `Unsaved changes (autosaved ${updatedAtLabel})`
+    }
+    if (status?.state === "error" && status.source === "autosave") {
+      return `Unsaved changes (autosave failed: ${status.message ?? "internal error"})`
+    }
+    return "Unsaved changes"
+  }
+  if (status?.state === "saving") {
+    return "Saving..."
+  }
+  if (status?.state === "saved" && updatedAtLabel) {
+    return `Saved ${updatedAtLabel}`
+  }
+  if (status?.state === "error") {
+    return `Save failed: ${status.message ?? "internal error"}`
+  }
+  return ""
+}
 
 export function Header(props: HeaderProps) {
   const machineName = useMachineStore((state) => state.document.definition.name)
@@ -32,6 +77,13 @@ export function Header(props: HeaderProps) {
   const togglePanel = useUIStore((state) => state.togglePanel)
 
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  const saveStatusText = formatSaveStatus(props.saveStatus, isDirty)
+  const saveStatusClass =
+    props.saveStatus?.state === "error"
+      ? " fub-save-status-error"
+      : props.saveStatus?.state === "saving"
+        ? " fub-save-status-saving"
+        : ""
 
   const runAction = (name: string, action: HeaderAction) => {
     if (!action || typeof action !== "function") {
@@ -68,6 +120,9 @@ export function Header(props: HeaderProps) {
           />
           {isDirty ? <span aria-label="Unsaved changes" className="fub-dirty-dot" /> : null}
         </label>
+        <span className={`fub-save-status${saveStatusClass}`} role="status" aria-live="polite">
+          {saveStatusText}
+        </span>
       </div>
 
       <div className="fub-header-actions" role="group" aria-label="Builder actions">

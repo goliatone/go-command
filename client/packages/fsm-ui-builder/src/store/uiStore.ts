@@ -20,10 +20,13 @@ export interface PanelLayoutState {
 export interface UIStoreState extends PanelLayoutState {
   viewportMode: ViewportMode
   mobilePanel: MobilePanel
+  keyboardHelpOpen: boolean
   setPanelWidth(panel: "explorer" | "inspector", width: number): void
   setConsoleHeight(height: number): void
   setPanelCollapsed(panel: "explorer" | "inspector" | "console", collapsed: boolean): void
   togglePanel(panel: "explorer" | "inspector" | "console"): void
+  setKeyboardHelpOpen(open: boolean): void
+  toggleKeyboardHelp(): void
   zoomCanvas(delta: number): void
   panCanvas(deltaX: number, deltaY: number): void
   resetCanvasView(): void
@@ -104,6 +107,7 @@ export function createUIStore(): UIStore {
     ...initial,
     viewportMode: "desktop",
     mobilePanel: "canvas",
+    keyboardHelpOpen: false,
     setPanelWidth(panel, width) {
       set((state) => {
         const next = {
@@ -150,6 +154,14 @@ export function createUIStore(): UIStore {
         persistLayout(next)
         return next
       })
+    },
+    setKeyboardHelpOpen(open) {
+      set({ keyboardHelpOpen: open })
+    },
+    toggleKeyboardHelp() {
+      set((state) => ({
+        keyboardHelpOpen: !state.keyboardHelpOpen
+      }))
     },
     zoomCanvas(delta) {
       set((state) => {

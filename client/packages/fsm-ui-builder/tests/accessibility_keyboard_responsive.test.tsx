@@ -110,6 +110,13 @@ describe("fsm-ui-builder keyboard, accessibility, and responsive behavior", () =
       expect(document.activeElement?.id).toBe("fub-panel-canvas")
     })
 
+    fireEvent.keyDown(window, { key: "?" })
+    expect(screen.getByRole("dialog", { name: "Keyboard Shortcuts" })).toBeTruthy()
+    fireEvent.keyDown(window, { key: "Escape" })
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Keyboard Shortcuts" })).toBeNull()
+    })
+
     expect(screen.getByText("Zoom: 100%")).toBeTruthy()
     fireEvent.keyDown(window, { key: "=", ctrlKey: true })
     expect(screen.getByText("Zoom: 110%")).toBeTruthy()

@@ -128,6 +128,44 @@ describe("generic rpc clients", () => {
     await expect(client.call("system.ping", { value: 1 })).rejects.toBeInstanceOf(RPCClientError);
   });
 
+  it("HTTPRPCClient binds global fetch when no fetchImpl is provided", async () => {
+    const originalFetch = globalThis.fetch;
+    const globalRef = globalThis;
+    const fakeFetch = async function(this: unknown, _input: string | URL | Request, init?: RequestInit): Promise<Response> {
+      if (this !== globalRef) {
+        throw new TypeError("Illegal invocation");
+      }
+      const body = JSON.parse(String(init?.body));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: body.id, jsonrpc: "2.0", result: { ok: true } })
+      } as Response;
+    };
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fakeFetch
+    });
+
+    try {
+      const client = new HTTPRPCClient({
+        endpoint: "https://api.example.com/rpc",
+        rpcVersion: "2.0"
+      });
+
+      const result = await client.call<{ ok: boolean }>("system.ping");
+      expect(result).toEqual({ ok: true });
+    } finally {
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: originalFetch
+      });
+    }
+  });
+
   it("WebSocketRPCClient invokes arbitrary RPC methods", async () => {
     let socketRef: FakeRPCWebSocket | null = null;
     const client = new WebSocketRPCClient("wss://api.example.com/rpc", {
