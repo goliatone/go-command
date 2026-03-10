@@ -10,10 +10,9 @@ var embeddedFS embed.FS
 
 // ClientFS returns embedded client artifacts rooted at `data/client`.
 //
-// NOTE: This package intentionally embeds all client artifacts together,
-// which couples them at Go binary level. If we later want finer-grained
-// binary composition, split into dedicated embed packages (for example
-// `data/rpc` and `data/fsm`) and import only what each binary needs.
+// NOTE: This package intentionally embeds only core runtime assets.
+// Builder assets live in the optional `data/builder` package to preserve
+// strict binary composition boundaries.
 func ClientFS() fs.FS {
 	sub, err := fs.Sub(embeddedFS, "client")
 	if err != nil {
