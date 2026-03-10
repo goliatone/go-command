@@ -130,6 +130,25 @@ user, err := dispatcher.Query[GetUserMessage, *User](context.Background(), GetUs
 })
 ```
 
+Dispatcher routing defaults to exact message-type matching. Rich pattern matching is opt-in:
+
+```go
+// default is exact matching:
+// registered pattern must equal msg.Type()/message id.
+
+// opt in to rich routing behavior when needed:
+_ = dispatcher.SetCommandRoutingMode(
+    dispatcher.RoutingModeRich,
+    dispatcher.WithRoutingMatcher(router.MakeRouteMatcher(router.MakeRouteMatcherOptions{
+        Separator: ".",
+    })),
+    dispatcher.WithRoutingMatchStrategy(router.MatchStrategySpecificity),
+)
+```
+
+`DispatchWith` enforces canonical command ids (`Type() string`) for queued/policy paths.
+Inline compatibility remains unchanged for legacy reflection-derived message types.
+
 ### 2. Registry System with CLI, Cron, and RPC
 
 The registry allows commands to be registered once and executed through multiple interfaces:
@@ -243,7 +262,7 @@ For the global registry helpers, use `registry.AddResolver` and `registry.HasRes
 Migration notes:
 
 - If you switch to resolver based queue registration, you must attach the queue resolver or queue registration will not happen.
-- When both resolver based and direct registration are used, the queue layer should treat duplicate registrations as noops to avoid conflicts.
+- Queued routing paths should treat duplicate command id registrations as explicit conflicts (no silent no-op shadowing).
 
 See `docs/GUIDE_RESOLVERS.md` for a deeper guide.
 

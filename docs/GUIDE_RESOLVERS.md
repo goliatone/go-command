@@ -180,5 +180,7 @@ on runtime fields; otherwise pointer registrations may not match runtime message
 - Existing CLI/Cron behavior stays the same.
 - If you adopt a queue resolver, you must attach it to the registry, otherwise queue
   registration will not happen.
-- When both resolver based registration and direct registration are used, the queue
-  layer should treat duplicates as noops to avoid registration conflicts.
+- For queued command routing, duplicate command id registrations should be treated as
+  explicit conflicts to avoid silent shadowing.
+- Dispatcher routing defaults to exact message id matching; rich matcher behavior is
+  opt-in via dispatcher routing mode configuration.
