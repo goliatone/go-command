@@ -96,6 +96,33 @@ function dev:test {
     lgr exec -- go test ./...
 }
 
+function dev:test:cross {
+    local tmp
+    local command_root
+    local job_root
+
+    command_root=$(pwd)
+    job_root="$(cd ../go-job && pwd)"
+    tmp=$(mktemp -d)
+
+    cat > "${tmp}/go.work" <<EOF
+go 1.23.4
+use (
+    ${command_root}
+    ${job_root}
+)
+EOF
+
+    lgr I "cross-check go-command flow contracts"
+    GOWORK="${tmp}/go.work" go test ./flow/... || return 1
+
+    lgr I "cross-check go-job queue command bridge and worker runtime"
+    (
+        cd "${job_root}" || exit "$?"
+        GOWORK="${tmp}/go.work" go test ./queue/command ./queue/worker
+    ) || return 1
+}
+
 function dev:test:race {
     lgr exec -- go test ./... -race -count=1
 }
@@ -109,8 +136,29 @@ function flow:test {
     lgr exec -- go test ./flow/...
 }
 
-function _client:packages {
+function _client:core:packages {
     echo "rpc fsm fsm-rpc"
+}
+
+function _client:builder:packages {
+    echo "fsm-ui-builder"
+}
+
+function _client:release:packages {
+    echo "$(_client:core:packages) $(_client:builder:packages)"
+}
+
+function _client:build:workspace {
+    local client_dir
+    local pkg
+
+    client_dir=$1
+    pkg=$2
+
+    (
+        cd "${client_dir}" || exit "$?"
+        npm run build --workspace "packages/${pkg}"
+    ) || return 1
 }
 
 ##
@@ -146,7 +194,7 @@ function client:release {
 
     node -e 'const fs=require("fs"); const path="client/package.json"; const version=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); json.version=version; fs.writeFileSync(path, JSON.stringify(json, null, 2)+"\n");' "${tag}" || return 1
 
-    pkgs=$(_client:packages)
+    pkgs=$(_client:release:packages)
     for pkg in $pkgs; do
         pkg_file="client/packages/${pkg}/package.json"
         node -e 'const fs=require("fs"); const path=process.argv[1]; const version=process.argv[2]; const json=JSON.parse(fs.readFileSync(path,"utf8")); json.version=version; fs.writeFileSync(path, JSON.stringify(json, null, 2)+"\n");' "${pkg_file}" "${tag}" || return 1
@@ -163,7 +211,7 @@ function client:release {
 ##
 ## client:build
 ##
-## Build TS client packages and sync dist output into embedded Go assets (`data/client`).
+## Build core TS client packages and sync dist output into embedded Go assets (`data/client`).
 function client:build {
     local client_dir
     local pkgs
@@ -185,15 +233,14 @@ function client:build {
         ) || return 1
     fi
 
-    (
-        cd "${client_dir}" || exit "$?"
-        npm run build
-    ) || return 1
+    pkgs=$(_client:core:packages)
+    for pkg in $pkgs; do
+        _client:build:workspace "${client_dir}" "${pkg}" || return 1
+    done
 
     rm -rf "${output_dir}"
     mkdir -p "${output_dir}"
 
-    pkgs=$(_client:packages)
     for pkg in $pkgs; do
         mkdir -p "${output_dir}/${pkg}"
         cp -R "${client_dir}/packages/${pkg}/dist/." "${output_dir}/${pkg}/"
@@ -202,6 +249,66 @@ function client:build {
             return 1
         fi
     done
+}
+
+##
+## -----
+##
+## client:build:builder
+##
+## Build FSM UI builder package and sync dist output into optional embedded Go assets (`data/client-builder`).
+function client:build:builder {
+    local client_dir
+    local pkgs
+    local pkg
+    local output_root
+    local output_dir
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required for client:build:builder"
+        return 1
+    fi
+
+    client_dir="$(pwd)/client"
+    output_root="$(pwd)/data/client-builder"
+
+    if [ ! -d "${client_dir}/node_modules" ]; then
+        (
+            cd "${client_dir}" || exit "$?"
+            npm ci
+        ) || return 1
+    fi
+
+    pkgs=$(_client:builder:packages)
+    for pkg in $pkgs; do
+        _client:build:workspace "${client_dir}" "${pkg}" || return 1
+
+        output_dir="${output_root}/${pkg}"
+        rm -rf "${output_dir}"
+        mkdir -p "${output_dir}"
+        cp -R "${client_dir}/packages/${pkg}/dist/." "${output_dir}/"
+
+        if [ ! -f "${output_dir}/index.js" ]; then
+            echo "builder build output is missing ${output_dir}/index.js"
+            return 1
+        fi
+
+        if [ -f "${client_dir}/packages/${pkg}/dist/index.css" ] && [ ! -f "${output_dir}/index.css" ]; then
+            echo "builder build output is missing ${output_dir}/index.css"
+            return 1
+        fi
+    done
+}
+
+##
+## -----
+##
+## client:build:all
+##
+## Build core client packages and builder package artifacts.
+function client:build:all {
+    client:build || return 1
+    client:build:builder || return 1
 }
 
 function go:mod:update {
@@ -474,7 +581,7 @@ function release {
 
     # Keep TS client package version and embedded dist in sync with release tag.
     client:release "${tag}" || return 1
-    client:build || return 1
+    client:build:all || return 1
 
     # Add updated version file to git
     git add "${VERSION_FILE}"
@@ -483,6 +590,9 @@ function release {
     fi
     if [ -d "data/client" ]; then
         git add data/client
+    fi
+    if [ -d "data/client-builder" ]; then
+        git add data/client-builder
     fi
     git commit -m "Bump version: v${tag}"
 
