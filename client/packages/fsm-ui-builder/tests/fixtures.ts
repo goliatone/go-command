@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 export function loadContractFixture(name: string): unknown {
-  const path = resolve(__dirname, "../../../../docs/fixtures/fsm-ui-builder-contracts", name)
+  const path = resolve(__dirname, "../../../../data/fixtures/fsm-ui-builder-contracts", name)
   return JSON.parse(readFileSync(path, "utf8")) as unknown
 }
 
