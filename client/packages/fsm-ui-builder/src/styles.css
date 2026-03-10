@@ -534,6 +534,8 @@
 .fub-panel {
   min-width: 0;
   min-height: 0;
+  flex: 1;
+  height: 100%;
   border-right: 1px solid var(--fub-border);
   border-bottom: 1px solid var(--fub-border);
   background: var(--fub-bg-2);
@@ -565,6 +567,7 @@
 }
 
 .fub-panel-body {
+  flex: 1;
   overflow: auto;
   padding: var(--fub-space-3);
   scroll-behavior: smooth;

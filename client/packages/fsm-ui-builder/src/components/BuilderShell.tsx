@@ -156,9 +156,10 @@ export function BuilderShell(props: BuilderShellProps) {
 
   const rows = useMemo(() => {
     const unsupportedRow = unsupportedKinds.length > 0 ? "32px" : "0px"
-    const consoleRow = consoleCollapsed ? "0px" : `${consoleHeight}px`
+    // Constrain console to max 40% of viewport height to prevent overflow
+    const consoleRow = consoleCollapsed ? "0px" : `min(${consoleHeight}px, 40vh)`
     const handle = consoleCollapsed ? "0px" : "6px"
-    return `48px ${unsupportedRow} minmax(360px,1fr) ${handle} ${consoleRow}`
+    return `48px ${unsupportedRow} minmax(280px,1fr) ${handle} ${consoleRow}`
   }, [consoleCollapsed, consoleHeight, unsupportedKinds.length])
 
   const diagnosticsAnnouncement = useMemo(() => {
@@ -243,30 +244,45 @@ export function BuilderShell(props: BuilderShellProps) {
     )
   }
 
+  // Calculate grid row for main content (row 3, accounting for 0px unsupported row)
+  const mainContentRow = unsupportedKinds.length > 0 ? 3 : 3
+  const consoleHandleRow = unsupportedKinds.length > 0 ? 4 : 4
+  const consoleRow = unsupportedKinds.length > 0 ? 5 : 5
+
   return (
     <>
       <div className="fub-root" data-theme={theme} style={{ gridTemplateColumns: columns, gridTemplateRows: rows }}>
-        <div className="fub-slot-header" style={{ gridColumn: "1 / -1" }}>
+        {/* Row 1: Header - spans all columns */}
+        <div className="fub-slot-header" style={{ gridColumn: "1 / -1", gridRow: 1 }}>
           <Header {...props} readOnly={false} onPanelToggle={onPanelToggle} />
         </div>
 
+        {/* Row 2: Unsupported warning (if present) - spans all columns */}
         {unsupportedKinds.length > 0 ? (
-          <div className="fub-guardrail-banner" style={{ gridColumn: "1 / -1" }} role="status" aria-live="polite">
+          <div className="fub-guardrail-banner" style={{ gridColumn: "1 / -1", gridRow: 2 }} role="status" aria-live="polite">
             Unsupported workflow nodes are read-only: {unsupportedKinds.join(", ")}
           </div>
         ) : null}
 
-        {!explorerCollapsed ? <Explorer readOnly={false} /> : null}
+        {/* Row 3: Main panels (Explorer, Canvas, Inspector) */}
+        {!explorerCollapsed ? (
+          <div style={{ gridColumn: 1, gridRow: mainContentRow, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <Explorer readOnly={false} />
+          </div>
+        ) : null}
         {!explorerCollapsed ? (
           <div
             className="fub-resizer fub-resizer-vertical"
             role="separator"
             aria-label="Resize explorer"
             onPointerDown={resizeExplorer}
+            style={{ gridColumn: 2, gridRow: mainContentRow }}
           />
         ) : null}
 
-        <Canvas readOnly={false} />
+        <div style={{ gridColumn: 3, gridRow: mainContentRow, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+          <Canvas readOnly={false} />
+        </div>
 
         {!inspectorCollapsed ? (
           <div
@@ -274,21 +290,29 @@ export function BuilderShell(props: BuilderShellProps) {
             role="separator"
             aria-label="Resize inspector"
             onPointerDown={resizeInspector}
+            style={{ gridColumn: 4, gridRow: mainContentRow }}
           />
         ) : null}
-        {!inspectorCollapsed ? <Inspector actionCatalogProvider={props.actionCatalogProvider} readOnly={false} /> : null}
+        {!inspectorCollapsed ? (
+          <div style={{ gridColumn: 5, gridRow: mainContentRow, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <Inspector actionCatalogProvider={props.actionCatalogProvider} readOnly={false} />
+          </div>
+        ) : null}
 
+        {/* Row 4: Console resize handle - spans all columns */}
         {!consoleCollapsed ? (
           <div
             className="fub-resizer fub-resizer-horizontal"
             role="separator"
             aria-label="Resize console"
             onPointerDown={resizeConsole}
-            style={{ gridColumn: "1 / -1" }}
+            style={{ gridColumn: "1 / -1", gridRow: consoleHandleRow }}
           />
         ) : null}
+
+        {/* Row 5: Console - spans all columns */}
         {!consoleCollapsed ? (
-          <div className="fub-slot-console" style={{ gridColumn: "1 / -1" }}>
+          <div className="fub-slot-console" style={{ gridColumn: "1 / -1", gridRow: consoleRow }}>
             <ConsolePanel />
           </div>
         ) : null}

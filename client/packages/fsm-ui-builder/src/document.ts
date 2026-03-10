@@ -1,5 +1,6 @@
 import type {
   DraftMachineDocument,
+  DraftState,
   MachineDefinition,
   TransitionDefinition,
   ValidationDiagnostic,
@@ -65,6 +66,85 @@ export function deepClone<T>(value: T): T {
 
 export function serializeDraftDocument(document: DraftMachineDocument): string {
   return JSON.stringify(document)
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
+}
+
+function isMachineDefinitionLike(value: unknown): value is MachineDefinition {
+  const record = asRecord(value)
+  if (!record) {
+    return false
+  }
+  return Array.isArray(record.states) && Array.isArray(record.transitions)
+}
+
+function normalizeDraftState(input: unknown, fallback: DraftState): DraftState {
+  const record = asRecord(input)
+  if (!record) {
+    return deepClone(fallback)
+  }
+  return {
+    is_draft: typeof record.is_draft === "boolean" ? record.is_draft : fallback.is_draft,
+    last_saved_at:
+      typeof record.last_saved_at === "string" && record.last_saved_at.trim() !== ""
+        ? record.last_saved_at
+        : fallback.last_saved_at
+  }
+}
+
+function normalizeDraftDocumentLike(input: DraftMachineDocument): DraftMachineDocument {
+  const fallback = defaultDraftMachineDocument()
+  const clone = deepClone(input)
+  const normalized: DraftMachineDocument = {
+    ...fallback,
+    ...clone,
+    definition: deepClone(clone.definition),
+    ui_schema: asRecord(clone.ui_schema) ? deepClone(clone.ui_schema) : deepClone(fallback.ui_schema),
+    draft_state: normalizeDraftState(clone.draft_state, fallback.draft_state)
+  }
+  return normalized
+}
+
+function wrapMachineDefinition(definition: MachineDefinition): DraftMachineDocument {
+  const fallback = defaultDraftMachineDocument()
+  return {
+    ...fallback,
+    definition: deepClone(definition)
+  }
+}
+
+function extractDraftCandidate(input: unknown): unknown {
+  const record = asRecord(input)
+  if (!record) {
+    return input
+  }
+  if ("draft" in record) {
+    return record.draft
+  }
+  return input
+}
+
+export function normalizeInitialDocumentInput(input: unknown): DraftMachineDocument {
+  const candidate = extractDraftCandidate(input)
+  const candidateRecord = asRecord(candidate)
+  if (!candidateRecord) {
+    return defaultDraftMachineDocument()
+  }
+
+  if (isMachineDefinitionLike(candidateRecord.definition)) {
+    return normalizeDraftDocumentLike(candidateRecord as DraftMachineDocument)
+  }
+
+  if (isMachineDefinitionLike(candidate)) {
+    return wrapMachineDefinition(candidate)
+  }
+
+  return defaultDraftMachineDocument()
 }
 
 export function transitionLabel(transition: TransitionDefinition): string {

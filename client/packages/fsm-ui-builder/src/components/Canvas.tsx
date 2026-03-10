@@ -109,47 +109,87 @@ function getLayoutedElements(
   edges: Edge[],
   direction: "TB" | "LR" = "TB"
 ): { nodes: Node[]; edges: Edge[] } {
-  const dagreGraph = new dagre.graphlib.Graph()
-  dagreGraph.setDefaultEdgeLabel(() => ({}))
-  dagreGraph.setGraph({ rankdir: direction, nodesep: 80, ranksep: 100 })
+  if (nodes.length === 0) {
+    return { nodes: [], edges: [] }
+  }
 
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
-  })
+  try {
+    const dagreGraph = new dagre.graphlib.Graph()
+    dagreGraph.setDefaultEdgeLabel(() => ({}))
+    dagreGraph.setGraph({ rankdir: direction, nodesep: 80, ranksep: 100 })
 
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target)
-  })
+    nodes.forEach((node) => {
+      dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+    })
 
-  dagre.layout(dagreGraph)
+    edges.forEach((edge) => {
+      dagreGraph.setEdge(edge.source, edge.target)
+    })
 
-  const layoutedNodes = nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id)
-    return {
-      ...node,
-      position: {
-        x: nodeWithPosition.x - NODE_WIDTH / 2,
-        y: nodeWithPosition.y - NODE_HEIGHT / 2
+    dagre.layout(dagreGraph)
+
+    const layoutedNodes = nodes.map((node, index) => {
+      const nodeWithPosition = dagreGraph.node(node.id)
+      // Fallback to grid layout if dagre doesn't provide valid positions
+      if (!nodeWithPosition || typeof nodeWithPosition.x !== "number" || typeof nodeWithPosition.y !== "number") {
+        const col = index % 3
+        const row = Math.floor(index / 3)
+        return {
+          ...node,
+          position: {
+            x: col * (NODE_WIDTH + 80) + 50,
+            y: row * (NODE_HEIGHT + 80) + 50
+          }
+        }
       }
-    }
-  })
+      return {
+        ...node,
+        position: {
+          x: nodeWithPosition.x - NODE_WIDTH / 2,
+          y: nodeWithPosition.y - NODE_HEIGHT / 2
+        }
+      }
+    })
 
-  return { nodes: layoutedNodes, edges }
+    return { nodes: layoutedNodes, edges }
+  } catch {
+    // Fallback to simple grid layout if dagre fails
+    const layoutedNodes = nodes.map((node, index) => {
+      const col = index % 3
+      const row = Math.floor(index / 3)
+      return {
+        ...node,
+        position: {
+          x: col * (NODE_WIDTH + 80) + 50,
+          y: row * (NODE_HEIGHT + 80) + 50
+        }
+      }
+    })
+    return { nodes: layoutedNodes, edges }
+  }
 }
 
 function buildNodesAndEdges(
-  states: Array<{ name: string; initial?: boolean; terminal?: boolean }>,
-  transitions: Array<{ from: string; to?: string; event: string; dynamic_to?: { resolver?: string } }>
+  states: Array<{ name: string; initial?: boolean; terminal?: boolean }> | undefined | null,
+  transitions: Array<{ from: string; to?: string; event: string; dynamic_to?: { resolver?: string } }> | undefined | null
 ): { nodes: Node[]; edges: Edge[] } {
+  // Guard against undefined/null states or transitions
+  const safeStates = Array.isArray(states) ? states : []
+  const safeTransitions = Array.isArray(transitions) ? transitions : []
+
+  if (safeStates.length === 0) {
+    return { nodes: [], edges: [] }
+  }
+
   // Count outgoing transitions per state
   const transitionCounts: Record<string, number> = {}
-  transitions.forEach((t) => {
+  safeTransitions.forEach((t) => {
     if (t.from) {
       transitionCounts[t.from] = (transitionCounts[t.from] || 0) + 1
     }
   })
 
-  const nodes: Node[] = states.map((state, stateIndex) => ({
+  const nodes: Node[] = safeStates.map((state, stateIndex) => ({
     id: state.name || `state-${stateIndex}`,
     type: "stateNode",
     position: { x: 0, y: 0 },
@@ -162,11 +202,11 @@ function buildNodesAndEdges(
     } satisfies StateNodeData
   }))
 
-  const stateNames = new Set(states.map((s) => s.name))
+  const stateNames = new Set(safeStates.map((s) => s.name))
 
   const edges: Edge[] = []
 
-  transitions.forEach((transition, transitionIndex) => {
+  safeTransitions.forEach((transition, transitionIndex) => {
     const targetState = transition.to || transition.dynamic_to?.resolver
     const sourceExists = stateNames.has(transition.from)
     const targetExists = targetState && stateNames.has(targetState)

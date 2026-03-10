@@ -36,6 +36,26 @@ function asError(input: unknown): Error | null {
   return input instanceof Error ? input : null
 }
 
+function isMethodNotFoundError(error: RPCClientError): boolean {
+  if (error.code === -32601) {
+    return true
+  }
+  const message = error.message.toLowerCase()
+  return message.includes("method not found")
+}
+
+function isTransportPathError(error: RPCClientError): boolean {
+  return error.status === 404 || error.status === 405
+}
+
+function withEndpointHint(message: string): string {
+  const suffix = " Verify RPC endpoint and FSM method registration (for example `/api/rpc` with `fsm.*` methods)."
+  if (message.endsWith(suffix)) {
+    return message
+  }
+  return `${message}${suffix}`
+}
+
 export function toHandledBuilderError(error: unknown): HandledBuilderError {
   if (error instanceof BuilderResultError) {
     return {
@@ -46,6 +66,13 @@ export function toHandledBuilderError(error: unknown): HandledBuilderError {
   }
 
   if (error instanceof RPCClientError) {
+    if (isMethodNotFoundError(error) || isTransportPathError(error)) {
+      return {
+        code: HANDLED_ERROR_CODES.internal,
+        message: withEndpointHint(normalizeMessage(error.message)),
+        method: error.method
+      }
+    }
     return {
       code: normalizeHandledCode(error.code),
       message: normalizeMessage(error.message),

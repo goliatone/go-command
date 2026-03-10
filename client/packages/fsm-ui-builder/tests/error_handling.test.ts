@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { BuilderResultError, HANDLED_ERROR_CODES, toHandledBuilderError } from "../src"
+import { RPCClientError } from "../../../src/rpc_client"
 
 describe("fsm-ui-builder error handling", () => {
   it("maps frozen branch error codes from builder result errors", () => {
@@ -23,5 +24,19 @@ describe("fsm-ui-builder error handling", () => {
 
     expect(handled.code).toBe(HANDLED_ERROR_CODES.internal)
     expect(handled.message).toBe("boom")
+  })
+
+  it("adds endpoint guidance for method-not-found rpc errors", () => {
+    const handled = toHandledBuilderError(
+      new RPCClientError({
+        method: "fsm.authoring.get_machine",
+        message: "method not found",
+        code: -32601
+      })
+    )
+
+    expect(handled.code).toBe(HANDLED_ERROR_CODES.internal)
+    expect(handled.message).toContain("/api/rpc")
+    expect(handled.method).toBe("fsm.authoring.get_machine")
   })
 })

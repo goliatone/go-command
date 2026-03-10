@@ -61,9 +61,7 @@ Quick mount example:
 
 ```ts
 import {
-  createBuilderAuthoringRPC,
   createBuilderRPCClient,
-  createBuilderRuntimeRPC,
   mountFSMUIBuilder,
 } from "@goliatone/go-command-fsm-ui-builder";
 
@@ -71,8 +69,7 @@ const rpc = createBuilderRPCClient({ endpoint: "/rpc" });
 
 mountFSMUIBuilder(document.getElementById("app")!, {
   machineId: "orders",
-  runtimeRPC: createBuilderRuntimeRPC(rpc),
-  authoringRPC: createBuilderAuthoringRPC(rpc),
+  rpcClient: rpc, // or rpcEndpoint: "/api/rpc"
 });
 ```
 

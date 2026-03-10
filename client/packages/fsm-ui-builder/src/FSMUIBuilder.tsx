@@ -8,15 +8,16 @@ import type { ExportAdapter } from "./adapters/export"
 import { createDefaultExportAdapter, isRPCExportAvailable } from "./adapters/export"
 import type { PersistenceStore, PersistedMachineDraft } from "./adapters/persistence"
 import { createLocalStoragePersistenceStore } from "./adapters/persistence"
-import type { BuilderRequestMeta, DraftMachineDocument, ValidationDiagnostic } from "./contracts"
+import type { BuilderRequestMeta, DraftMachineDocument, MachineDefinition, ValidationDiagnostic } from "./contracts"
 import { BuilderShell } from "./components/BuilderShell"
 import type { SaveStatus } from "./components/Header"
-import { defaultDraftMachineDocument, deepClone, validateDefinition, type Selection } from "./document"
+import { deepClone, normalizeInitialDocumentInput, validateDefinition, type Selection } from "./document"
 import { toHandledBuilderError } from "./errorHandling"
 import type { BuilderRuntimeRPC } from "./hooks/useRPC"
 import { useRuntimeRPC } from "./hooks/useRPC"
 import { FSM_RUNTIME_METHODS, HANDLED_ERROR_CODES } from "./contracts"
 import { BuilderStoresProvider, useMachineStore, useSimulationStore } from "./store/provider"
+import { createBuilderRPCClient } from "./rpc"
 import { loadDraftDocumentForEditing, prepareDraftDocumentForSave } from "./transforms/roundtrip"
 import "./styles.css"
 
@@ -27,9 +28,10 @@ export interface SimulationDefaults {
 }
 
 export interface FSMUIBuilderProps {
-  initialDocument?: DraftMachineDocument
+  initialDocument?: DraftMachineDocument | MachineDefinition | { draft?: DraftMachineDocument | MachineDefinition }
   initialDiagnostics?: ValidationDiagnostic[]
   machineId?: string
+  rpcEndpoint?: string
   rpcClient?: RPCClient | null
   runtimeRPC?: BuilderRuntimeRPC | null
   authoringRPC?: BuilderAuthoringRPC | null
@@ -103,8 +105,16 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
   const pushSimulationError = useSimulationStore((state) => state.pushError)
   const pushSimulationInfo = useSimulationStore((state) => state.pushInfo)
 
-  const runtimeFromClient = useRuntimeRPC(props.rpcClient ?? null)
-  const authoringFromClient = useAuthoringRPC(props.rpcClient ?? null)
+  const fallbackRPCClient = useMemo(() => {
+    if (props.rpcClient || !props.rpcEndpoint || props.rpcEndpoint.trim() === "") {
+      return null
+    }
+    return createBuilderRPCClient({ endpoint: props.rpcEndpoint })
+  }, [props.rpcClient, props.rpcEndpoint])
+
+  const resolvedRPCClient = props.rpcClient ?? fallbackRPCClient
+  const runtimeFromClient = useRuntimeRPC(resolvedRPCClient ?? null)
+  const authoringFromClient = useAuthoringRPC(resolvedRPCClient ?? null)
   const runtimeRPC = props.runtimeRPC ?? runtimeFromClient
   const authoringRPC = props.authoringRPC ?? authoringFromClient
 
@@ -501,7 +511,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
 
 export function FSMUIBuilder(props: FSMUIBuilderProps) {
   const initialDocument = useMemo(
-    () => loadDraftDocumentForEditing(props.initialDocument ?? defaultDraftMachineDocument()),
+    () => loadDraftDocumentForEditing(normalizeInitialDocumentInput(props.initialDocument)),
     [props.initialDocument]
   )
 

@@ -71,3 +71,4 @@ export { formatHandledBuilderError, toHandledBuilderError } from "./errorHandlin
 export type { HandledBuilderError } from "./errorHandling"
 
 export { loadDraftDocumentForEditing, prepareDraftDocumentForSave } from "./transforms/roundtrip"
+export { normalizeInitialDocumentInput } from "./document"
