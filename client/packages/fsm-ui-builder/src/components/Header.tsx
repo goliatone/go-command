@@ -35,10 +35,12 @@ export interface HeaderProps {
   onRecoverDraft?: () => Promise<void> | void
   onExportJSON?: () => Promise<void> | void
   onExportRPC?: () => Promise<void> | void
+  onOpenVersionHistory?: () => Promise<void> | void
   runtimeAvailable?: boolean
   authoringAvailable?: boolean
   recoveryAvailable?: boolean
   rpcExportAvailable?: boolean
+  versionHistoryEnabled?: boolean
   readOnly?: boolean
   onPanelToggle?: (panel: "explorer" | "inspector" | "console") => void
   saveStatus?: SaveStatus
@@ -132,6 +134,12 @@ export function Header(props: HeaderProps) {
       label: "Recover Draft",
       onClick: () => runAction("recover", props.onRecoverDraft),
       disabled: readOnly || !props.recoveryAvailable || Boolean(busyAction),
+      icon: <RefreshIcon />
+    },
+    {
+      label: "Version History",
+      onClick: () => runAction("version-history", props.onOpenVersionHistory),
+      disabled: Boolean(busyAction) || !props.versionHistoryEnabled,
       icon: <RefreshIcon />
     },
     {

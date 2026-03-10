@@ -20,10 +20,10 @@ import {
   getBezierPath,
   type EdgeProps
 } from "@xyflow/react"
-import dagre from "@dagrejs/dagre"
 
 import { useMachineStore, useSimulationStore, useUIStore } from "../store/provider"
 import { readGraphNodePositions, stableStateNodeID } from "../utils/graphLayout"
+import { buildAutoLayoutPositions, type GraphLayoutDirection } from "../utils/layout"
 import { StateNode, type StateNodeData } from "./StateNode"
 
 import "@xyflow/react/dist/style.css"
@@ -98,9 +98,6 @@ const edgeTypes: EdgeTypes = {
   custom: CustomEdge
 }
 
-const NODE_WIDTH = 200
-const NODE_HEIGHT = 80
-
 interface EdgeData extends Record<string, unknown> {
   transitionIndex: number
 }
@@ -110,76 +107,12 @@ interface SimulationNodeContext {
   projectedStateName?: string
 }
 
-function getLayoutedElements(
-  nodes: Node[],
-  edges: Edge[],
-  direction: "TB" | "LR" = "TB"
-): { nodes: Node[]; edges: Edge[] } {
-  if (nodes.length === 0) {
-    return { nodes: [], edges: [] }
-  }
-
-  try {
-    const dagreGraph = new dagre.graphlib.Graph()
-    dagreGraph.setDefaultEdgeLabel(() => ({}))
-    dagreGraph.setGraph({ rankdir: direction, nodesep: 80, ranksep: 100 })
-
-    nodes.forEach((node) => {
-      dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
-    })
-
-    edges.forEach((edge) => {
-      dagreGraph.setEdge(edge.source, edge.target)
-    })
-
-    dagre.layout(dagreGraph)
-
-    const layoutedNodes = nodes.map((node, index) => {
-      const nodeWithPosition = dagreGraph.node(node.id)
-      // Fallback to grid layout if dagre doesn't provide valid positions
-      if (!nodeWithPosition || typeof nodeWithPosition.x !== "number" || typeof nodeWithPosition.y !== "number") {
-        const col = index % 3
-        const row = Math.floor(index / 3)
-        return {
-          ...node,
-          position: {
-            x: col * (NODE_WIDTH + 80) + 50,
-            y: row * (NODE_HEIGHT + 80) + 50
-          }
-        }
-      }
-      return {
-        ...node,
-        position: {
-          x: nodeWithPosition.x - NODE_WIDTH / 2,
-          y: nodeWithPosition.y - NODE_HEIGHT / 2
-        }
-      }
-    })
-
-    return { nodes: layoutedNodes, edges }
-  } catch {
-    // Fallback to simple grid layout if dagre fails
-    const layoutedNodes = nodes.map((node, index) => {
-      const col = index % 3
-      const row = Math.floor(index / 3)
-      return {
-        ...node,
-        position: {
-          x: col * (NODE_WIDTH + 80) + 50,
-          y: row * (NODE_HEIGHT + 80) + 50
-        }
-      }
-    })
-    return { nodes: layoutedNodes, edges }
-  }
-}
-
 function buildNodesAndEdges(
   states: Array<{ name: string; initial?: boolean; terminal?: boolean }> | undefined | null,
   transitions: Array<{ from: string; to?: string; event: string; dynamic_to?: { resolver?: string } }> | undefined | null,
   persistedPositions: Record<string, { x: number; y: number }>,
-  simulationContext: SimulationNodeContext
+  simulationContext: SimulationNodeContext,
+  layoutDirection: GraphLayoutDirection
 ): { nodes: Node[]; edges: Edge[] } {
   // Guard against undefined/null states or transitions
   const safeStates = Array.isArray(states) ? states : []
@@ -198,6 +131,11 @@ function buildNodesAndEdges(
   })
 
   const nodeIDByStateName = new Map<string, string>()
+  const autoLayoutPositions = buildAutoLayoutPositions({
+    states: safeStates,
+    transitions: safeTransitions,
+    direction: layoutDirection
+  })
   const nodes: Node[] = safeStates.map((state, stateIndex) => {
     const stateID = stableStateNodeID(stateIndex)
     if (!nodeIDByStateName.has(state.name)) {
@@ -211,7 +149,7 @@ function buildNodesAndEdges(
     return {
       id: stateID,
       type: "stateNode",
-      position: { x: 0, y: 0 },
+      position: persistedPositions[stateID] ?? autoLayoutPositions[stateID] ?? { x: 0, y: 0 },
       data: {
         name: state.name,
         initial: state.initial,
@@ -246,22 +184,7 @@ function buildNodesAndEdges(
     })
   })
 
-  const layouted = getLayoutedElements(nodes, edges)
-  const withPersistedPositions = layouted.nodes.map((node) => {
-    const persisted = persistedPositions[node.id]
-    if (!persisted) {
-      return node
-    }
-    return {
-      ...node,
-      position: {
-        x: persisted.x,
-        y: persisted.y
-      }
-    }
-  })
-
-  return { nodes: withPersistedPositions, edges: layouted.edges }
+  return { nodes, edges }
 }
 
 function CanvasInner(props: CanvasProps) {
@@ -271,6 +194,7 @@ function CanvasInner(props: CanvasProps) {
   const setSelection = useMachineStore((state) => state.setSelection)
   const addState = useMachineStore((state) => state.addState)
   const setGraphNodePosition = useMachineStore((state) => state.setGraphNodePosition)
+  const setGraphNodePositions = useMachineStore((state) => state.setGraphNodePositions)
   const updateStateName = useMachineStore((state) => state.updateStateName)
   const updateStateFlag = useMachineStore((state) => state.updateStateFlag)
   const projectedOutcome = useSimulationStore((state) => state.projectedOutcome)
@@ -284,6 +208,7 @@ function CanvasInner(props: CanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useReactFlow()
   const [isDragOver, setIsDragOver] = useState(false)
+  const [layoutDirection, setLayoutDirection] = useState<GraphLayoutDirection>("TB")
   const simulationContext = useMemo<SimulationNodeContext>(() => {
     return {
       currentStateName: projectedOutcome?.previousState || snapshotResult?.currentState,
@@ -294,8 +219,8 @@ function CanvasInner(props: CanvasProps) {
   const persistedPositions = useMemo(() => readGraphNodePositions(document.ui_schema), [document.ui_schema])
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => buildNodesAndEdges(states, transitions, persistedPositions, simulationContext),
-    [states, transitions, persistedPositions, simulationContext]
+    () => buildNodesAndEdges(states, transitions, persistedPositions, simulationContext, layoutDirection),
+    [states, transitions, persistedPositions, simulationContext, layoutDirection]
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
@@ -306,11 +231,12 @@ function CanvasInner(props: CanvasProps) {
       states,
       transitions,
       persistedPositions,
-      simulationContext
+      simulationContext,
+      layoutDirection
     )
     setNodes(newNodes)
     setEdges(newEdges)
-  }, [states, transitions, persistedPositions, simulationContext, setNodes, setEdges])
+  }, [states, transitions, persistedPositions, simulationContext, layoutDirection, setNodes, setEdges])
 
   useEffect(() => {
     if (selection.kind === "state") {
@@ -407,6 +333,18 @@ function CanvasInner(props: CanvasProps) {
     },
     [readOnly, setGraphNodePosition]
   )
+
+  const handleAutoLayout = useCallback(() => {
+    if (readOnly || states.length === 0) {
+      return
+    }
+    const positions = buildAutoLayoutPositions({
+      states,
+      transitions,
+      direction: layoutDirection
+    })
+    setGraphNodePositions(positions)
+  }, [layoutDirection, readOnly, setGraphNodePositions, states, transitions])
 
   const handleMoveEnd = useCallback(
     (_event: unknown, viewport: { zoom: number }) => {
@@ -530,6 +468,22 @@ function CanvasInner(props: CanvasProps) {
           <span className="fub-badge fub-canvas-zoom" aria-live="polite">
             Zoom: {Math.round(canvasZoom * 100)}%
           </span>
+          <select
+            aria-label="Auto layout direction"
+            className="fub-input fub-canvas-layout-direction"
+            value={layoutDirection}
+            disabled={readOnly}
+            onChange={(event) => {
+              const value = event.target.value
+              setLayoutDirection(value === "LR" ? "LR" : "TB")
+            }}
+          >
+            <option value="TB">Top-Bottom</option>
+            <option value="LR">Left-Right</option>
+          </select>
+          <button type="button" className="fub-mini-btn" onClick={handleAutoLayout} disabled={readOnly || states.length < 2}>
+            Auto layout
+          </button>
           {simulationModeActive ? <span className="fub-badge fub-badge-simulation">Simulation mode</span> : null}
           {readOnly ? <span className="fub-badge">Read-only</span> : null}
         </div>

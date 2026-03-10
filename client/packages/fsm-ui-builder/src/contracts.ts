@@ -15,8 +15,16 @@ export const FSM_AUTHORING_METHODS = {
   deleteMachine: "fsm.authoring.delete_machine"
 } as const
 
+export const FSM_AUTHORING_OPTIONAL_METHODS = {
+  export: "fsm.authoring.export",
+  listVersions: "fsm.authoring.list_versions",
+  getVersion: "fsm.authoring.get_version",
+  diffVersions: "fsm.authoring.diff_versions"
+} as const
+
 export type RuntimeMethodName = (typeof FSM_RUNTIME_METHODS)[keyof typeof FSM_RUNTIME_METHODS]
 export type AuthoringMethodName = (typeof FSM_AUTHORING_METHODS)[keyof typeof FSM_AUTHORING_METHODS]
+export type OptionalAuthoringMethodName = (typeof FSM_AUTHORING_OPTIONAL_METHODS)[keyof typeof FSM_AUTHORING_OPTIONAL_METHODS]
 
 export interface BuilderRequestMeta {
   actorId?: string
@@ -312,6 +320,59 @@ export interface AuthoringDeleteMachineRequest {
 export interface AuthoringDeleteMachineResponse {
   machineId: string
   deleted: boolean
+}
+
+export interface AuthoringVersionSummary {
+  version: string
+  etag?: string
+  updatedAt: string
+  publishedAt?: string
+  isDraft: boolean
+}
+
+export interface AuthoringListVersionsRequest {
+  machineId: string
+  limit?: number
+  cursor?: string
+}
+
+export interface AuthoringListVersionsResponse {
+  machineId: string
+  items: AuthoringVersionSummary[]
+  nextCursor?: string
+}
+
+export interface AuthoringGetVersionRequest {
+  machineId: string
+  version: string
+}
+
+export interface AuthoringGetVersionResponse {
+  machineId: string
+  version: string
+  draft: DraftMachineDocument
+  diagnostics: ValidationDiagnostic[]
+  etag?: string
+}
+
+export interface AuthoringDiffChange {
+  path: string
+  changeType: string
+}
+
+export interface AuthoringDiffVersionsRequest {
+  machineId: string
+  baseVersion: string
+  targetVersion: string
+}
+
+export interface AuthoringDiffVersionsResponse {
+  machineId: string
+  baseVersion: string
+  targetVersion: string
+  hasConflicts: boolean
+  changes: AuthoringDiffChange[]
+  conflictPaths?: string[]
 }
 
 export const HANDLED_ERROR_CODES = {

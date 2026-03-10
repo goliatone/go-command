@@ -1,6 +1,7 @@
 import type { MachineDefinition, TransitionDefinition, ValidationDiagnostic, WorkflowNodeDefinition } from "../../contracts"
 import { diagnosticsForSelectionField, isSupportedWorkflowNodeKind, type Selection } from "../../document"
 import { InlineDiagnostics, InspectorPanel, ReadOnlyNote, renderWorkflowNodeSummary, toMessages, transitionTargetKind } from "./shared"
+import { WorkflowGraphEditor } from "./WorkflowGraphEditor"
 
 export interface TransitionInspectorProps {
   definition: MachineDefinition
@@ -158,6 +159,10 @@ export function TransitionInspector(props: TransitionInspectorProps) {
             </button>
           </div>
         </div>
+        <WorkflowGraphEditor
+          nodes={props.transition.workflow.nodes}
+          onSelectNode={(nodeIndex) => props.selectWorkflowNode(props.transitionIndex, nodeIndex)}
+        />
         <ul>
           {props.transition.workflow.nodes.map((node, nodeIndex) => (
             <li key={workflowNodeKey(node, nodeIndex)}>

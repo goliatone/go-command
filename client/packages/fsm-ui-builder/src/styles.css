@@ -634,6 +634,12 @@
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--fub-accent) 20%, transparent);
 }
 
+.fub-list-item--drop-target {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--fub-accent) 45%, var(--fub-border));
+  background: color-mix(in oklab, var(--fub-accent) 8%, var(--fub-bg-2));
+}
+
 .fub-item-main {
   white-space: nowrap;
   overflow: hidden;
@@ -663,6 +669,12 @@
 .fub-canvas-zoom {
   min-width: 84px;
   text-align: center;
+}
+
+.fub-canvas-layout-direction {
+  width: 120px;
+  font-size: 0.75rem;
+  padding: 4px 6px;
 }
 
 /* ============================================
@@ -830,6 +842,37 @@ kbd {
 .fub-action-catalog-option-tags {
   color: var(--fub-text-muted);
   font-size: 0.72rem;
+}
+
+.fub-workflow-graph {
+  display: grid;
+  gap: var(--fub-space-2);
+  margin-bottom: var(--fub-space-3);
+}
+
+.fub-workflow-graph-node {
+  border: 1px solid var(--fub-border);
+  border-radius: var(--fub-radius-md);
+  padding: var(--fub-space-2);
+  background: var(--fub-bg-1);
+}
+
+.fub-workflow-graph-node .fub-list-item {
+  margin-bottom: var(--fub-space-1);
+}
+
+.fub-workflow-graph-next {
+  display: flex;
+  gap: var(--fub-space-1);
+  flex-wrap: wrap;
+}
+
+.fub-workflow-graph-edge {
+  font-size: 0.72rem;
+  color: var(--fub-text-muted);
+  border: 1px dashed var(--fub-border);
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 
 .fub-checkbox-row {
@@ -1098,6 +1141,12 @@ kbd {
   letter-spacing: 0.05em;
 }
 
+.fub-version-history-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: var(--fub-space-4);
+}
+
 /* ============================================
    Responsive Styles
    ============================================ */
@@ -1123,6 +1172,10 @@ kbd {
 
   .fub-header {
     padding: 0 var(--fub-space-3);
+  }
+
+  .fub-version-history-grid {
+    grid-template-columns: 1fr;
   }
 }
 

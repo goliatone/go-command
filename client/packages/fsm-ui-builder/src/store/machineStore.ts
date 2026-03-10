@@ -19,6 +19,7 @@ import {
 } from "../document"
 import {
   readGraphNodePositions,
+  reindexGraphNodePositionsAfterStateMove,
   reindexGraphNodePositionsAfterStateRemoval,
   stableStateNodeID,
   withGraphNodePositions,
@@ -56,10 +57,12 @@ export interface MachineStoreState {
   setMachineName(name: string): void
   addState(): void
   removeState(stateIndex: number): void
+  moveState(fromIndex: number, toIndex: number): void
   updateStateName(stateIndex: number, name: string): void
   updateStateFlag(stateIndex: number, field: "initial" | "terminal", value: boolean): void
   addTransition(): void
   removeTransition(transitionIndex: number): void
+  moveTransition(fromIndex: number, toIndex: number): void
   updateTransition(
     transitionIndex: number,
     field: "event" | "from" | "to" | "dynamic_to.resolver",
@@ -77,6 +80,8 @@ export interface MachineStoreState {
   ): void
   updateWorkflowNodeMetadata(transitionIndex: number, nodeIndex: number, metadata: Record<string, unknown>): void
   setGraphNodePosition(stateIndex: number, position: GraphNodePosition): void
+  setGraphNodePositions(positions: Record<string, GraphNodePosition>): void
+  restoreDocument(document: DraftMachineDocument, diagnostics?: ValidationDiagnostic[]): void
   undo(): void
   redo(): void
   markSaved(): void
@@ -95,6 +100,30 @@ function clampIndex(value: number, max: number): number {
     return 0
   }
   return Math.min(Math.max(0, value), max - 1)
+}
+
+function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number): void {
+  if (fromIndex === toIndex) {
+    return
+  }
+  const [moved] = items.splice(fromIndex, 1)
+  if (moved === undefined) {
+    return
+  }
+  items.splice(toIndex, 0, moved)
+}
+
+function movedSelectionIndex(index: number, fromIndex: number, toIndex: number): number {
+  if (index === fromIndex) {
+    return toIndex
+  }
+  if (fromIndex < toIndex && index > fromIndex && index <= toIndex) {
+    return index - 1
+  }
+  if (fromIndex > toIndex && index >= toIndex && index < fromIndex) {
+    return index + 1
+  }
+  return index
 }
 
 function normalizeDiagnostics(document: DraftMachineDocument, external: ValidationDiagnostic[] = []): ValidationDiagnostic[] {
@@ -277,6 +306,13 @@ function setGraphNodePositionForState(
   document.ui_schema = withGraphNodePositions(document.ui_schema, positions)
 }
 
+function setGraphNodePositions(
+  document: DraftMachineDocument,
+  positions: Record<string, GraphNodePosition>
+): void {
+  document.ui_schema = withGraphNodePositions(document.ui_schema, positions)
+}
+
 export function createMachineStore(input: CreateMachineStoreInput = {}): MachineStore {
   const initialDocument = deepClone(input.document ?? defaultDraftMachineDocument())
   const initialSelection: Selection = { kind: "machine" }
@@ -334,6 +370,39 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
           isDirty: false
         }
       })
+    },
+    restoreDocument(document, diagnostics) {
+      commitTransaction(
+        store,
+        "restore-document",
+        (draft) => {
+          const nextDocument = deepClone(document)
+          draft.definition = nextDocument.definition
+          draft.ui_schema = nextDocument.ui_schema
+          draft.draft_state = nextDocument.draft_state
+          for (const [key, value] of Object.entries(nextDocument)) {
+            if (key === "definition" || key === "ui_schema" || key === "draft_state") {
+              continue
+            }
+            draft[key] = value
+          }
+          for (const key of Object.keys(draft)) {
+            if (key in nextDocument) {
+              continue
+            }
+            if (key === "definition" || key === "ui_schema" || key === "draft_state") {
+              continue
+            }
+            delete draft[key]
+          }
+        },
+        () => ({ kind: "machine" })
+      )
+      if (diagnostics) {
+        set((state) => ({
+          diagnostics: normalizeDiagnostics(state.document, diagnostics)
+        }))
+      }
     },
     setDiagnostics(diagnostics) {
       set((state) => {
@@ -399,6 +468,39 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
               ? clampIndex(Math.min(state.selection.stateIndex, stateIndex), document.definition.states.length)
               : clampIndex(stateIndex, document.definition.states.length)
           return { kind: "state", stateIndex: nextIndex }
+        }
+      )
+    },
+    moveState(fromIndex, toIndex) {
+      commitTransaction(
+        store,
+        "move-state",
+        (document) => {
+          const count = document.definition.states.length
+          if (count < 2) {
+            return
+          }
+          if (fromIndex < 0 || fromIndex >= count || toIndex < 0 || toIndex >= count) {
+            return
+          }
+          if (fromIndex === toIndex) {
+            return
+          }
+
+          moveArrayItem(document.definition.states, fromIndex, toIndex)
+
+          const positions = readGraphNodePositions(document.ui_schema)
+          const reindexedPositions = reindexGraphNodePositionsAfterStateMove(positions, fromIndex, toIndex)
+          setGraphNodePositions(document, reindexedPositions)
+        },
+        (_document, state) => {
+          if (state.selection.kind === "state") {
+            return {
+              kind: "state",
+              stateIndex: movedSelectionIndex(state.selection.stateIndex, fromIndex, toIndex)
+            }
+          }
+          return state.selection
         }
       )
     },
@@ -487,6 +589,48 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
             kind: "transition",
             transitionIndex: clampIndex(transitionIndex, document.definition.transitions.length)
           }
+        }
+      )
+    },
+    moveTransition(fromIndex, toIndex) {
+      commitTransaction(
+        store,
+        "move-transition",
+        (document, _state, targetCache) => {
+          const count = document.definition.transitions.length
+          if (count < 2) {
+            return
+          }
+          if (fromIndex < 0 || fromIndex >= count || toIndex < 0 || toIndex >= count) {
+            return
+          }
+          if (fromIndex === toIndex) {
+            return
+          }
+
+          moveArrayItem(document.definition.transitions, fromIndex, toIndex)
+
+          const rebuiltCache = buildTargetCache(document)
+          Object.keys(targetCache).forEach((key) => {
+            delete targetCache[key]
+          })
+          Object.assign(targetCache, rebuiltCache)
+        },
+        (_document, state) => {
+          if (state.selection.kind === "transition") {
+            return {
+              kind: "transition",
+              transitionIndex: movedSelectionIndex(state.selection.transitionIndex, fromIndex, toIndex)
+            }
+          }
+          if (state.selection.kind === "workflow-node") {
+            return {
+              kind: "workflow-node",
+              transitionIndex: movedSelectionIndex(state.selection.transitionIndex, fromIndex, toIndex),
+              nodeIndex: state.selection.nodeIndex
+            }
+          }
+          return state.selection
         }
       )
     },
@@ -682,6 +826,11 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
           return
         }
         setGraphNodePositionForState(document, stateIndex, position)
+      })
+    },
+    setGraphNodePositions(positions) {
+      commitTransaction(store, "set-graph-node-positions", (document) => {
+        setGraphNodePositions(document, positions)
       })
     },
     undo() {

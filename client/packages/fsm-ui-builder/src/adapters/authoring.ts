@@ -3,12 +3,19 @@ import type { RPCClient } from "../../../../src"
 
 import {
   FSM_AUTHORING_METHODS,
+  FSM_AUTHORING_OPTIONAL_METHODS,
+  type AuthoringDiffVersionsRequest,
+  type AuthoringDiffVersionsResponse,
   type AuthoringDeleteMachineRequest,
   type AuthoringDeleteMachineResponse,
   type AuthoringGetMachineRequest,
   type AuthoringGetMachineResponse,
+  type AuthoringGetVersionRequest,
+  type AuthoringGetVersionResponse,
   type AuthoringListMachinesRequest,
   type AuthoringListMachinesResponse,
+  type AuthoringListVersionsRequest,
+  type AuthoringListVersionsResponse,
   type AuthoringPublishRequest,
   type AuthoringPublishResponse,
   type AuthoringSaveDraftRequest,
@@ -26,6 +33,9 @@ export interface BuilderAuthoringRPC {
   validate(data: AuthoringValidateRequest, meta?: BuilderRequestMeta): Promise<AuthoringValidateResponse>
   publish(data: AuthoringPublishRequest, meta?: BuilderRequestMeta): Promise<AuthoringPublishResponse>
   deleteMachine(data: AuthoringDeleteMachineRequest, meta?: BuilderRequestMeta): Promise<AuthoringDeleteMachineResponse>
+  listVersions?(data: AuthoringListVersionsRequest, meta?: BuilderRequestMeta): Promise<AuthoringListVersionsResponse>
+  getVersion?(data: AuthoringGetVersionRequest, meta?: BuilderRequestMeta): Promise<AuthoringGetVersionResponse>
+  diffVersions?(data: AuthoringDiffVersionsRequest, meta?: BuilderRequestMeta): Promise<AuthoringDiffVersionsResponse>
 }
 
 export function createBuilderAuthoringRPC(client: RPCClient): BuilderAuthoringRPC {
@@ -74,6 +84,30 @@ export function createBuilderAuthoringRPC(client: RPCClient): BuilderAuthoringRP
       return callBuilderMethod<AuthoringDeleteMachineRequest, AuthoringDeleteMachineResponse>({
         client,
         method: FSM_AUTHORING_METHODS.deleteMachine,
+        data,
+        meta
+      })
+    },
+    async listVersions(data, meta) {
+      return callBuilderMethod<AuthoringListVersionsRequest, AuthoringListVersionsResponse>({
+        client,
+        method: FSM_AUTHORING_OPTIONAL_METHODS.listVersions,
+        data,
+        meta
+      })
+    },
+    async getVersion(data, meta) {
+      return callBuilderMethod<AuthoringGetVersionRequest, AuthoringGetVersionResponse>({
+        client,
+        method: FSM_AUTHORING_OPTIONAL_METHODS.getVersion,
+        data,
+        meta
+      })
+    },
+    async diffVersions(data, meta) {
+      return callBuilderMethod<AuthoringDiffVersionsRequest, AuthoringDiffVersionsResponse>({
+        client,
+        method: FSM_AUTHORING_OPTIONAL_METHODS.diffVersions,
         data,
         meta
       })

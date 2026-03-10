@@ -71,6 +71,10 @@ function TreeIcon() {
 
 export function Explorer(props: ExplorerProps) {
   const [activeView, setActiveView] = useState<ExplorerView>("palette")
+  const [dragStateIndex, setDragStateIndex] = useState<number | null>(null)
+  const [dropStateIndex, setDropStateIndex] = useState<number | null>(null)
+  const [dragTransitionIndex, setDragTransitionIndex] = useState<number | null>(null)
+  const [dropTransitionIndex, setDropTransitionIndex] = useState<number | null>(null)
   const states = useMachineStore((state) => state.document.definition.states)
   const transitions = useMachineStore((state) => state.document.definition.transitions)
   const selection = useMachineStore((state) => state.selection)
@@ -78,12 +82,42 @@ export function Explorer(props: ExplorerProps) {
   const setSelection = useMachineStore((state) => state.setSelection)
   const addState = useMachineStore((state) => state.addState)
   const addTransition = useMachineStore((state) => state.addTransition)
+  const moveState = useMachineStore((state) => state.moveState)
+  const moveTransition = useMachineStore((state) => state.moveTransition)
 
   const readOnly = Boolean(props.readOnly)
 
   const handleViewChange = useCallback((view: ExplorerView) => {
     setActiveView(view)
   }, [])
+
+  const handleStateDrop = useCallback(
+    (targetIndex: number) => {
+      if (dragStateIndex === null || dragStateIndex === targetIndex) {
+        setDragStateIndex(null)
+        setDropStateIndex(null)
+        return
+      }
+      moveState(dragStateIndex, targetIndex)
+      setDragStateIndex(null)
+      setDropStateIndex(null)
+    },
+    [dragStateIndex, moveState]
+  )
+
+  const handleTransitionDrop = useCallback(
+    (targetIndex: number) => {
+      if (dragTransitionIndex === null || dragTransitionIndex === targetIndex) {
+        setDragTransitionIndex(null)
+        setDropTransitionIndex(null)
+        return
+      }
+      moveTransition(dragTransitionIndex, targetIndex)
+      setDragTransitionIndex(null)
+      setDropTransitionIndex(null)
+    },
+    [dragTransitionIndex, moveTransition]
+  )
 
   return (
     <section
@@ -144,10 +178,44 @@ export function Explorer(props: ExplorerProps) {
               <h3>States</h3>
               <ul>
                 {states.map((state, stateIndex) => (
-                  <li key={`state-${stateIndex}`}>
+                  <li
+                    key={`state-${stateIndex}`}
+                    draggable={!readOnly}
+                    onDragStart={() => {
+                      if (readOnly) {
+                        return
+                      }
+                      setDragStateIndex(stateIndex)
+                    }}
+                    onDragOver={(event) => {
+                      if (readOnly || dragStateIndex === null) {
+                        return
+                      }
+                      event.preventDefault()
+                      setDropStateIndex(stateIndex)
+                    }}
+                    onDragLeave={() => {
+                      if (dropStateIndex === stateIndex) {
+                        setDropStateIndex(null)
+                      }
+                    }}
+                    onDrop={(event) => {
+                      if (readOnly) {
+                        return
+                      }
+                      event.preventDefault()
+                      handleStateDrop(stateIndex)
+                    }}
+                    onDragEnd={() => {
+                      setDragStateIndex(null)
+                      setDropStateIndex(null)
+                    }}
+                  >
                     <button
                       type="button"
-                      className={`fub-list-item${selectedClass(isStateSelected(selection, stateIndex))}`}
+                      className={`fub-list-item${selectedClass(isStateSelected(selection, stateIndex))}${
+                        dropStateIndex === stateIndex ? " fub-list-item--drop-target" : ""
+                      }`}
                       onClick={() => setSelection({ kind: "state", stateIndex })}
                     >
                       <span className="fub-item-main">{state.name || "(unnamed)"}</span>
@@ -165,10 +233,44 @@ export function Explorer(props: ExplorerProps) {
               <h3>Transitions</h3>
               <ul>
                 {transitions.map((transition, transitionIndex) => (
-                  <li key={transition.id || `transition-${transitionIndex}`}>
+                  <li
+                    key={transition.id || `transition-${transitionIndex}`}
+                    draggable={!readOnly}
+                    onDragStart={() => {
+                      if (readOnly) {
+                        return
+                      }
+                      setDragTransitionIndex(transitionIndex)
+                    }}
+                    onDragOver={(event) => {
+                      if (readOnly || dragTransitionIndex === null) {
+                        return
+                      }
+                      event.preventDefault()
+                      setDropTransitionIndex(transitionIndex)
+                    }}
+                    onDragLeave={() => {
+                      if (dropTransitionIndex === transitionIndex) {
+                        setDropTransitionIndex(null)
+                      }
+                    }}
+                    onDrop={(event) => {
+                      if (readOnly) {
+                        return
+                      }
+                      event.preventDefault()
+                      handleTransitionDrop(transitionIndex)
+                    }}
+                    onDragEnd={() => {
+                      setDragTransitionIndex(null)
+                      setDropTransitionIndex(null)
+                    }}
+                  >
                     <button
                       type="button"
-                      className={`fub-list-item${selectedClass(isTransitionSelected(selection, transitionIndex))}`}
+                      className={`fub-list-item${selectedClass(isTransitionSelected(selection, transitionIndex))}${
+                        dropTransitionIndex === transitionIndex ? " fub-list-item--drop-target" : ""
+                      }`}
                       onClick={() => setSelection({ kind: "transition", transitionIndex })}
                     >
                       <span className="fub-item-main">{transition.id || `transition-${transitionIndex + 1}`}</span>

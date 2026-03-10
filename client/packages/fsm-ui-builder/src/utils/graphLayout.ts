@@ -99,3 +99,47 @@ export function reindexGraphNodePositionsAfterStateRemoval(
 
   return reindexed
 }
+
+export function reindexGraphNodePositionsAfterStateMove(
+  positions: Record<string, GraphNodePosition>,
+  fromIndex: number,
+  toIndex: number
+): Record<string, GraphNodePosition> {
+  if (fromIndex === toIndex) {
+    return { ...positions }
+  }
+
+  const reindexed: Record<string, GraphNodePosition> = {}
+
+  for (const [key, value] of Object.entries(positions)) {
+    if (!key.startsWith("state:")) {
+      reindexed[key] = value
+      continue
+    }
+
+    const rawIndex = Number.parseInt(key.slice("state:".length), 10)
+    if (Number.isNaN(rawIndex)) {
+      reindexed[key] = value
+      continue
+    }
+
+    if (rawIndex === fromIndex) {
+      reindexed[stableStateNodeID(toIndex)] = value
+      continue
+    }
+
+    if (fromIndex < toIndex && rawIndex > fromIndex && rawIndex <= toIndex) {
+      reindexed[stableStateNodeID(rawIndex - 1)] = value
+      continue
+    }
+
+    if (fromIndex > toIndex && rawIndex >= toIndex && rawIndex < fromIndex) {
+      reindexed[stableStateNodeID(rawIndex + 1)] = value
+      continue
+    }
+
+    reindexed[key] = value
+  }
+
+  return reindexed
+}
