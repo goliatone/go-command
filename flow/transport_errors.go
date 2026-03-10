@@ -63,6 +63,20 @@ func MapRuntimeError(err error) TransportErrorMapping {
 			GRPCCode:    GRPCCodeNotFound,
 			RPCCode:     code,
 		}
+	case ErrCodeAuthoringNotFound:
+		return TransportErrorMapping{
+			RuntimeCode: code,
+			HTTPStatus:  http.StatusNotFound,
+			GRPCCode:    GRPCCodeNotFound,
+			RPCCode:     code,
+		}
+	case ErrCodeAuthoringValidationFailed:
+		return TransportErrorMapping{
+			RuntimeCode: code,
+			HTTPStatus:  http.StatusPreconditionFailed,
+			GRPCCode:    GRPCCodeFailedPrecondition,
+			RPCCode:     code,
+		}
 	case ErrCodeVersionConflict:
 		return TransportErrorMapping{
 			RuntimeCode: code,
@@ -166,7 +180,7 @@ func runtimeErrorDetails(err error, mapping TransportErrorMapping) map[string]an
 
 func runtimeCategoryForMapping(mapping TransportErrorMapping) string {
 	switch strings.TrimSpace(mapping.RuntimeCode) {
-	case ErrCodeInvalidTransition, ErrCodeGuardRejected, ErrCodeStateNotFound, ErrCodePreconditionFailed:
+	case ErrCodeInvalidTransition, ErrCodeGuardRejected, ErrCodeStateNotFound, ErrCodeAuthoringNotFound, ErrCodePreconditionFailed, ErrCodeAuthoringValidationFailed:
 		return string(apperrors.CategoryBadInput)
 	case ErrCodeVersionConflict, ErrCodeIdempotencyConflict:
 		return string(apperrors.CategoryConflict)
