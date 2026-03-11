@@ -9,7 +9,7 @@
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM"],
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "vitest/globals", "vite/client"],
     "skipLibCheck": true,
     "jsx": "react-jsx"
   },
