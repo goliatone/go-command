@@ -14,7 +14,9 @@
     "demo": "vite --config vite.demo.config.ts"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.12",
     "@dagrejs/dagre": "^2.0.4",
+    "immer": "^10.1.1",
     "@xyflow/react": "^12.10.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

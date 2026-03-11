@@ -20,7 +20,14 @@ import { BuilderShell } from "./components/BuilderShell"
 import { ConflictResolutionModal, type ConflictResolutionChoice } from "./components/ConflictResolutionModal"
 import type { SaveStatus } from "./components/Header"
 import { VersionHistoryModal } from "./components/VersionHistoryModal"
-import { deepClone, normalizeInitialDocumentInput, validateDefinition, type Selection } from "./document"
+import {
+  deepClone,
+  diagnosticsParityEqual,
+  mergeScopedValidationDiagnostics,
+  normalizeInitialDocumentInput,
+  validateDefinition,
+  type Selection
+} from "./document"
 import { toHandledBuilderError } from "./errorHandling"
 import type { BuilderRuntimeRPC } from "./hooks/useRPC"
 import { useRuntimeRPC } from "./hooks/useRPC"
@@ -130,6 +137,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
   const replaceDocument = useMachineStore((state) => state.replaceDocument)
   const restoreDocument = useMachineStore((state) => state.restoreDocument)
   const setDiagnostics = useMachineStore((state) => state.setDiagnostics)
+  const consumeValidationScopeNodeIDs = useMachineStore((state) => state.consumeValidationScopeNodeIDs)
   const markSaved = useMachineStore((state) => state.markSaved)
   const applyRemoteSave = useMachineStore((state) => state.applyRemoteSave)
 
@@ -214,6 +222,18 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     })
   }, [])
 
+  const persistBaselineDraft = useCallback(
+    async (draft: DraftMachineDocument) => {
+      await persistenceStore.save({
+        machineId: machineID,
+        updatedAt: new Date().toISOString(),
+        document: deepClone(draft)
+      })
+      setRecoveryDraft(null)
+    },
+    [machineID, persistenceStore]
+  )
+
   const commitSavedAuthoringDraft = useCallback(
     async (input: {
       draft: DraftMachineDocument
@@ -233,21 +253,14 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
       }
 
       baseRoundTripDocumentRef.current = deepClone(persistedDocument)
-
-      await persistenceStore.save({
-        machineId: machineID,
-        updatedAt: new Date().toISOString(),
-        document: persistedDocument
-      })
-
-      setRecoveryDraft(null)
+      await persistBaselineDraft(persistedDocument)
       setSaveStatus({
         state: "saved",
         source: "manual",
         updatedAt: new Date().toISOString()
       })
     },
-    [applyRemoteSave, machineID, persistenceStore]
+    [applyRemoteSave, persistBaselineDraft]
   )
 
   const openVersionConflict = useCallback(
@@ -496,16 +509,58 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     }
 
     try {
-      const validation = await authoringRPC.validate({
+      const scopeNodeIDs = consumeValidationScopeNodeIDs()
+      if (scopeNodeIDs.length === 0) {
+        const validation = await authoringRPC.validate({
+          machineId: machineID,
+          draft: roundTripDraft
+        })
+        setDiagnostics(validation.diagnostics)
+        pushSimulationInfo(`Validation completed. valid=${validation.valid}`)
+        return
+      }
+
+      const scopedValidation = await authoringRPC.validate({
+        machineId: machineID,
+        draft: roundTripDraft,
+        scope: {
+          nodeIds: scopeNodeIDs
+        }
+      })
+
+      const mergedDiagnostics = mergeScopedValidationDiagnostics({
+        definition: roundTripDraft.definition,
+        cachedDiagnostics: diagnostics,
+        scopedDiagnostics: scopedValidation.diagnostics,
+        scopeNodeIDs
+      })
+      setDiagnostics(mergedDiagnostics)
+
+      const fullValidation = await authoringRPC.validate({
         machineId: machineID,
         draft: roundTripDraft
       })
-      setDiagnostics(validation.diagnostics)
-      pushSimulationInfo(`Validation completed. valid=${validation.valid}`)
+
+      if (!diagnosticsParityEqual(mergedDiagnostics, fullValidation.diagnostics)) {
+        setDiagnostics(fullValidation.diagnostics)
+        pushSimulationInfo("Scoped validation parity mismatch detected; fell back to full validation output.")
+        return
+      }
+
+      pushSimulationInfo(`Validation completed. valid=${fullValidation.valid} (scoped + parity checked)`)
     } catch (error) {
       handleOperationError(error)
     }
-  }, [authoringRPC, buildRoundTripDraft, handleOperationError, machineID, pushSimulationInfo, setDiagnostics])
+  }, [
+    authoringRPC,
+    buildRoundTripDraft,
+    consumeValidationScopeNodeIDs,
+    diagnostics,
+    handleOperationError,
+    machineID,
+    pushSimulationInfo,
+    setDiagnostics
+  ])
 
   const onSave = useCallback(async () => {
     setSaveStatus({
@@ -517,14 +572,9 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
 
     if (!authoringRPC) {
       try {
-        await persistenceStore.save({
-          machineId: machineID,
-          updatedAt: new Date().toISOString(),
-          document: deepClone(roundTripDraft)
-        })
+        await persistBaselineDraft(roundTripDraft)
         markSaved()
         baseRoundTripDocumentRef.current = deepClone(roundTripDraft)
-        setRecoveryDraft(null)
         setSaveStatus({
           state: "saved",
           source: "manual",
@@ -572,6 +622,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     machineID,
     markSaved,
     openVersionConflict,
+    persistBaselineDraft,
     pushSimulationInfo
   ])
 
@@ -587,6 +638,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
           restoreDocument(serverDraft, pendingConflict.latestDiagnostics)
           baseRoundTripDocumentRef.current = deepClone(serverDraft)
           markSaved()
+          await persistBaselineDraft(serverDraft)
           setPendingConflict(null)
           setSaveStatus({
             state: "saved",
@@ -648,6 +700,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
       markSaved,
       openVersionConflict,
       pendingConflict,
+      persistBaselineDraft,
       pushSimulationInfo,
       restoreDocument
     ]
@@ -773,6 +826,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
       restoreDocument(restoredDraft, snapshot.diagnostics)
       baseRoundTripDocumentRef.current = deepClone(restoredDraft)
       markSaved()
+      await persistBaselineDraft(restoredDraft)
       setVersionHistoryOpen(false)
       setSaveStatus({
         state: "saved",
@@ -791,6 +845,7 @@ function BuilderShellWithLifecycle(props: FSMUIBuilderProps) {
     handleOperationError,
     markSaved,
     machineID,
+    persistBaselineDraft,
     pushSimulationInfo,
     restoreDocument,
     versionHistorySelectedVersion

@@ -602,6 +602,19 @@
   letter-spacing: 0.04em;
 }
 
+.fub-explorer-list-scroll {
+  max-height: min(38vh, 340px);
+  overflow: auto;
+  position: relative;
+  padding-right: 2px;
+}
+
+.fub-explorer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* ============================================
    List Item Styles
    ============================================ */

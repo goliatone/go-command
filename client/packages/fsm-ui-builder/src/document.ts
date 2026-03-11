@@ -59,7 +59,11 @@ export function defaultDraftMachineDocument(): DraftMachineDocument {
 
 export function deepClone<T>(value: T): T {
   if (typeof structuredClone === "function") {
-    return structuredClone(value)
+    try {
+      return structuredClone(value)
+    } catch {
+      // Fall back for non-cloneable host objects/proxies in tests and browser runtimes.
+    }
   }
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -282,6 +286,107 @@ export function mapDiagnosticToSelection(definition: MachineDefinition, diagnost
   }
 
   return null
+}
+
+function diagnosticIdentity(diagnostic: ValidationDiagnostic): string {
+  return [
+    diagnostic.code,
+    diagnostic.severity,
+    diagnostic.message,
+    diagnostic.path,
+    diagnostic.node_id ?? "",
+    diagnostic.field ?? ""
+  ].join("|")
+}
+
+function dedupeDiagnostics(diagnostics: ValidationDiagnostic[]): ValidationDiagnostic[] {
+  const byIdentity = new Map<string, ValidationDiagnostic>()
+  for (const diagnostic of diagnostics) {
+    byIdentity.set(diagnosticIdentity(diagnostic), diagnostic)
+  }
+  return [...byIdentity.values()]
+}
+
+function diagnosticCompare(a: ValidationDiagnostic, b: ValidationDiagnostic): number {
+  const keyA = diagnosticIdentity(a)
+  const keyB = diagnosticIdentity(b)
+  if (keyA === keyB) {
+    return 0
+  }
+  return keyA > keyB ? 1 : -1
+}
+
+function isDiagnosticInValidationScope(
+  definition: MachineDefinition,
+  diagnostic: ValidationDiagnostic,
+  scopedNodeIDs: Set<string>
+): boolean {
+  const nodeID = diagnostic.node_id?.trim()
+  if (nodeID && scopedNodeIDs.has(nodeID)) {
+    return true
+  }
+
+  const transitionIndex = parseFirstInt(diagnostic.path, /transitions\[(\d+)\]/)
+  if (transitionIndex !== null) {
+    const transition = definition.transitions[transitionIndex]
+    const transitionID = transition?.id?.trim()
+    if (transitionID && scopedNodeIDs.has(transitionID)) {
+      return true
+    }
+
+    const workflowNodeIndex = parseFirstInt(diagnostic.path, /workflow\.nodes\[(\d+)\]/)
+    if (workflowNodeIndex !== null) {
+      const workflowNodeID = transition?.workflow?.nodes?.[workflowNodeIndex]?.id?.trim()
+      if (workflowNodeID && scopedNodeIDs.has(workflowNodeID)) {
+        return true
+      }
+    }
+  }
+
+  const stateIndex = parseFirstInt(diagnostic.path, /states\[(\d+)\]/)
+  if (stateIndex !== null) {
+    const stateName = definition.states[stateIndex]?.name?.trim()
+    if (stateName && scopedNodeIDs.has(stateName)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export function mergeScopedValidationDiagnostics(input: {
+  definition: MachineDefinition
+  cachedDiagnostics: ValidationDiagnostic[]
+  scopedDiagnostics: ValidationDiagnostic[]
+  scopeNodeIDs: string[]
+}): ValidationDiagnostic[] {
+  const scopedNodeIDs = new Set(input.scopeNodeIDs.map((value) => value.trim()).filter((value) => value !== ""))
+  if (scopedNodeIDs.size === 0) {
+    return dedupeDiagnostics(input.scopedDiagnostics).sort(diagnosticCompare)
+  }
+
+  const preservedDiagnostics = input.cachedDiagnostics.filter(
+    (diagnostic) => !isDiagnosticInValidationScope(input.definition, diagnostic, scopedNodeIDs)
+  )
+
+  return dedupeDiagnostics([...preservedDiagnostics, ...input.scopedDiagnostics]).sort(diagnosticCompare)
+}
+
+export function diagnosticsParityEqual(
+  leftDiagnostics: ValidationDiagnostic[],
+  rightDiagnostics: ValidationDiagnostic[]
+): boolean {
+  const left = dedupeDiagnostics(leftDiagnostics).sort(diagnosticCompare)
+  const right = dedupeDiagnostics(rightDiagnostics).sort(diagnosticCompare)
+  if (left.length !== right.length) {
+    return false
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (diagnosticIdentity(left[index]) !== diagnosticIdentity(right[index])) {
+      return false
+    }
+  }
+  return true
 }
 
 function makeDiagnostic(input: {

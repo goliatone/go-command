@@ -193,10 +193,9 @@ function CanvasInner(props: CanvasProps) {
   const selection = useMachineStore((state) => state.selection)
   const setSelection = useMachineStore((state) => state.setSelection)
   const addState = useMachineStore((state) => state.addState)
+  const addStateFromPalette = useMachineStore((state) => state.addStateFromPalette)
   const setGraphNodePosition = useMachineStore((state) => state.setGraphNodePosition)
   const setGraphNodePositions = useMachineStore((state) => state.setGraphNodePositions)
-  const updateStateName = useMachineStore((state) => state.updateStateName)
-  const updateStateFlag = useMachineStore((state) => state.updateStateFlag)
   const projectedOutcome = useSimulationStore((state) => state.projectedOutcome)
   const snapshotResult = useSimulationStore((state) => state.snapshotResult)
   const canvasZoom = useUIStore((state) => state.canvasZoom)
@@ -408,47 +407,18 @@ function CanvasInner(props: CanvasProps) {
         y: event.clientY
       })
 
-      // Add a new state
-      addState()
-
-      // The new state will be at the end of the states array
-      // After the state is added, update its properties if needed
-      const newStateIndex = states.length // This is the index of the newly added state
-
-      // Use setTimeout to ensure the state is added before we try to update it
-      setTimeout(() => {
-        // Generate a unique name based on the dropped item type
-        const baseName = droppedData.defaults?.initial
-          ? "initial"
-          : droppedData.defaults?.terminal
-            ? "final"
-            : "state"
-        const stateName = `${baseName}_${newStateIndex + 1}`
-
-        updateStateName(newStateIndex, stateName)
-        setGraphNodePosition(newStateIndex, dropPosition)
-
-        // Set initial/terminal flags if specified
-        if (droppedData.defaults?.initial) {
-          updateStateFlag(newStateIndex, "initial", true)
-        }
-        if (droppedData.defaults?.terminal) {
-          updateStateFlag(newStateIndex, "terminal", true)
-        }
-
-        // Select the new state
-        setSelection({ kind: "state", stateIndex: newStateIndex })
-      }, 0)
+      const namePrefix = droppedData.defaults?.initial ? "initial" : droppedData.defaults?.terminal ? "final" : "state"
+      addStateFromPalette({
+        namePrefix,
+        initial: droppedData.defaults?.initial,
+        terminal: droppedData.defaults?.terminal,
+        position: dropPosition
+      })
     },
     [
       readOnly,
       reactFlowInstance,
-      addState,
-      states.length,
-      updateStateName,
-      updateStateFlag,
-      setSelection,
-      setGraphNodePosition
+      addStateFromPalette
     ]
   )
 

@@ -141,4 +141,72 @@ describe("phase 7 layout and reorder behavior", () => {
     ])
     expect(store.getState().selection).toEqual({ kind: "workflow-node", transitionIndex: 2, nodeIndex: 0 })
   })
+
+  it("keeps transition target cache isolated when duplicate transition IDs exist", () => {
+    const store = createMachineStore({
+      document: {
+        definition: {
+          id: "orders",
+          name: "Orders",
+          version: "v1",
+          states: [{ name: "draft", initial: true }, { name: "review" }, { name: "approved" }],
+          transitions: [
+            {
+              id: "dup-id",
+              event: "approve-review",
+              from: "draft",
+              to: "review",
+              workflow: { nodes: [{ id: "step-1", kind: "step", step: { action_id: "audit.log" }, next: [] }] }
+            },
+            {
+              id: "dup-id",
+              event: "approve-final",
+              from: "draft",
+              to: "approved",
+              workflow: { nodes: [{ id: "step-2", kind: "step", step: { action_id: "notify.ops" }, next: [] }] }
+            }
+          ]
+        },
+        ui_schema: {
+          layout: "flow",
+          nodes: [],
+          edges: [],
+          inspector: {}
+        },
+        draft_state: {
+          is_draft: true,
+          last_saved_at: "2026-03-10T00:00:00Z"
+        }
+      }
+    })
+
+    store.getState().updateTransitionTargetKind(0, "dynamic")
+    store.getState().updateTransition(0, "dynamic_to.resolver", "resolver.review")
+    store.getState().updateTransitionTargetKind(0, "static")
+
+    expect(store.getState().document.definition.transitions[0]?.to).toBe("review")
+    expect(store.getState().document.definition.transitions[1]?.to).toBe("approved")
+  })
+
+  it("adds palette states atomically in one transaction with selection and persisted position", () => {
+    const store = createMachineStore({ document: makeDocument() })
+    const before = store.getState()
+
+    store.getState().addStateFromPalette({
+      namePrefix: "initial",
+      initial: true,
+      position: { x: 340, y: 180 }
+    })
+
+    const after = store.getState()
+    const addedIndex = after.document.definition.states.length - 1
+    const addedState = after.document.definition.states[addedIndex]
+
+    expect(after.history.length).toBe(before.history.length + 1)
+    expect(after.selection).toEqual({ kind: "state", stateIndex: addedIndex })
+    expect(addedState?.name).toBe("initial_4")
+    expect(addedState?.initial).toBe(true)
+    expect(after.document.definition.states[0]?.initial).toBe(false)
+    expect(readGraphNodePositions(after.document.ui_schema)[stableStateNodeID(addedIndex)]).toEqual({ x: 340, y: 180 })
+  })
 })

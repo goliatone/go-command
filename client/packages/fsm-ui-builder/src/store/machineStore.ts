@@ -1,4 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
+import { produce } from "immer"
 
 import type {
   DraftState,
@@ -34,6 +35,11 @@ interface HistoryEntry {
   transaction: string
 }
 
+interface CommitTransactionOptions {
+  diagnosticsResolver?: (document: DraftMachineDocument, state: MachineStoreState) => ValidationDiagnostic[]
+  resetValidationScope?: boolean
+}
+
 interface TransitionTargetCacheEntry {
   staticTo?: string
   dynamicTarget?: TransitionDefinition["dynamic_to"]
@@ -45,6 +51,7 @@ export interface MachineStoreState {
   document: DraftMachineDocument
   selection: Selection
   diagnostics: ValidationDiagnostic[]
+  pendingValidationNodeIDs: string[]
   targetCache: TargetCache
   history: HistoryEntry[]
   historyIndex: number
@@ -53,9 +60,16 @@ export interface MachineStoreState {
   setSelection(selection: Selection): void
   replaceDocument(document: DraftMachineDocument, diagnostics?: ValidationDiagnostic[]): void
   setDiagnostics(diagnostics: ValidationDiagnostic[]): void
+  consumeValidationScopeNodeIDs(): string[]
   focusDiagnostic(diagnostic: ValidationDiagnostic): void
   setMachineName(name: string): void
   addState(): void
+  addStateFromPalette(input: {
+    namePrefix: string
+    initial?: boolean
+    terminal?: boolean
+    position?: GraphNodePosition
+  }): void
   removeState(stateIndex: number): void
   moveState(fromIndex: number, toIndex: number): void
   updateStateName(stateIndex: number, name: string): void
@@ -134,23 +148,83 @@ function normalizeDiagnostics(document: DraftMachineDocument, external: Validati
   return [...external, ...validated]
 }
 
-function transitionCacheKey(transition: TransitionDefinition, transitionIndex: number): string {
-  const id = transition.id.trim()
-  if (id !== "") {
-    return `id:${id}`
-  }
+function transitionCacheKey(_transition: TransitionDefinition, transitionIndex: number): string {
   return `index:${transitionIndex}`
 }
 
-function cloneTargetCache(input: TargetCache): TargetCache {
-  const output: TargetCache = {}
-  for (const [key, entry] of Object.entries(input)) {
-    output[key] = {
-      staticTo: entry.staticTo,
-      dynamicTarget: entry.dynamicTarget ? deepClone(entry.dynamicTarget) : undefined
-    }
+function sanitizeStateNamePrefix(prefix: string): string {
+  const normalized = prefix.trim().replace(/\s+/g, "_")
+  if (normalized === "") {
+    return "state"
   }
-  return output
+  return normalized
+}
+
+function nextUniqueStateName(definition: MachineDefinition, prefix: string, seed: number): string {
+  const normalizedPrefix = sanitizeStateNamePrefix(prefix)
+  const existingNames = new Set(definition.states.map((state) => state.name))
+  let suffix = Math.max(1, seed)
+  let candidate = `${normalizedPrefix}_${suffix}`
+  while (existingNames.has(candidate)) {
+    suffix += 1
+    candidate = `${normalizedPrefix}_${suffix}`
+  }
+  return candidate
+}
+
+function uniqueNodeIDs(nodeIDs: string[]): string[] {
+  const unique = new Set<string>()
+  for (const nodeID of nodeIDs) {
+    const normalized = nodeID.trim()
+    if (normalized === "") {
+      continue
+    }
+    unique.add(normalized)
+  }
+  return [...unique]
+}
+
+function collectTransitionScopedNodeIDs(transition: TransitionDefinition | undefined): string[] {
+  if (!transition) {
+    return []
+  }
+  const nodeIDs: string[] = [transition.id]
+  for (const node of transition.workflow?.nodes ?? []) {
+    nodeIDs.push(node.id)
+  }
+  return uniqueNodeIDs(nodeIDs)
+}
+
+function diagnosticsRulesAffected(previous: DraftMachineDocument, next: DraftMachineDocument): boolean {
+  return previous.definition.states !== next.definition.states || previous.definition.transitions !== next.definition.transitions
+}
+
+function collectChangedValidationNodeIDs(previousDocument: DraftMachineDocument, nextDocument: DraftMachineDocument): string[] {
+  if (previousDocument.definition.states !== nextDocument.definition.states) {
+    // State-level edits can invalidate global diagnostics in ways scoped node IDs cannot fully represent.
+    return []
+  }
+
+  if (previousDocument.definition.transitions === nextDocument.definition.transitions) {
+    return []
+  }
+
+  const previousTransitions = previousDocument.definition.transitions
+  const nextTransitions = nextDocument.definition.transitions
+  const changedNodeIDs: string[] = []
+  const transitionCount = Math.max(previousTransitions.length, nextTransitions.length)
+
+  for (let transitionIndex = 0; transitionIndex < transitionCount; transitionIndex += 1) {
+    const previousTransition = previousTransitions[transitionIndex]
+    const nextTransition = nextTransitions[transitionIndex]
+    if (previousTransition === nextTransition) {
+      continue
+    }
+    changedNodeIDs.push(...collectTransitionScopedNodeIDs(previousTransition))
+    changedNodeIDs.push(...collectTransitionScopedNodeIDs(nextTransition))
+  }
+
+  return uniqueNodeIDs(changedNodeIDs)
 }
 
 function buildTargetCache(document: DraftMachineDocument): TargetCache {
@@ -206,18 +280,32 @@ function reindexTargetCacheAfterRemoval(cache: TargetCache, removedIndex: number
   return next
 }
 
-function nextStateFromHistory(history: HistoryEntry[], historyIndex: number, baselineHash: string): Pick<
+function nextStateFromHistory(
+  history: HistoryEntry[],
+  historyIndex: number,
+  baselineHash: string,
+  pendingValidationNodeIDs: string[] = []
+): Pick<
   MachineStoreState,
-  "document" | "selection" | "diagnostics" | "targetCache" | "history" | "historyIndex" | "baselineHash" | "isDirty"
+  | "document"
+  | "selection"
+  | "diagnostics"
+  | "pendingValidationNodeIDs"
+  | "targetCache"
+  | "history"
+  | "historyIndex"
+  | "baselineHash"
+  | "isDirty"
 > {
   const safeIndex = clampIndex(historyIndex, history.length)
   const current = history[safeIndex]
   const hash = serializeDraftDocument(current.document)
   return {
-    document: deepClone(current.document),
+    document: current.document,
     selection: current.selection,
-    diagnostics: [...current.diagnostics],
-    targetCache: cloneTargetCache(current.targetCache),
+    diagnostics: current.diagnostics,
+    pendingValidationNodeIDs,
+    targetCache: current.targetCache,
     history,
     historyIndex: safeIndex,
     baselineHash,
@@ -239,15 +327,43 @@ function commitTransaction(
   store: MachineStore,
   transaction: string,
   produceDocument: (document: DraftMachineDocument, state: MachineStoreState, targetCache: TargetCache) => void,
-  nextSelectionResolver?: (document: DraftMachineDocument, state: MachineStoreState) => Selection
+  nextSelectionResolver?: (document: DraftMachineDocument, state: MachineStoreState) => Selection,
+  options: CommitTransactionOptions = {}
 ): void {
   store.setState((state) => {
-    const document = deepClone(state.document)
-    const targetCache = cloneTargetCache(state.targetCache)
-    produceDocument(document, state, targetCache)
+    const nextTransactionState = produce(
+      {
+        document: state.document,
+        targetCache: state.targetCache
+      },
+      (draft) => {
+        produceDocument(draft.document, state, draft.targetCache)
+      }
+    )
 
-    const diagnostics = normalizeDiagnostics(document)
+    const document = nextTransactionState.document
+    const targetCache = nextTransactionState.targetCache
+    const diagnosticsAffected = diagnosticsRulesAffected(state.document, document)
+    const diagnostics = options.diagnosticsResolver
+      ? options.diagnosticsResolver(document, state)
+      : diagnosticsAffected
+        ? normalizeDiagnostics(document)
+        : state.diagnostics
     const selection = nextSelectionResolver ? nextSelectionResolver(document, state) : state.selection
+
+    let pendingValidationNodeIDs = state.pendingValidationNodeIDs
+    if (options.resetValidationScope) {
+      pendingValidationNodeIDs = []
+    } else if (diagnosticsAffected) {
+      const statesChanged = state.document.definition.states !== document.definition.states
+      const transitionsChanged = state.document.definition.transitions !== document.definition.transitions
+      const changedNodeIDs = collectChangedValidationNodeIDs(state.document, document)
+      if (statesChanged || (transitionsChanged && changedNodeIDs.length === 0)) {
+        pendingValidationNodeIDs = []
+      } else if (changedNodeIDs.length > 0) {
+        pendingValidationNodeIDs = uniqueNodeIDs([...state.pendingValidationNodeIDs, ...changedNodeIDs])
+      }
+    }
 
     const nextHistory = state.history.slice(0, state.historyIndex + 1)
     nextHistory.push({
@@ -258,7 +374,7 @@ function commitTransaction(
       transaction
     })
 
-    return nextStateFromHistory(nextHistory, nextHistory.length - 1, state.baselineHash)
+    return nextStateFromHistory(nextHistory, nextHistory.length - 1, state.baselineHash, pendingValidationNodeIDs)
   })
 }
 
@@ -325,16 +441,17 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
       document: initialDocument,
       selection: initialSelection,
       diagnostics: initialDiagnostics,
-      targetCache: cloneTargetCache(initialTargetCache),
+      targetCache: initialTargetCache,
       transaction: "init"
     }
   ]
 
   const store = createStore<MachineStoreState>((set, get) => ({
-    document: deepClone(initialDocument),
+    document: initialDocument,
     selection: initialSelection,
-    diagnostics: [...initialDiagnostics],
-    targetCache: cloneTargetCache(initialTargetCache),
+    diagnostics: initialDiagnostics,
+    pendingValidationNodeIDs: [],
+    targetCache: initialTargetCache,
     history: initialHistory,
     historyIndex: 0,
     baselineHash,
@@ -353,17 +470,18 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
             document: nextDocument,
             selection: nextSelection,
             diagnostics: normalized,
-            targetCache: cloneTargetCache(targetCache),
+            targetCache,
             transaction: "replace-document"
           }
         ]
         const nextBaseline = serializeDraftDocument(nextDocument)
 
         return {
-          document: deepClone(nextDocument),
+          document: nextDocument,
           selection: nextSelection,
           diagnostics: normalized,
-          targetCache: cloneTargetCache(targetCache),
+          pendingValidationNodeIDs: [],
+          targetCache,
           history: nextHistory,
           historyIndex: 0,
           baselineHash: nextBaseline,
@@ -396,19 +514,28 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
             delete draft[key]
           }
         },
-        () => ({ kind: "machine" })
+        () => ({ kind: "machine" }),
+        {
+          diagnosticsResolver: diagnostics
+            ? (nextDocument) => normalizeDiagnostics(nextDocument, diagnostics)
+            : undefined,
+          resetValidationScope: true
+        }
       )
-      if (diagnostics) {
-        set((state) => ({
-          diagnostics: normalizeDiagnostics(state.document, diagnostics)
-        }))
-      }
     },
     setDiagnostics(diagnostics) {
       set((state) => {
         const merged = normalizeDiagnostics(state.document, diagnostics)
-        return { diagnostics: merged }
+        return { diagnostics: merged, pendingValidationNodeIDs: [] }
       })
+    },
+    consumeValidationScopeNodeIDs() {
+      const state = get()
+      const nodeIDs = state.pendingValidationNodeIDs
+      if (nodeIDs.length > 0) {
+        set({ pendingValidationNodeIDs: [] })
+      }
+      return nodeIDs
     },
     focusDiagnostic(diagnostic) {
       set((state) => {
@@ -429,8 +556,35 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         store,
         "add-state",
         (document) => {
-          const stateIndex = document.definition.states.length + 1
-          document.definition.states.push({ name: `state_${stateIndex}` })
+          const stateName = nextUniqueStateName(document.definition, "state", document.definition.states.length + 1)
+          document.definition.states.push({ name: stateName })
+        },
+        (document) => ({ kind: "state", stateIndex: Math.max(0, document.definition.states.length - 1) })
+      )
+    },
+    addStateFromPalette(input) {
+      commitTransaction(
+        store,
+        "add-state-from-palette",
+        (document) => {
+          const stateIndex = document.definition.states.length
+          const stateName = nextUniqueStateName(document.definition, input.namePrefix, stateIndex + 1)
+          const state: MachineDefinition["states"][number] = {
+            name: stateName
+          }
+          if (input.initial) {
+            document.definition.states.forEach((candidate) => {
+              candidate.initial = false
+            })
+            state.initial = true
+          }
+          if (input.terminal) {
+            state.terminal = true
+          }
+          document.definition.states.push(state)
+          if (input.position) {
+            setGraphNodePositionForState(document, stateIndex, input.position)
+          }
         },
         (document) => ({ kind: "state", stateIndex: Math.max(0, document.definition.states.length - 1) })
       )
@@ -839,7 +993,7 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         return
       }
       const nextIndex = state.historyIndex - 1
-      set(nextStateFromHistory(state.history, nextIndex, state.baselineHash))
+      set(nextStateFromHistory(state.history, nextIndex, state.baselineHash, []))
     },
     redo() {
       const state = get()
@@ -847,22 +1001,24 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
         return
       }
       const nextIndex = state.historyIndex + 1
-      set(nextStateFromHistory(state.history, nextIndex, state.baselineHash))
+      set(nextStateFromHistory(state.history, nextIndex, state.baselineHash, []))
     },
     markSaved() {
       set((state) => {
         const baseline = serializeDraftDocument(state.document)
         return {
           baselineHash: baseline,
-          isDirty: false
+          isDirty: false,
+          pendingValidationNodeIDs: []
         }
       })
     },
     applyRemoteSave(version, draftState, diagnostics) {
       set((state) => {
-        const document = deepClone(state.document)
-        document.definition.version = version
-        document.draft_state = deepClone(draftState)
+        const document = produce(state.document, (draft) => {
+          draft.definition.version = version
+          draft.draft_state = deepClone(draftState)
+        })
 
         const mergedDiagnostics = normalizeDiagnostics(document, diagnostics)
         const targetCache = buildTargetCache(document)
@@ -870,13 +1026,13 @@ export function createMachineStore(input: CreateMachineStoreInput = {}): Machine
           document,
           selection: state.selection,
           diagnostics: mergedDiagnostics,
-          targetCache: cloneTargetCache(targetCache),
+          targetCache,
           transaction: "apply-remote-save"
         }
         const history = state.history.slice(0, state.historyIndex + 1)
         history.push(entry)
         const baseline = serializeDraftDocument(document)
-        return nextStateFromHistory(history, history.length - 1, baseline)
+        return nextStateFromHistory(history, history.length - 1, baseline, [])
       })
     }
   }))

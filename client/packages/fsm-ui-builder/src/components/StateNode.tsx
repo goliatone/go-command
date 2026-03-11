@@ -70,7 +70,7 @@ function StateNodeComponent({ data, selected }: NodeProps) {
   const getBadgeText = (): string => {
     if (initial) return "Initial"
     if (terminal) return "Final"
-    return "State"
+    return "Regular"
   }
 
   const getIcon = () => {

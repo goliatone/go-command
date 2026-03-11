@@ -245,7 +245,7 @@ export function Header(props: HeaderProps) {
 
         <div className="fub-header-separator" aria-hidden="true" />
 
-        {/* Primary action: Run/Simulate */}
+        {/* Primary action: Simulate */}
         <button
           type="button"
           className="fub-btn fub-btn-primary"
@@ -254,7 +254,7 @@ export function Header(props: HeaderProps) {
           title={props.runtimeAvailable ? "Run dry-run + snapshot" : "Runtime RPC unavailable"}
         >
           <PlayIcon />
-          {busyAction === "simulate" ? "Running..." : "Run"}
+          {busyAction === "simulate" ? "Running..." : "Simulate"}
         </button>
       </div>
 

@@ -1,7 +1,37 @@
-import { useState, useCallback } from "react"
+import { memo, useCallback, useRef, useState, type CSSProperties, type MutableRefObject } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
+
+import type { TransitionDefinition } from "../contracts"
 import { transitionLabel, type Selection } from "../document"
 import { useMachineStore } from "../store/provider"
 import { NodePalette } from "./NodePalette"
+
+const EXPLORER_VIRTUALIZATION_THRESHOLD = 80
+const EXPLORER_ROW_HEIGHT = 52
+const EXPLORER_OVERSCAN = 8
+const EXPLORER_FALLBACK_VISIBLE_ROWS = 12
+
+type ExplorerRowKind = "state" | "transition"
+
+const explorerRenderCounts: Record<ExplorerRowKind, Map<number, number>> = {
+  state: new Map(),
+  transition: new Map()
+}
+
+function trackExplorerRowRender(kind: ExplorerRowKind, index: number): void {
+  const map = explorerRenderCounts[kind]
+  map.set(index, (map.get(index) ?? 0) + 1)
+}
+
+export function __resetExplorerRenderCounts(): void {
+  for (const map of Object.values(explorerRenderCounts)) {
+    map.clear()
+  }
+}
+
+export function __getExplorerRenderCount(kind: ExplorerRowKind, index: number): number {
+  return explorerRenderCounts[kind].get(index) ?? 0
+}
 
 function selectedClass(selected: boolean): string {
   return selected ? " is-selected" : ""
@@ -23,11 +53,83 @@ function isTransitionSelected(selection: Selection, transitionIndex: number): bo
   return false
 }
 
+interface StateListRowProps {
+  stateIndex: number
+  state: {
+    name: string
+    initial?: boolean
+    terminal?: boolean
+  }
+  selected: boolean
+  dropTarget: boolean
+  setButtonRef: (index: number, element: HTMLButtonElement | null) => void
+  onSelect: (stateIndex: number) => void
+  onNavigate: (stateIndex: number, key: string) => void
+}
+
+const StateListRow = memo(function StateListRow(props: StateListRowProps) {
+  trackExplorerRowRender("state", props.stateIndex)
+
+  return (
+    <button
+      type="button"
+      ref={(element) => props.setButtonRef(props.stateIndex, element)}
+      className={`fub-list-item${selectedClass(props.selected)}${props.dropTarget ? " fub-list-item--drop-target" : ""}`}
+      onClick={() => props.onSelect(props.stateIndex)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+          event.preventDefault()
+        }
+        props.onNavigate(props.stateIndex, event.key)
+      }}
+      aria-label={props.state.name || "(unnamed)"}
+    >
+      <span className="fub-item-main">{props.state.name || "(unnamed)"}</span>
+      <span className="fub-item-meta">
+        {props.state.initial ? "initial" : ""}
+        {props.state.terminal ? " final" : ""}
+      </span>
+    </button>
+  )
+})
+
+interface TransitionListRowProps {
+  transitionIndex: number
+  transition: TransitionDefinition
+  selected: boolean
+  dropTarget: boolean
+  setButtonRef: (index: number, element: HTMLButtonElement | null) => void
+  onSelect: (transitionIndex: number) => void
+  onNavigate: (transitionIndex: number, key: string) => void
+}
+
+const TransitionListRow = memo(function TransitionListRow(props: TransitionListRowProps) {
+  trackExplorerRowRender("transition", props.transitionIndex)
+
+  return (
+    <button
+      type="button"
+      ref={(element) => props.setButtonRef(props.transitionIndex, element)}
+      className={`fub-list-item${selectedClass(props.selected)}${props.dropTarget ? " fub-list-item--drop-target" : ""}`}
+      onClick={() => props.onSelect(props.transitionIndex)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+          event.preventDefault()
+        }
+        props.onNavigate(props.transitionIndex, event.key)
+      }}
+      aria-label={transitionLabel(props.transition)}
+    >
+      <span className="fub-item-main">{props.transition.id || `transition-${props.transitionIndex + 1}`}</span>
+      <span className="fub-item-meta">{transitionLabel(props.transition)}</span>
+    </button>
+  )
+})
+
 export interface ExplorerProps {
   readOnly?: boolean
 }
 
-// SVG Icons for view toggle
 function PaletteIcon() {
   return (
     <svg
@@ -69,12 +171,26 @@ function TreeIcon() {
   )
 }
 
+function focusButtonRef(buttonRefMap: MutableRefObject<Map<number, HTMLButtonElement>>, index: number): void {
+  const focus = () => {
+    buttonRefMap.current.get(index)?.focus()
+  }
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(focus)
+    })
+    return
+  }
+  window.setTimeout(focus, 0)
+}
+
 export function Explorer(props: ExplorerProps) {
-  const [activeView, setActiveView] = useState<ExplorerView>("palette")
+  const [activeView, setActiveView] = useState<ExplorerView>("tree")
   const [dragStateIndex, setDragStateIndex] = useState<number | null>(null)
   const [dropStateIndex, setDropStateIndex] = useState<number | null>(null)
   const [dragTransitionIndex, setDragTransitionIndex] = useState<number | null>(null)
   const [dropTransitionIndex, setDropTransitionIndex] = useState<number | null>(null)
+
   const states = useMachineStore((state) => state.document.definition.states)
   const transitions = useMachineStore((state) => state.document.definition.transitions)
   const selection = useMachineStore((state) => state.selection)
@@ -87,9 +203,136 @@ export function Explorer(props: ExplorerProps) {
 
   const readOnly = Boolean(props.readOnly)
 
+  const stateButtonRefs = useRef(new Map<number, HTMLButtonElement>())
+  const transitionButtonRefs = useRef(new Map<number, HTMLButtonElement>())
+
+  const stateScrollRef = useRef<HTMLDivElement | null>(null)
+  const transitionScrollRef = useRef<HTMLDivElement | null>(null)
+
+  const stateVirtualized = states.length >= EXPLORER_VIRTUALIZATION_THRESHOLD
+  const transitionVirtualized = transitions.length >= EXPLORER_VIRTUALIZATION_THRESHOLD
+
+  const stateVirtualizer = useVirtualizer({
+    count: states.length,
+    getScrollElement: () => stateScrollRef.current,
+    estimateSize: () => EXPLORER_ROW_HEIGHT,
+    overscan: EXPLORER_OVERSCAN,
+    initialRect: { width: 320, height: 320 },
+    getItemKey: (index) => `state-${index}`
+  })
+
+  const transitionVirtualizer = useVirtualizer({
+    count: transitions.length,
+    getScrollElement: () => transitionScrollRef.current,
+    estimateSize: () => EXPLORER_ROW_HEIGHT,
+    overscan: EXPLORER_OVERSCAN,
+    initialRect: { width: 320, height: 320 },
+    getItemKey: (index) => `transition-${index}`
+  })
+
   const handleViewChange = useCallback((view: ExplorerView) => {
     setActiveView(view)
   }, [])
+
+  const selectState = useCallback(
+    (stateIndex: number) => {
+      setSelection({ kind: "state", stateIndex })
+    },
+    [setSelection]
+  )
+
+  const selectTransition = useCallback(
+    (transitionIndex: number) => {
+      setSelection({ kind: "transition", transitionIndex })
+    },
+    [setSelection]
+  )
+
+  const registerStateButtonRef = useCallback((index: number, element: HTMLButtonElement | null) => {
+    if (element) {
+      stateButtonRefs.current.set(index, element)
+      return
+    }
+    stateButtonRefs.current.delete(index)
+  }, [])
+
+  const registerTransitionButtonRef = useCallback((index: number, element: HTMLButtonElement | null) => {
+    if (element) {
+      transitionButtonRefs.current.set(index, element)
+      return
+    }
+    transitionButtonRefs.current.delete(index)
+  }, [])
+
+  const focusStateIndex = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= states.length) {
+        return
+      }
+      setSelection({ kind: "state", stateIndex: nextIndex })
+      if (stateVirtualized) {
+        stateVirtualizer.scrollToIndex(nextIndex, { align: "auto" })
+      }
+      focusButtonRef(stateButtonRefs, nextIndex)
+    },
+    [setSelection, stateVirtualized, stateVirtualizer, states.length]
+  )
+
+  const focusTransitionIndex = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= transitions.length) {
+        return
+      }
+      setSelection({ kind: "transition", transitionIndex: nextIndex })
+      if (transitionVirtualized) {
+        transitionVirtualizer.scrollToIndex(nextIndex, { align: "auto" })
+      }
+      focusButtonRef(transitionButtonRefs, nextIndex)
+    },
+    [setSelection, transitionVirtualized, transitionVirtualizer, transitions.length]
+  )
+
+  const onStateRowNavigate = useCallback(
+    (stateIndex: number, key: string) => {
+      if (key === "ArrowDown") {
+        focusStateIndex(Math.min(states.length - 1, stateIndex + 1))
+        return
+      }
+      if (key === "ArrowUp") {
+        focusStateIndex(Math.max(0, stateIndex - 1))
+        return
+      }
+      if (key === "Home") {
+        focusStateIndex(0)
+        return
+      }
+      if (key === "End") {
+        focusStateIndex(Math.max(0, states.length - 1))
+      }
+    },
+    [focusStateIndex, states.length]
+  )
+
+  const onTransitionRowNavigate = useCallback(
+    (transitionIndex: number, key: string) => {
+      if (key === "ArrowDown") {
+        focusTransitionIndex(Math.min(transitions.length - 1, transitionIndex + 1))
+        return
+      }
+      if (key === "ArrowUp") {
+        focusTransitionIndex(Math.max(0, transitionIndex - 1))
+        return
+      }
+      if (key === "Home") {
+        focusTransitionIndex(0)
+        return
+      }
+      if (key === "End") {
+        focusTransitionIndex(Math.max(0, transitions.length - 1))
+      }
+    },
+    [focusTransitionIndex, transitions.length]
+  )
 
   const handleStateDrop = useCallback(
     (targetIndex: number) => {
@@ -117,6 +360,153 @@ export function Explorer(props: ExplorerProps) {
       setDropTransitionIndex(null)
     },
     [dragTransitionIndex, moveTransition]
+  )
+
+  const stateVirtualRows = stateVirtualizer.getVirtualItems()
+  const transitionVirtualRows = transitionVirtualizer.getVirtualItems()
+  const stateRowsToRender = stateVirtualized
+    ? stateVirtualRows.length > 0
+      ? stateVirtualRows
+      : Array.from({ length: Math.min(EXPLORER_FALLBACK_VISIBLE_ROWS, states.length) }, (_, index) => ({
+          index,
+          start: index * EXPLORER_ROW_HEIGHT,
+          key: `state-fallback-${index}`
+        }))
+    : []
+  const transitionRowsToRender = transitionVirtualized
+    ? transitionVirtualRows.length > 0
+      ? transitionVirtualRows
+      : Array.from({ length: Math.min(EXPLORER_FALLBACK_VISIBLE_ROWS, transitions.length) }, (_, index) => ({
+          index,
+          start: index * EXPLORER_ROW_HEIGHT,
+          key: `transition-fallback-${index}`
+        }))
+    : []
+
+  const renderStateRow = useCallback(
+    (stateIndex: number, style?: CSSProperties) => (
+      <li
+        key={`state-${stateIndex}`}
+        style={style}
+        draggable={!readOnly}
+        onDragStart={() => {
+          if (readOnly) {
+            return
+          }
+          setDragStateIndex(stateIndex)
+        }}
+        onDragOver={(event) => {
+          if (readOnly || dragStateIndex === null) {
+            return
+          }
+          event.preventDefault()
+          setDropStateIndex(stateIndex)
+        }}
+        onDragLeave={() => {
+          if (dropStateIndex === stateIndex) {
+            setDropStateIndex(null)
+          }
+        }}
+        onDrop={(event) => {
+          if (readOnly) {
+            return
+          }
+          event.preventDefault()
+          handleStateDrop(stateIndex)
+        }}
+        onDragEnd={() => {
+          setDragStateIndex(null)
+          setDropStateIndex(null)
+        }}
+      >
+        <StateListRow
+          stateIndex={stateIndex}
+          state={states[stateIndex] ?? { name: "" }}
+          selected={isStateSelected(selection, stateIndex)}
+          dropTarget={dropStateIndex === stateIndex}
+          setButtonRef={registerStateButtonRef}
+          onSelect={selectState}
+          onNavigate={onStateRowNavigate}
+        />
+      </li>
+    ),
+    [
+      dragStateIndex,
+      dropStateIndex,
+      handleStateDrop,
+      onStateRowNavigate,
+      readOnly,
+      registerStateButtonRef,
+      selectState,
+      selection,
+      states
+    ]
+  )
+
+  const renderTransitionRow = useCallback(
+    (transitionIndex: number, style?: CSSProperties) => {
+      const transition = transitions[transitionIndex]
+      if (!transition) {
+        return null
+      }
+      return (
+        <li
+          key={`transition-${transitionIndex}`}
+          style={style}
+          draggable={!readOnly}
+          onDragStart={() => {
+            if (readOnly) {
+              return
+            }
+            setDragTransitionIndex(transitionIndex)
+          }}
+          onDragOver={(event) => {
+            if (readOnly || dragTransitionIndex === null) {
+              return
+            }
+            event.preventDefault()
+            setDropTransitionIndex(transitionIndex)
+          }}
+          onDragLeave={() => {
+            if (dropTransitionIndex === transitionIndex) {
+              setDropTransitionIndex(null)
+            }
+          }}
+          onDrop={(event) => {
+            if (readOnly) {
+              return
+            }
+            event.preventDefault()
+            handleTransitionDrop(transitionIndex)
+          }}
+          onDragEnd={() => {
+            setDragTransitionIndex(null)
+            setDropTransitionIndex(null)
+          }}
+        >
+          <TransitionListRow
+            transitionIndex={transitionIndex}
+            transition={transition}
+            selected={isTransitionSelected(selection, transitionIndex)}
+            dropTarget={dropTransitionIndex === transitionIndex}
+            setButtonRef={registerTransitionButtonRef}
+            onSelect={selectTransition}
+            onNavigate={onTransitionRowNavigate}
+          />
+        </li>
+      )
+    },
+    [
+      dragTransitionIndex,
+      dropTransitionIndex,
+      handleTransitionDrop,
+      onTransitionRowNavigate,
+      readOnly,
+      registerTransitionButtonRef,
+      selectTransition,
+      selection,
+      transitions
+    ]
   )
 
   return (
@@ -160,11 +550,11 @@ export function Explorer(props: ExplorerProps) {
 
       <div className="fub-panel-body">
         {activeView === "palette" ? (
-          <div id="fub-explorer-palette" role="tabpanel">
+          <div id="fub-explorer-palette">
             <NodePalette readOnly={readOnly} />
           </div>
         ) : (
-          <div id="fub-explorer-tree" role="tabpanel">
+          <div id="fub-explorer-tree">
             <div className="fub-tree-actions">
               <button type="button" className="fub-mini-btn" onClick={addState} disabled={readOnly}>
                 + State
@@ -176,109 +566,72 @@ export function Explorer(props: ExplorerProps) {
 
             <section className="fub-section">
               <h3>States</h3>
-              <ul>
-                {states.map((state, stateIndex) => (
-                  <li
-                    key={`state-${stateIndex}`}
-                    draggable={!readOnly}
-                    onDragStart={() => {
-                      if (readOnly) {
-                        return
-                      }
-                      setDragStateIndex(stateIndex)
-                    }}
-                    onDragOver={(event) => {
-                      if (readOnly || dragStateIndex === null) {
-                        return
-                      }
-                      event.preventDefault()
-                      setDropStateIndex(stateIndex)
-                    }}
-                    onDragLeave={() => {
-                      if (dropStateIndex === stateIndex) {
-                        setDropStateIndex(null)
-                      }
-                    }}
-                    onDrop={(event) => {
-                      if (readOnly) {
-                        return
-                      }
-                      event.preventDefault()
-                      handleStateDrop(stateIndex)
-                    }}
-                    onDragEnd={() => {
-                      setDragStateIndex(null)
-                      setDropStateIndex(null)
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className={`fub-list-item${selectedClass(isStateSelected(selection, stateIndex))}${
-                        dropStateIndex === stateIndex ? " fub-list-item--drop-target" : ""
-                      }`}
-                      onClick={() => setSelection({ kind: "state", stateIndex })}
-                    >
-                      <span className="fub-item-main">{state.name || "(unnamed)"}</span>
-                      <span className="fub-item-meta">
-                        {state.initial ? "initial" : ""}
-                        {state.terminal ? " final" : ""}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div
+                className="fub-explorer-list-scroll"
+                ref={stateScrollRef}
+                aria-label="States list"
+                data-virtualized={stateVirtualized ? "true" : "false"}
+                data-testid="fub-explorer-states-scroll"
+              >
+                <ul
+                  className="fub-explorer-list"
+                  style={
+                    stateVirtualized
+                      ? {
+                          height: `${stateVirtualizer.getTotalSize()}px`,
+                          position: "relative"
+                        }
+                      : undefined
+                  }
+                >
+                  {stateVirtualized
+                    ? stateRowsToRender.map((virtualRow) =>
+                        renderStateRow(virtualRow.index, {
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`
+                        })
+                      )
+                    : states.map((_state, stateIndex) => renderStateRow(stateIndex))}
+                </ul>
+              </div>
             </section>
 
             <section className="fub-section">
               <h3>Transitions</h3>
-              <ul>
-                {transitions.map((transition, transitionIndex) => (
-                  <li
-                    key={transition.id || `transition-${transitionIndex}`}
-                    draggable={!readOnly}
-                    onDragStart={() => {
-                      if (readOnly) {
-                        return
-                      }
-                      setDragTransitionIndex(transitionIndex)
-                    }}
-                    onDragOver={(event) => {
-                      if (readOnly || dragTransitionIndex === null) {
-                        return
-                      }
-                      event.preventDefault()
-                      setDropTransitionIndex(transitionIndex)
-                    }}
-                    onDragLeave={() => {
-                      if (dropTransitionIndex === transitionIndex) {
-                        setDropTransitionIndex(null)
-                      }
-                    }}
-                    onDrop={(event) => {
-                      if (readOnly) {
-                        return
-                      }
-                      event.preventDefault()
-                      handleTransitionDrop(transitionIndex)
-                    }}
-                    onDragEnd={() => {
-                      setDragTransitionIndex(null)
-                      setDropTransitionIndex(null)
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className={`fub-list-item${selectedClass(isTransitionSelected(selection, transitionIndex))}${
-                        dropTransitionIndex === transitionIndex ? " fub-list-item--drop-target" : ""
-                      }`}
-                      onClick={() => setSelection({ kind: "transition", transitionIndex })}
-                    >
-                      <span className="fub-item-main">{transition.id || `transition-${transitionIndex + 1}`}</span>
-                      <span className="fub-item-meta">{transitionLabel(transition)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div
+                className="fub-explorer-list-scroll"
+                ref={transitionScrollRef}
+                aria-label="Transitions list"
+                data-virtualized={transitionVirtualized ? "true" : "false"}
+                data-testid="fub-explorer-transitions-scroll"
+              >
+                <ul
+                  className="fub-explorer-list"
+                  style={
+                    transitionVirtualized
+                      ? {
+                          height: `${transitionVirtualizer.getTotalSize()}px`,
+                          position: "relative"
+                        }
+                      : undefined
+                  }
+                >
+                  {transitionVirtualized
+                    ? transitionRowsToRender.map((virtualRow) =>
+                        renderTransitionRow(virtualRow.index, {
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`
+                        })
+                      )
+                    : transitions.map((_transition, transitionIndex) => renderTransitionRow(transitionIndex))}
+                </ul>
+              </div>
             </section>
           </div>
         )}

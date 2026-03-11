@@ -74,6 +74,23 @@ function makeAuthoringRPC(input: Partial<BuilderAuthoringRPC>): BuilderAuthoring
   }
 }
 
+function makePersistenceStore(initial: DraftMachineDocument | null = null) {
+  return {
+    list: vi.fn(async () => []),
+    load: vi.fn(async () =>
+      initial
+        ? {
+            machineId: "orders",
+            updatedAt: "2026-03-10T00:00:00Z",
+            document: initial
+          }
+        : null
+    ),
+    save: vi.fn(async () => {}),
+    delete: vi.fn(async () => {})
+  }
+}
+
 describe("phase 7 workflow/version/conflict features", () => {
   afterEach(() => {
     cleanup()
@@ -113,6 +130,7 @@ describe("phase 7 workflow/version/conflict features", () => {
   it("loads version history entries, diffs, and restores an older version through optional capabilities", async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
+    const persistenceStore = makePersistenceStore()
     const authoringRPC = makeAuthoringRPC({
       listVersions: vi.fn(async () => ({
         machineId: "orders",
@@ -137,7 +155,14 @@ describe("phase 7 workflow/version/conflict features", () => {
       }))
     })
 
-    render(<FSMUIBuilder initialDocument={makeDocument("v2")} authoringRPC={authoringRPC} onChange={onChange} />)
+    render(
+      <FSMUIBuilder
+        initialDocument={makeDocument("v2")}
+        authoringRPC={authoringRPC}
+        persistenceStore={persistenceStore}
+        onChange={onChange}
+      />
+    )
 
     await user.click(screen.getByRole("button", { name: "More" }))
     await user.click(screen.getByRole("menuitem", { name: "Version History" }))
@@ -155,6 +180,11 @@ describe("phase 7 workflow/version/conflict features", () => {
       const latest = onChange.mock.calls.at(-1)?.[0] as { document: DraftMachineDocument } | undefined
       expect(latest?.document.definition.version).toBe("v1")
     })
+
+    expect(persistenceStore.save).toHaveBeenCalled()
+    const persistedCall = persistenceStore.save.mock.calls.at(-1) as unknown[] | undefined
+    const persisted = persistedCall?.[0] as { document?: DraftMachineDocument } | undefined
+    expect(persisted?.document?.definition.version).toBe("v1")
   })
 
   it("handles FSM_VERSION_CONFLICT with Keep Mine retry using the latest baseVersion", async () => {
@@ -210,5 +240,51 @@ describe("phase 7 workflow/version/conflict features", () => {
     const secondCall = saveDraft.mock.calls[1]?.[0] as { baseVersion?: string } | undefined
     expect(secondCall?.baseVersion).toBe("v2")
     expect(screen.queryByRole("dialog", { name: "Version Conflict" })).toBeNull()
+  })
+
+  it("handles FSM_VERSION_CONFLICT with Keep Server by persisting latest server baseline", async () => {
+    const user = userEvent.setup()
+    const persistenceStore = makePersistenceStore(makeDocument("v0"))
+    const saveDraft = vi.fn().mockImplementationOnce(async () => {
+      throw new BuilderResultError("fsm.authoring.save_draft", {
+        code: HANDLED_ERROR_CODES.versionConflict,
+        message: "version conflict"
+      })
+    })
+
+    const getMachine = vi.fn(async () => ({
+      machineId: "orders",
+      version: "v2",
+      draft: makeDocument("v2"),
+      diagnostics: [],
+      etag: "orders-v2"
+    }))
+
+    const authoringRPC = makeAuthoringRPC({
+      saveDraft,
+      getMachine
+    })
+
+    render(
+      <FSMUIBuilder
+        initialDocument={makeDocument("v1")}
+        authoringRPC={authoringRPC}
+        persistenceStore={persistenceStore}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Save Draft" }))
+    expect(await screen.findByRole("dialog", { name: "Version Conflict" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Keep Server" }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Version Conflict" })).toBeNull()
+    })
+
+    expect(persistenceStore.save).toHaveBeenCalled()
+    const persistedCall = persistenceStore.save.mock.calls.at(-1) as unknown[] | undefined
+    const persisted = persistedCall?.[0] as { document?: DraftMachineDocument } | undefined
+    expect(persisted?.document?.definition.version).toBe("v2")
   })
 })
