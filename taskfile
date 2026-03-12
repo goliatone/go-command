@@ -300,6 +300,19 @@ function client:build:builder {
     done
 }
 
+function client:test {
+    client_dir="$(pwd)/client"
+
+    pkgs=$(_client:builder:packages)
+    for pkg in $pkgs; do
+        _client:build:workspace "${client_dir}" "${pkg}" || return 1
+
+        cd "${client_dir}/packages/${pkg}/" || return 1
+
+        npm test
+    done
+}
+
 ##
 ## -----
 ##
@@ -309,6 +322,74 @@ function client:build:builder {
 function client:build:all {
     client:build || return 1
     client:build:builder || return 1
+}
+
+##
+## -----
+##
+## client:build:example:fsm_ui_builder_web_chat
+##
+## Build only the client packages required by the FSM UI Builder web chat example:
+## - `fsm` -> sync to `data/client/fsm`
+## - `fsm-ui-builder` -> sync to `data/client-builder/fsm-ui-builder`
+##
+## Use this while iterating locally so the example serves latest changed artifacts.
+function client:build:example:fsm_ui_builder_web_chat {
+    local client_dir
+    local fsm_output
+    local builder_output
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required for client:build:example:fsm_ui_builder_web_chat"
+        return 1
+    fi
+
+    client_dir="$(pwd)/client"
+    if [ ! -d "${client_dir}/node_modules" ]; then
+        (
+            cd "${client_dir}" || exit "$?"
+            npm ci
+        ) || return 1
+    fi
+
+    _client:build:workspace "${client_dir}" "fsm" || return 1
+    _client:build:workspace "${client_dir}" "fsm-ui-builder" || return 1
+
+    fsm_output="$(pwd)/data/client/fsm"
+    rm -rf "${fsm_output}"
+    mkdir -p "${fsm_output}"
+    cp -R "${client_dir}/packages/fsm/dist/." "${fsm_output}/"
+    if [ ! -f "${fsm_output}/index.js" ]; then
+        echo "example client build output is missing ${fsm_output}/index.js"
+        return 1
+    fi
+
+    builder_output="$(pwd)/data/client-builder/fsm-ui-builder"
+    rm -rf "${builder_output}"
+    mkdir -p "${builder_output}"
+    cp -R "${client_dir}/packages/fsm-ui-builder/dist/." "${builder_output}/"
+    if [ ! -f "${builder_output}/index.js" ]; then
+        echo "example builder build output is missing ${builder_output}/index.js"
+        return 1
+    fi
+    if [ -f "${client_dir}/packages/fsm-ui-builder/dist/index.css" ] && [ ! -f "${builder_output}/index.css" ]; then
+        echo "example builder build output is missing ${builder_output}/index.css"
+        return 1
+    fi
+}
+
+##
+## -----
+##
+## example:fsm_ui_builder_web_chat:run
+##
+## Build required client artifacts and run the FSM UI Builder web chat example.
+function example:fsm_ui_builder_web_chat:run {
+    client:build:example:fsm_ui_builder_web_chat || return 1
+    (
+        cd examples/fsm_ui_builder_web_chat || exit "$?"
+        /Users/goliatone/.g/go/bin/go run .
+    ) || return 1
 }
 
 function go:mod:update {
