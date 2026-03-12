@@ -251,7 +251,7 @@ describe("fsm-ui-builder keyboard, accessibility, and responsive behavior", () =
     render(<FSMUIBuilder initialDocument={makeDocument()} />)
 
     expect(screen.queryByLabelText("Explorer panel")).toBeNull()
-    await user.click(screen.getByRole("button", { name: "Explorer" }))
+    await user.click(screen.getByRole("button", { name: "Show Explorer" }))
     expect(screen.getByLabelText("Explorer panel")).toBeTruthy()
   })
 

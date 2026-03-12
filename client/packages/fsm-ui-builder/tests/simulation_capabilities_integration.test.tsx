@@ -138,11 +138,10 @@ describe("fsm-ui-builder simulation and capability integrations", () => {
 
     expect(screen.getByText("Action catalog unavailable.")).toBeTruthy()
 
-    await user.click(screen.getByRole("button", { name: "Export RPC" }))
-
-    await waitFor(() => {
-      expect(screen.getAllByText(/RPC export unavailable/i).length).toBeGreaterThan(0)
-    })
+    // Open the "More" dropdown menu and verify Export RPC is disabled
+    await user.click(screen.getByRole("button", { name: /More/i }))
+    const exportRPCItem = screen.getByRole("menuitem", { name: "Export RPC" }) as HTMLButtonElement
+    expect(exportRPCItem.disabled).toBe(true)
   })
 
   it("enforces unsupported workflow-node guardrails with explicit messaging", async () => {
@@ -203,9 +202,13 @@ describe("fsm-ui-builder simulation and capability integrations", () => {
       />
     )
 
-    const recover = await screen.findByRole("button", { name: "Recover Draft" })
+    // Open the "More" dropdown menu
+    await user.click(screen.getByRole("button", { name: /More/i }))
+
+    // Find and click the Recover Draft menu item
+    const recover = await screen.findByRole("menuitem", { name: "Recover Draft" })
     await waitFor(() => {
-      expect((recover as HTMLButtonElement).disabled).toBe(false)
+      expect(recover.getAttribute("aria-disabled")).not.toBe("true")
     })
 
     await user.click(recover)
