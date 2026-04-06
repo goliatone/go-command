@@ -1,58 +1,51 @@
 # Changelog
 
-# [0.19.0](https://github.com/goliatone/go-command/compare/v0.18.0...v0.19.0) - (2026-03-10)
+# [0.19.0](https://github.com/goliatone/go-command/compare/v0.18.0...v0.19.0) - (2026-04-06)
 
-## ⚠️ Breaking
+## <!-- 1 -->🐛 Bug Fixes
 
-- `flow.JobScheduler` is now receipt-first:
-  - `Enqueue(ctx, msg) (flow.EnqueueReceipt, error)`
-  - `EnqueueAt(ctx, msg, at) (flow.EnqueueReceipt, error)`
-  - `EnqueueAfter(ctx, msg, delay) (flow.EnqueueReceipt, error)`
-- `flow.OutboxDispatcher` now captures enqueue receipt metadata (`dispatch_id`, `enqueued_at`) in dispatch outcomes.
+- Tests for fsm ui builder ([f191783](https://github.com/goliatone/go-command/commit/f1917830b5f20ef0164b089a44b597e9d453891b))  - (goliatone)
+- Update fms authoring rpc contracts ([e2371a0](https://github.com/goliatone/go-command/commit/e2371a063158a11e679ef3650e52baa3d2dff9ee))  - (goliatone)
+- Refactor dispatcher contract ([a7d9bc7](https://github.com/goliatone/go-command/commit/a7d9bc7a3ebebf40e183e0dd24f37c11dbf5dd19))  - (goliatone)
 
-## ➕ Add
+## <!-- 13 -->📦 Bumps
 
-- Added cross-repo compatibility task `dev:test:cross` to validate local `go-command` + `go-job` contract alignment.
-- Added FSM UI Builder package `@goliatone/go-command-fsm-ui-builder` with frozen RPC integration (`POST /rpc`) for runtime simulation and authoring flows.
-- Added optional builder embed surface under `data/builder` (rooted at `data/client-builder/fsm-ui-builder`) so importing `data` remains core-only.
+- Bump version: v0.19.0 ([cf614ef](https://github.com/goliatone/go-command/commit/cf614ef26d7167c4a2fa8c23f305066c45d073c1))  - (goliatone)
 
-## 📚 Migration
+## <!-- 16 -->➕ Add
 
-Before:
+- Fsm ui client state manager ([50f8dad](https://github.com/goliatone/go-command/commit/50f8dad886405d3e2b9ac76cccc241030ab33a65))  - (goliatone)
+- Fsm ui builder update ([577541f](https://github.com/goliatone/go-command/commit/577541f8f1841701c8a1147c9ecd613257dcd123))  - (goliatone)
+- Fsm ui builder ([2d62455](https://github.com/goliatone/go-command/commit/2d62455e0e1119b4947a680c0b85f05519196e2c))  - (goliatone)
+- Client packages ([cbe49b5](https://github.com/goliatone/go-command/commit/cbe49b5b23c22d5a9742b30f3aa2281b7351c7c7))  - (goliatone)
+- Update ui builder ([4fb6bab](https://github.com/goliatone/go-command/commit/4fb6bab5e0f1f3729a6daa3470bc7397d5e91d08))  - (goliatone)
+- Package fsm ui improvements ([439fd03](https://github.com/goliatone/go-command/commit/439fd0311192167a93d7d9310d57d7489819bf11))  - (goliatone)
+- Fixtures ([37c3d60](https://github.com/goliatone/go-command/commit/37c3d60819b98aee3cc4b3e7ae0e450232c46c8e))  - (goliatone)
+- Udpate taskfile with builder ui ([ede47c8](https://github.com/goliatone/go-command/commit/ede47c88114f57564475f9ce54b6dcbc2b6cb96d))  - (goliatone)
+- Updated ci workflow ([474b65d](https://github.com/goliatone/go-command/commit/474b65d6093c29a5b2bdfda762aefbbad98f491f))  - (goliatone)
+- Builder package ([fc6efc5](https://github.com/goliatone/go-command/commit/fc6efc5afb1d3cbcc82d9b7b6ff5dd8362455f0f))  - (goliatone)
+- Udpated client dist ([49fbc55](https://github.com/goliatone/go-command/commit/49fbc55cc0308a84468a3b8091c4eb47cb39a77c))  - (goliatone)
+- Fsm ui builder package ([98ec474](https://github.com/goliatone/go-command/commit/98ec4742112046b099ab1667de82836cccf1a5ef))  - (goliatone)
+- Udpate transport errors for flow ([abddac0](https://github.com/goliatone/go-command/commit/abddac05adeb773683acc8cab332dcc14e4dd841))  - (goliatone)
+- Rpc authoring for fsm ([323584b](https://github.com/goliatone/go-command/commit/323584b5db2dd42d403cc003b83bfecf2b6da772))  - (goliatone)
+- Fsm authoring req/res ([59397f8](https://github.com/goliatone/go-command/commit/59397f810f47e10864b5972d4cc7bd8b251bec71))  - (goliatone)
+- Package fsm ui builder ([31664c8](https://github.com/goliatone/go-command/commit/31664c8fb253a46819a214cdd39c733d751f4271))  - (goliatone)
+- Flow authoring service ([8a1f8b9](https://github.com/goliatone/go-command/commit/8a1f8b91fa2e29b605e850e42f42fba77632c681))  - (goliatone)
+- New machine meta ([8c6ebe1](https://github.com/goliatone/go-command/commit/8c6ebe1e98916e2cb9c585b40a1bda4c1a5ebeba))  - (goliatone)
+- Fsm authoring contracts ([960d025](https://github.com/goliatone/go-command/commit/960d02542e1d3df2bee848fb0251593276cd3c5c))  - (goliatone)
 
-```go
-type JobScheduler interface {
-    Enqueue(ctx context.Context, msg *ExecutionMessage) error
-    EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) error
-    EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) error
-}
-```
+## <!-- 3 -->📚 Documentation
 
-After:
+- Update changelog for v0.18.0 ([1a7163f](https://github.com/goliatone/go-command/commit/1a7163f9b30563c09081d0f53c2b60901136187e))  - (goliatone)
 
-```go
-type JobScheduler interface {
-    Enqueue(ctx context.Context, msg *ExecutionMessage) (flow.EnqueueReceipt, error)
-    EnqueueAt(ctx context.Context, msg *ExecutionMessage, at time.Time) (flow.EnqueueReceipt, error)
-    EnqueueAfter(ctx context.Context, msg *ExecutionMessage, delay time.Duration) (flow.EnqueueReceipt, error)
-}
-```
+## <!-- 7 -->⚙️ Miscellaneous Tasks
 
-Resolver registration guidance:
-
-```go
-// Use one registration path per command. Duplicate queue command ids fail fast.
-_ = cmdRegistry.AddResolver("queue", queuecmd.QueueResolver(queueRegistry))
-_, _ = queuecmd.RegisterCommandWithRegistry(queueRegistry, myCommand)
-```
-
-FSM UI Builder migration notes:
-
-- Use `@goliatone/go-command-fsm-ui-builder` for mountable authoring/simulation UX.
-- Runtime simulation methods: `fsm.apply_event` and `fsm.snapshot`.
-- Authoring methods: `fsm.authoring.list_machines`, `fsm.authoring.get_machine`, `fsm.authoring.save_draft`, `fsm.authoring.validate`, `fsm.authoring.publish`, `fsm.authoring.delete_machine`.
-- Builder embedding is opt-in via `data/builder`; keep `data` imports for core runtime assets only.
-- Adapter behavior is capability-gated: persistence defaults to local autosave; export/action-catalog RPC hooks are optional and degrade gracefully when unavailable.
+- Update gitignore ([a50fe7c](https://github.com/goliatone/go-command/commit/a50fe7c646f4f4b798d365afd0313902ee9c48e4))  - (goliatone)
+- Update tasks ([a31629b](https://github.com/goliatone/go-command/commit/a31629b472a9a0fae3888fb91931178ed333bcd8))  - (goliatone)
+- Udpate example ([07b9e65](https://github.com/goliatone/go-command/commit/07b9e653ca6db6f4045906a90dcc712b6425dcba))  - (goliatone)
+- Add fixtures ([8ff6b3e](https://github.com/goliatone/go-command/commit/8ff6b3e5870cd6e514f8becfd103e47a5296b9e7))  - (goliatone)
+- Update docs ([66eb58f](https://github.com/goliatone/go-command/commit/66eb58ff8a1871e8d6bef034f2759a227ef7e834))  - (goliatone)
+- Update tests ([d17bcb0](https://github.com/goliatone/go-command/commit/d17bcb03c2b19929443f908bc29b0a930f4c7908))  - (goliatone)
 
 # [0.18.0](https://github.com/goliatone/go-command/compare/v0.17.0...v0.18.0) - (2026-03-10)
 
@@ -651,3 +644,5 @@ FSM UI Builder migration notes:
 - Update tests to handle refactor changes ([ef3bd76](https://github.com/goliatone/go-command/commit/ef3bd76aa6a8004f21ee3cab061d0e0b54da44e5))  - (goliatone)
 - Update tests ([52e5298](https://github.com/goliatone/go-command/commit/52e5298fd395ec96a55424187d120df44272da43))  - (goliatone)
 - Add deps ([bc89da0](https://github.com/goliatone/go-command/commit/bc89da0b8c929e0a4c3ae63f03545d65f1d376e8))  - (goliatone)
+
+
