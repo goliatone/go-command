@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.20.0](https://github.com/goliatone/go-command/compare/v0.19.0...v0.20.0) - (2026-06-09)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.20.0 ([f67ef62](https://github.com/goliatone/go-command/commit/f67ef62d001fa1c21d35c142e89bd048ff334a97))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Executor for mode ([ce6bbd3](https://github.com/goliatone/go-command/commit/ce6bbd36a4c12d7e53ca5f4ac2e9e1632ef4a281))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.19.0 ([677977d](https://github.com/goliatone/go-command/commit/677977d731cc2e365b3bc63958cc7443cdceb212))  - (goliatone)
+
 # [0.19.0](https://github.com/goliatone/go-command/compare/v0.18.0...v0.19.0) - (2026-04-06)
 
 ## <!-- 1 -->🐛 Bug Fixes
