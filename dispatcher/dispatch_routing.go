@@ -149,6 +149,14 @@ func UnregisterExecutor(mode command.ExecutionMode) {
 	delete(dispatchExecutors, mode)
 }
 
+func ExecutorForMode(mode command.ExecutionMode) (CommandExecutor, bool) {
+	mode = command.NormalizeExecutionMode(mode)
+	if mode == "" {
+		return nil, false
+	}
+	return getDispatchExecutor(mode)
+}
+
 func SetModeResolver(resolver ModeResolver) {
 	dispatchRoutingMu.Lock()
 	defer dispatchRoutingMu.Unlock()
