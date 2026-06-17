@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FSM UI Builder - Chat Automation Demo</title>
+    <link rel="stylesheet" href="/builder/index.css" />
+    <link rel="stylesheet" href="/public/styles.css" />
+    <script>
+      (function() {
+        var key = "fsm-ui-builder.panel-layout";
+        var stored = localStorage.getItem(key);
+        if (!stored) {
+          return;
+        }
+        try {
+          var layout = JSON.parse(stored);
+          if (layout.explorerCollapsed) {
+            layout.explorerCollapsed = false;
+            localStorage.setItem(key, JSON.stringify(layout));
+          }
+        } catch (err) {
+          localStorage.removeItem(key);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="builder-pane">
+        <div id="builder-root" class="builder-root"></div>
+      </section>
+
+      <aside class="chat-pane" aria-label="Chat automation panel">
+        <header class="chat-header">
+          <span class="chat-header-title">Command Console</span>
+          <button id="chat-clear" class="btn btn-secondary btn-sm" type="button">Clear Session</button>
+        </header>
+
+        <section class="scenario-pane" aria-label="Scenario controls">
+          <div class="panel-title">Scenario Controls</div>
+          <div class="scenario-grid">
+            <label class="field">
+              <span>Machine</span>
+              <select id="scenario-machine"></select>
+            </label>
+            <label class="field">
+              <span>Entity</span>
+              <input id="scenario-entity" type="text" value="order-1" />
+            </label>
+            <label class="field">
+              <span>Event</span>
+              <input id="scenario-event" type="text" value="approve" />
+            </label>
+            <label class="field">
+              <span>Amount</span>
+              <input id="scenario-amount" type="number" step="0.01" value="120" />
+            </label>
+            <label class="field">
+              <span>Expected State</span>
+              <input id="scenario-expected-state" type="text" placeholder="optional" />
+            </label>
+            <label class="field">
+              <span>Expected Version</span>
+              <input id="scenario-expected-version" type="number" placeholder="optional" />
+            </label>
+            <label class="field field-wide">
+              <span>Idempotency Key</span>
+              <input id="scenario-idempotency" type="text" placeholder="optional" />
+            </label>
+          </div>
+          <div class="scenario-actions">
+            <button id="scenario-simulate" class="btn btn-secondary" type="button">Dry-run</button>
+            <button id="scenario-apply" class="btn btn-primary" type="button">Apply Event</button>
+          </div>
+        </section>
+
+        <div class="chat-toolbar">
+          <button class="btn btn-secondary btn-sm" data-command="/help" type="button">Help</button>
+          <button class="btn btn-secondary btn-sm" data-command="/status order-1 amount=120" type="button">Status</button>
+          <button class="btn btn-secondary btn-sm" data-command="/validate" type="button">Validate</button>
+          <button class="btn btn-secondary btn-sm" data-command="/publish" type="button">Publish</button>
+          <button class="btn btn-secondary btn-sm" data-command="/list-machines" type="button">Machines</button>
+        </div>
+
+        <section class="playbook-pane" aria-label="Guided playbooks">
+          <div class="panel-title">Playbooks</div>
+          <div class="playbook-row">
+            <button class="playbook-btn" data-playbook="quickstart" type="button">Quickstart</button>
+            <button class="playbook-btn" data-playbook="manual-review" type="button">Manual Review</button>
+            <button class="playbook-btn" data-playbook="conflict-check" type="button">Conflict Check</button>
+          </div>
+        </section>
+
+        <div id="chat-status" class="chat-status connecting">Connecting...</div>
+
+        <section class="result-pane" aria-label="Mechanics inspector">
+          <div class="result-header">
+            <span class="panel-title">Mechanics</span>
+            <button id="result-copy" class="btn btn-secondary btn-sm" type="button">Copy JSON</button>
+          </div>
+          <div id="result-summary" class="result-summary">
+            <span class="result-empty">Run a command to inspect mechanics.</span>
+          </div>
+          <pre id="result-json" class="result-json">{}</pre>
+        </section>
+
+        <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Command history"></div>
+
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <div class="chat-input-wrapper">
+            <input
+              id="chat-input"
+              type="text"
+              placeholder="Type a command... (try /help)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button class="btn btn-primary" type="submit">Send</button>
+        </form>
+
+        <div id="chat-suggestions" class="chat-suggestions" aria-label="Suggested commands"></div>
+      </aside>
+    </main>
+
+    <script type="module" src="/public/app.mjs"></script>
+  </body>
+</html>
