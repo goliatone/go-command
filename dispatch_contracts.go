@@ -34,6 +34,8 @@ const (
 	TextCodeUnknownCommandPolicyKey      = "UNKNOWN_COMMAND_POLICY_KEY"
 	TextCodeInvalidCommandID             = "INVALID_COMMAND_ID"
 	TextCodeQueueMultiHandlerUnsupported = "QUEUE_MULTI_HANDLER_UNSUPPORTED"
+	TextCodeDispatchRequestInvalid       = "DISPATCH_REQUEST_INVALID"
+	TextCodeDispatchResponseInvalid      = "DISPATCH_RESPONSE_INVALID"
 )
 
 type DispatchOptions struct {
@@ -53,6 +55,83 @@ type DispatchReceipt struct {
 	DispatchID    string
 	EnqueuedAt    *time.Time
 	CorrelationID string
+}
+
+// CommandDispatchRequest is the canonical generic command dispatch payload.
+// Transports should wrap this in rpc.RequestEnvelope.
+type CommandDispatchRequest struct {
+	CommandID string          `json:"command_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Payload   map[string]any  `json:"payload,omitempty"`
+	IDs       []string        `json:"ids,omitempty"`
+	Options   DispatchOptions `json:"options,omitempty"`
+}
+
+// ResolvedCommandID returns the stable command id, accepting Name only as a
+// compatibility alias for older admin dispatch callers.
+func (r CommandDispatchRequest) ResolvedCommandID() string {
+	return firstCatalogString(r.CommandID, r.Name)
+}
+
+// CommandDispatchResponse is the canonical generic command dispatch response.
+// Transports should wrap this in rpc.ResponseEnvelope.
+type CommandDispatchResponse struct {
+	Receipt          DispatchReceipt                  `json:"receipt"`
+	Result           any                              `json:"result,omitempty"`
+	StatusReference  string                           `json:"status_reference,omitempty"`
+	ValidationErrors []CommandDispatchValidationError `json:"validation_errors,omitempty"`
+}
+
+// CommandDispatchValidationError is safe for browser display and preserves a
+// payload path so renderers can map validation failures to fields.
+type CommandDispatchValidationError struct {
+	Path    string         `json:"path,omitempty"`
+	Code    string         `json:"code,omitempty"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+// ValidateCommandDispatchRequest checks the reusable dispatch payload shape.
+func ValidateCommandDispatchRequest(req CommandDispatchRequest) error {
+	reasons := make([]string, 0, 2)
+	if strings.TrimSpace(req.ResolvedCommandID()) == "" {
+		reasons = append(reasons, "command_id is required")
+	}
+	if req.Payload == nil {
+		req.Payload = map[string]any{}
+	}
+	if err := ValidateDispatchOptions(req.Options.Mode, req.Options); err != nil {
+		return err
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	return errors.New("command dispatch request validation failed", errors.CategoryValidation).
+		WithTextCode(TextCodeDispatchRequestInvalid).
+		WithMetadata(map[string]any{"reasons": reasons})
+}
+
+// ValidateCommandDispatchResponse checks reusable response and field error
+// shapes without assuming a specific renderer.
+func ValidateCommandDispatchResponse(resp CommandDispatchResponse) error {
+	if err := ValidateDispatchReceipt(resp.Receipt); err != nil {
+		return err
+	}
+	reasons := make([]string, 0, len(resp.ValidationErrors))
+	for _, validationErr := range resp.ValidationErrors {
+		if strings.TrimSpace(validationErr.Message) == "" {
+			reasons = append(reasons, "validation error message is required")
+		}
+		if strings.Contains(validationErr.Path, "..") {
+			reasons = append(reasons, "validation error path must not contain empty segments")
+		}
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	return errors.New("command dispatch response validation failed", errors.CategoryValidation).
+		WithTextCode(TextCodeDispatchResponseInvalid).
+		WithMetadata(map[string]any{"reasons": reasons})
 }
 
 func NormalizeExecutionMode(mode ExecutionMode) ExecutionMode {
