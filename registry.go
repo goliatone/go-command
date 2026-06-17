@@ -1,6 +1,7 @@
 package command
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/alecthomas/kong"
@@ -29,6 +30,8 @@ type Registry struct {
 	cliOptions         []kong.Option
 	resolvers          map[string]Resolver
 	resolverOrder      []string
+	descriptors        map[string]CommandDescriptor
+	descriptorOrder    []string
 }
 
 func NewRegistry() *Registry {
@@ -37,6 +40,7 @@ func NewRegistry() *Registry {
 		cliOptions:    make([]kong.Option, 0),
 		resolvers:     make(map[string]Resolver),
 		resolverOrder: make([]string, 0, 2),
+		descriptors:   make(map[string]CommandDescriptor),
 	}
 
 	_ = registry.AddResolver("cli", func(cmd any, _ CommandMeta, r *Registry) error {
@@ -61,6 +65,14 @@ func NewRegistry() *Registry {
 			return nil
 		}
 		return r.registerWithRPC(rpcCmd, meta)
+	})
+
+	_ = registry.AddResolver("catalog", func(cmd any, meta CommandMeta, r *Registry) error {
+		descriptor, ok := DescriptorForCommand(cmd, meta)
+		if !ok {
+			return nil
+		}
+		return r.RegisterCatalogDescriptor(descriptor)
 	})
 
 	return registry
@@ -310,4 +322,188 @@ func (r *Registry) HasResolver(key string) bool {
 	}
 	_, exists := r.resolvers[key]
 	return exists
+}
+
+// RegisterCatalogDescriptor registers or replaces an external catalog
+// descriptor. Duplicate IDs replace in place and preserve original ordering.
+func (r *Registry) RegisterCatalogDescriptor(descriptor CommandDescriptor) error {
+	descriptor = MergeCommandDescriptor(CommandMeta{MessageType: descriptor.MessageType}, descriptor.Exposure, descriptor.RPC, descriptor)
+	if descriptor.ID == "" {
+		return errors.New("command descriptor id required", errors.CategoryBadInput).
+			WithTextCode("COMMAND_DESCRIPTOR_ID_REQUIRED")
+	}
+	if !descriptor.ExposeInAdmin && !descriptor.Exposure.ExposeInAdmin {
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.descriptors == nil {
+		r.descriptors = make(map[string]CommandDescriptor)
+	}
+	if _, exists := r.descriptors[descriptor.ID]; !exists {
+		r.descriptorOrder = append(r.descriptorOrder, descriptor.ID)
+	}
+	r.descriptors[descriptor.ID] = cloneCommandDescriptor(descriptor)
+	return nil
+}
+
+// CatalogDescriptor returns one descriptor by stable command ID.
+func (r *Registry) CatalogDescriptor(commandID string) (CommandDescriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.descriptors == nil {
+		return CommandDescriptor{}, false
+	}
+	descriptor, ok := r.descriptors[commandID]
+	if !ok {
+		return CommandDescriptor{}, false
+	}
+	return cloneCommandDescriptor(descriptor), true
+}
+
+// CatalogDescriptors returns descriptors in deterministic registration order.
+func (r *Registry) CatalogDescriptors() []CommandDescriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.descriptors == nil {
+		return nil
+	}
+	out := make([]CommandDescriptor, 0, len(r.descriptorOrder))
+	for _, id := range r.descriptorOrder {
+		if descriptor, ok := r.descriptors[id]; ok {
+			out = append(out, cloneCommandDescriptor(descriptor))
+		}
+	}
+	return out
+}
+
+// CatalogDescriptorsByTag returns descriptors matching at least one tag.
+func (r *Registry) CatalogDescriptorsByTag(tags ...string) []CommandDescriptor {
+	wanted := map[string]bool{}
+	for _, tag := range tags {
+		if normalized := strings.ToLower(strings.TrimSpace(tag)); normalized != "" {
+			wanted[normalized] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	out := []CommandDescriptor{}
+	for _, descriptor := range r.CatalogDescriptors() {
+		for _, tag := range descriptor.Tags {
+			if wanted[strings.ToLower(strings.TrimSpace(tag))] {
+				out = append(out, descriptor)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// CatalogDescriptorsByExposure returns descriptors with the requested admin
+// exposure state. It does not perform actor authorization.
+func (r *Registry) CatalogDescriptorsByExposure(exposed bool) []CommandDescriptor {
+	out := []CommandDescriptor{}
+	for _, descriptor := range r.CatalogDescriptors() {
+		effective := descriptor.ExposeInAdmin || descriptor.Exposure.ExposeInAdmin
+		if effective == exposed {
+			out = append(out, descriptor)
+		}
+	}
+	return out
+}
+
+func cloneCommandDescriptor(in CommandDescriptor) CommandDescriptor {
+	out := in
+	out.Tags = cloneCatalogStrings(in.Tags)
+	out.Permissions = cloneCatalogStrings(in.Permissions)
+	out.Roles = cloneCatalogStrings(in.Roles)
+	out.RedactionHints = cloneCatalogStrings(in.RedactionHints)
+	out.Exposure.Tags = cloneCatalogStrings(in.Exposure.Tags)
+	out.Exposure.Permissions = cloneCatalogStrings(in.Exposure.Permissions)
+	out.Exposure.Roles = cloneCatalogStrings(in.Exposure.Roles)
+	out.RPC.Permissions = cloneCatalogStrings(in.RPC.Permissions)
+	out.RPC.Roles = cloneCatalogStrings(in.RPC.Roles)
+	out.RPC.Tags = cloneCatalogStrings(in.RPC.Tags)
+	out.DisplayHints = cloneCatalogMap(in.DisplayHints)
+	out.Input = cloneCommandInputSchema(in.Input)
+	out.Result.ResultSchema = cloneCatalogMap(in.Result.ResultSchema)
+	out.Result.RedactionHints = cloneCatalogStrings(in.Result.RedactionHints)
+	out.Result.DisplayHints = cloneCatalogMap(in.Result.DisplayHints)
+	return out
+}
+
+func cloneCommandInputSchema(in CommandInputSchema) CommandInputSchema {
+	out := in
+	out.Required = cloneCatalogStrings(in.Required)
+	out.JSONSchema = cloneCatalogMap(in.JSONSchema)
+	out.Extensions = cloneCatalogMap(in.Extensions)
+	if len(in.Fields) > 0 {
+		out.Fields = make([]CommandInputField, len(in.Fields))
+		for i, field := range in.Fields {
+			out.Fields[i] = cloneCommandInputField(field)
+		}
+	}
+	return out
+}
+
+func cloneCommandInputField(in CommandInputField) CommandInputField {
+	out := in
+	out.Default = cloneCatalogValue(in.Default)
+	out.Validation = cloneCatalogMap(in.Validation)
+	out.DisplayHints = cloneCatalogMap(in.DisplayHints)
+	if len(in.StaticOptions) > 0 {
+		out.StaticOptions = make([]CommandOption, len(in.StaticOptions))
+		for i, option := range in.StaticOptions {
+			out.StaticOptions[i] = option
+			out.StaticOptions[i].Metadata = cloneCatalogMap(option.Metadata)
+		}
+	}
+	if in.OptionSource != nil {
+		source := *in.OptionSource
+		source.Params = cloneCatalogMap(in.OptionSource.Params)
+		out.OptionSource = &source
+	}
+	return out
+}
+
+func cloneCatalogMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneCatalogValue(value)
+	}
+	return out
+}
+
+func cloneCatalogValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneCatalogMap(typed)
+	case []any:
+		if len(typed) == 0 {
+			return []any{}
+		}
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneCatalogValue(item)
+		}
+		return out
+	case []string:
+		return cloneCatalogStrings(typed)
+	case []map[string]any:
+		if len(typed) == 0 {
+			return []map[string]any{}
+		}
+		out := make([]map[string]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneCatalogMap(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
