@@ -1,5 +1,26 @@
 # Changelog
 
+# [0.21.0](https://github.com/goliatone/go-command/compare/v0.20.0...v0.21.0) - (2026-06-17)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.21.0 ([11b061f](https://github.com/goliatone/go-command/commit/11b061f0f5b6b1b9ce8bf5f93b30ac863b9409c1))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Register catalog descriptor ([42baff4](https://github.com/goliatone/go-command/commit/42baff46aa3fe94ef318c82cbd58d70b45ec6d9f))  - (goliatone)
+- Command catalog ([767b5b6](https://github.com/goliatone/go-command/commit/767b5b63750628f8895c52fc7deb198ed1fa3eab))  - (goliatone)
+- Dispatch contracts ([c219518](https://github.com/goliatone/go-command/commit/c21951855b3d8d39db0ea0b818618b64faf0c27f))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.20.0 ([9172e55](https://github.com/goliatone/go-command/commit/9172e55ed17f91efca752b4c88cdb88648ba9447))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update examples ([9fe1815](https://github.com/goliatone/go-command/commit/9fe1815123ecdb7b8346ae0478d03ae320b92f71))  - (goliatone)
+- Update tests ([6392e49](https://github.com/goliatone/go-command/commit/6392e49a01c627b802acc6b6a35978fa1118c0cb))  - (goliatone)
+
 # [0.20.0](https://github.com/goliatone/go-command/compare/v0.19.0...v0.20.0) - (2026-06-09)
 
 ## <!-- 13 -->📦 Bumps
