@@ -267,6 +267,43 @@ func TestDispatchOptionsContextRoundTripAndIsolation(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCommandDispatchRequestSupportsNameCompatibilityAlias(t *testing.T) {
+	req := CommandDispatchRequest{Name: "legacy.name", Payload: map[string]any{}}
+	require.Equal(t, "legacy.name", req.ResolvedCommandID())
+	require.NoError(t, ValidateCommandDispatchRequest(req))
+}
+
+func TestValidateCommandDispatchRequestRejectsMissingCommandIDAndInvalidOptions(t *testing.T) {
+	err := ValidateCommandDispatchRequest(CommandDispatchRequest{})
+	gerr := mustGoError(t, err)
+	require.Equal(t, TextCodeDispatchRequestInvalid, gerr.TextCode)
+
+	err = ValidateCommandDispatchRequest(CommandDispatchRequest{
+		CommandID: "queued.command",
+		Options: DispatchOptions{
+			Mode:  ExecutionModeInline,
+			Delay: time.Second,
+		},
+	})
+	gerr = mustGoError(t, err)
+	require.Equal(t, TextCodeDispatchOptionsInvalid, gerr.TextCode)
+}
+
+func TestValidateCommandDispatchResponsePreservesFieldErrors(t *testing.T) {
+	resp := CommandDispatchResponse{
+		Receipt: DispatchReceipt{Accepted: false, Mode: ExecutionModeInline, CommandID: "catalog.inspect"},
+		ValidationErrors: []CommandDispatchValidationError{
+			{Path: "payload.entity_id", Code: "required", Message: "Entity is required."},
+		},
+	}
+	require.NoError(t, ValidateCommandDispatchResponse(resp))
+
+	resp.ValidationErrors[0].Message = ""
+	err := ValidateCommandDispatchResponse(resp)
+	gerr := mustGoError(t, err)
+	require.Equal(t, TextCodeDispatchResponseInvalid, gerr.TextCode)
+}
+
 func TestCanonicalCommandID(t *testing.T) {
 	id, err := CanonicalCommandID(contractTypedMessage{})
 	require.NoError(t, err)
