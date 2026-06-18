@@ -172,6 +172,10 @@ profile.cov
 go.work
 go.work.sum
 
+# Local task and quality caches
+.tmp/
+.gocache/
+
 # env file
 .env
 
