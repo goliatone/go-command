@@ -534,6 +534,7 @@ function go:quality:pr {
 
 function go:quality:all {
     go:fmt || return 1
+    go:fix "$@" || return 1
     go:fmt:check || return 1
     go:test "$@" || return 1
     go:race "$@" || return 1
