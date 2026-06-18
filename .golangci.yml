@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  relative-path-mode: gitroot
+  allow-parallel-runners: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - durationcheck
+    - errchkjson
+    - ineffassign
+    - nilerr
+    - nilnesserr
+    - nolintlint
+    - nosprintfhostport
+    - rowserrcheck
+    - sqlclosecheck
+    - usestdlibvars
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+  exclusions:
+    generated: strict
+    warn-unused: true
+    presets:
+      - comments
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - errchkjson
+      - path: ^examples/
+        linters:
+          - errchkjson
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: strict
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: false
+      colors: false
