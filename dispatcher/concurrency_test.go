@@ -19,7 +19,7 @@ func TestConcurrentSubscribeUnsubscribe(t *testing.T) {
 	numGoroutines := 100
 
 	wg.Add(numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
 
@@ -46,7 +46,7 @@ func TestConcurrentDispatch(t *testing.T) {
 	numDispatches := 100
 
 	subs := make([]Subscription, numHandlers)
-	for i := 0; i < numHandlers; i++ {
+	for i := range numHandlers {
 		handler := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error {
 			counter.Add(1)
 			time.Sleep(time.Millisecond)
@@ -57,7 +57,7 @@ func TestConcurrentDispatch(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(numDispatches)
-	for i := 0; i < numDispatches; i++ {
+	for i := range numDispatches {
 		go func(id int) {
 			defer wg.Done()
 			msg := TestMessage{ID: id}
@@ -87,7 +87,7 @@ func TestConcurrentSubscribeDispatch(t *testing.T) {
 
 	wg.Add(numOperations * 2)
 
-	for i := 0; i < numOperations; i++ {
+	for range numOperations {
 		go func() {
 			defer wg.Done()
 
@@ -103,7 +103,7 @@ func TestConcurrentSubscribeDispatch(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < numOperations; i++ {
+	for i := range numOperations {
 		go func(id int) {
 			defer wg.Done()
 			msg := TestMessage{ID: id}

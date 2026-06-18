@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -327,12 +328,8 @@ func mergeDispatchMetadata(base map[string]any, override map[string]any) map[str
 	}
 
 	out := make(map[string]any, len(base)+len(override))
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range override {
-		out[key] = value
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, override)
 	return out
 }
 

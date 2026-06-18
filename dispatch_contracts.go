@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -324,7 +325,7 @@ func CanonicalCommandID(msg any) (string, error) {
 	switch {
 	case msgType.Implements(messageTyperType):
 		id = strings.TrimSpace(GetMessageType(msg))
-	case msgType.Kind() != reflect.Ptr && reflect.PointerTo(msgType).Implements(messageTyperType):
+	case msgType.Kind() != reflect.Pointer && reflect.PointerTo(msgType).Implements(messageTyperType):
 		id = strings.TrimSpace(GetMessageType(reflect.New(msgType).Interface()))
 	default:
 		return "", invalidCommandIDError("message must implement Type() string", map[string]any{
@@ -413,8 +414,6 @@ func cloneDispatchMetadata(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }
