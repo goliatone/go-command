@@ -167,7 +167,7 @@ func TestHandler_Concurrency(t *testing.T) {
 
 	cf := &countingFunc{failUntil: 1}
 
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

@@ -130,7 +130,7 @@ func buildStructForNode(node *cliNode) (reflect.Value, error) {
 			}
 			handler := reflect.ValueOf(child.handler)
 			handlerType := handler.Type()
-			if handlerType.Kind() == reflect.Ptr && handlerType.Elem().Kind() == reflect.Struct {
+			if handlerType.Kind() == reflect.Pointer && handlerType.Elem().Kind() == reflect.Struct {
 				fieldType = handlerType.Elem()
 				if handler.IsNil() {
 					fieldValue = reflect.Zero(handlerType.Elem())

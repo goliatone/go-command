@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -292,8 +293,7 @@ func renderTypeScript(endpoints []endpointMeta, exportName string) ([]byte, erro
 }
 
 func strconvQuote(value string) string {
-	encoded, _ := json.Marshal(value)
-	return string(encoded)
+	return strconv.Quote(value)
 }
 
 func die(err error) {

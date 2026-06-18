@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"sync"
 	"time"
 
@@ -296,9 +297,7 @@ func (h *Handler) retryDecision(err error, attempt int, maxRetries int, strategy
 
 	fromStrategy := DecideRetry(strategy, attempt, err)
 	if fromStrategy.Metadata != nil {
-		for key, value := range fromStrategy.Metadata {
-			decision.Metadata[key] = value
-		}
+		maps.Copy(decision.Metadata, fromStrategy.Metadata)
 	}
 	if fromStrategy.Delay > 0 {
 		decision.Delay = fromStrategy.Delay
@@ -428,10 +427,7 @@ func waitRetryDelay(ctx context.Context, control ExecutionControl, delay time.Du
 			return err
 		}
 
-		step := remaining
-		if step > maxStep {
-			step = maxStep
-		}
+		step := min(remaining, maxStep)
 		timer := time.NewTimer(step)
 		done := control.Done()
 
