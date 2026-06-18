@@ -17,7 +17,7 @@ func IsNilMessage(msg any) bool {
 	}
 
 	v := reflect.ValueOf(msg)
-	if v.Kind() != reflect.Ptr {
+	if v.Kind() != reflect.Pointer {
 		return false
 	}
 

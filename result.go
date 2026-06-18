@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"maps"
 	"sync"
 )
 
@@ -43,9 +44,7 @@ func (r *Result[T]) StoreWithMeta(value T, meta map[string]any) {
 	r.value = value
 	r.stored = true
 	r.err = nil
-	for k, v := range meta {
-		r.metadata[k] = v
-	}
+	maps.Copy(r.metadata, meta)
 }
 
 func (r *Result[T]) Load() (T, bool) {

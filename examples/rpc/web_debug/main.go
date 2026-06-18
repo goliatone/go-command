@@ -360,7 +360,7 @@ func decodeRPCPayload(raw json.RawMessage, prototype any) (any, error) {
 		return nil, errors.New("invalid method request type")
 	}
 
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		if err := json.Unmarshal(raw, prototype); err != nil {
 			return nil, err
 		}
