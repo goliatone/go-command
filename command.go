@@ -55,7 +55,7 @@ func GetMessageType(msg any) string {
 		return "unknown_type"
 	}
 
-	if v.Kind() == reflect.Ptr && v.IsNil() {
+	if v.Kind() == reflect.Pointer && v.IsNil() {
 		if msgTyper, ok := zeroValueTyper(t); ok {
 			return msgTyper.Type()
 		}
@@ -74,7 +74,7 @@ type messageTyper interface {
 	Type() string
 }
 
-var messageTyperType = reflect.TypeOf((*messageTyper)(nil)).Elem()
+var messageTyperType = reflect.TypeFor[messageTyper]()
 
 func zeroValueTyper(t reflect.Type) (messageTyper, bool) {
 	if t == nil {
@@ -83,7 +83,7 @@ func zeroValueTyper(t reflect.Type) (messageTyper, bool) {
 	if !t.Implements(messageTyperType) {
 		return nil, false
 	}
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		zero := reflect.New(t.Elem())
 		typer, ok := zero.Interface().(messageTyper)
 		return typer, ok
@@ -99,7 +99,7 @@ func typeNameFromType(t reflect.Type) string {
 	}
 	typeName := t.String()
 
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		typeName = typeName[1:] // remove the "*" prefix
 		t = t.Elem()            // get the type that the pointer points to
 	}

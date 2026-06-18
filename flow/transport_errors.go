@@ -2,6 +2,7 @@ package flow
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -167,9 +168,7 @@ func runtimeErrorDetails(err error, mapping TransportErrorMapping) map[string]an
 			details["runtime_code"] = code
 		}
 		if len(appErr.Metadata) > 0 {
-			for key, value := range appErr.Metadata {
-				details[key] = value
-			}
+			maps.Copy(details, appErr.Metadata)
 		}
 	}
 	if len(details) == 0 {

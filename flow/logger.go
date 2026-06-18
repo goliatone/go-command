@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -106,12 +107,8 @@ func mergeFields(a, b map[string]any) map[string]any {
 		return nil
 	}
 	out := make(map[string]any, len(a)+len(b))
-	for k, v := range a {
-		out[k] = v
-	}
-	for k, v := range b {
-		out[k] = v
-	}
+	maps.Copy(out, a)
+	maps.Copy(out, b)
 	return out
 }
 

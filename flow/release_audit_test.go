@@ -94,7 +94,7 @@ func TestShimAudit_NoLegacyBridgeMethodsBeyondExecute(t *testing.T) {
 }
 
 func TestTransitionRequestAudit_NoCurrentStateFallbackField(t *testing.T) {
-	typ := reflect.TypeOf(TransitionRequest[shimAuditMsg]{})
+	typ := reflect.TypeFor[TransitionRequest[shimAuditMsg]]()
 	if _, ok := typ.FieldByName("CurrentState"); ok {
 		t.Fatalf("unexpected CurrentState fallback field on TransitionRequest")
 	}

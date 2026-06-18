@@ -216,7 +216,7 @@ func CommandInputSchemaFromMessage(msg any) CommandInputSchema {
 	if t == nil {
 		return CommandInputSchema{Type: "object", NoInput: true}
 	}
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -296,7 +296,7 @@ func catalogTagHas(field reflect.StructField, want string) bool {
 }
 
 func catalogKindForType(t reflect.Type) string {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t.Kind() {
@@ -312,7 +312,7 @@ func catalogKindForType(t reflect.Type) string {
 }
 
 func jsonSchemaTypeForType(t reflect.Type) string {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t.Kind() {

@@ -111,7 +111,7 @@ type TargetInfo struct {
 }
 
 // Effect models an orchestration side effect emitted by transitions.
-type Effect interface{}
+type Effect any
 
 // CommandEffect models command-backed side effects.
 type CommandEffect struct {

@@ -542,20 +542,18 @@ func (s *SQLiteStateStore) ClaimPending(
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	ids := make([]string, 0, limit)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, strings.TrimSpace(id))
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return nil, err
 	}
-	_ = rows.Close()
 
 	claimed := make([]ClaimedOutboxEntry, 0, len(ids))
 	update := fmt.Sprintf(`UPDATE %s

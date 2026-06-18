@@ -66,10 +66,7 @@ func (b *BatchExecutor[T]) Execute(ctx context.Context, messages []T) error {
 	}
 	var batches [][]T
 	for i := 0; i < len(messages); i += b.batchSize {
-		end := i + b.batchSize
-		if end > len(messages) {
-			end = len(messages)
-		}
+		end := min(i+b.batchSize, len(messages))
 		batches = append(batches, messages[i:end])
 	}
 

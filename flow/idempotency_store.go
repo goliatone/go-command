@@ -187,7 +187,7 @@ func idempotencyPayloadHash[T any](req ApplyEventRequest[T], machineID, entityID
 	}
 	raw, err := json.Marshal(normalized)
 	if err != nil {
-		raw = []byte(fmt.Sprintf("%#v", normalized))
+		raw = fmt.Appendf(nil, "%#v", normalized)
 	}
 	hash := sha256.Sum256(raw)
 	return hex.EncodeToString(hash[:])

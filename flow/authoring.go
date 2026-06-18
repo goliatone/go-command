@@ -3,6 +3,7 @@ package flow
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -51,12 +52,7 @@ func (s *ValidationScope) containsNode(nodeID string) bool {
 	if strings.TrimSpace(nodeID) == "" {
 		return true
 	}
-	for _, candidate := range s.NodeIDs {
-		if candidate == nodeID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.NodeIDs, nodeID)
 }
 
 func sortDiagnostics(diags []ValidationDiagnostic) {
@@ -90,13 +86,13 @@ type EditorCatalog struct {
 
 // CatalogItem is one palette entry backed by runtime metadata.
 type CatalogItem struct {
-	ID          string                 `json:"id"`
-	Label       string                 `json:"label"`
-	Category    string                 `json:"category"`
-	Schema      map[string]any         `json:"schema,omitempty"`
-	UI          UIComponent            `json:"ui"`
-	Description string                 `json:"description,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Category    string         `json:"category"`
+	Schema      map[string]any `json:"schema,omitempty"`
+	UI          UIComponent    `json:"ui"`
+	Description string         `json:"description,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // BuildEditorCatalog derives palette entries from runtime registries.

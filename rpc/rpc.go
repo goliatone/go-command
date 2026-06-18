@@ -383,7 +383,7 @@ func payloadValue(msgType reflect.Type, payload any) (reflect.Value, error) {
 	}
 
 	// Common convenience conversion: value -> pointer target.
-	if msgType.Kind() == reflect.Ptr && value.Type().AssignableTo(msgType.Elem()) {
+	if msgType.Kind() == reflect.Pointer && value.Type().AssignableTo(msgType.Elem()) {
 		ptr := reflect.New(msgType.Elem())
 		ptr.Elem().Set(value)
 		return ptr, nil
@@ -396,7 +396,7 @@ func messageValue(msgType reflect.Type) any {
 	if msgType == nil {
 		return nil
 	}
-	if msgType.Kind() == reflect.Ptr {
+	if msgType.Kind() == reflect.Pointer {
 		return reflect.New(msgType.Elem()).Interface()
 	}
 	return reflect.New(msgType).Elem().Interface()
@@ -415,7 +415,7 @@ func typeRef(t reflect.Type) *TypeRef {
 	}
 	base := t
 	pointer := false
-	if base.Kind() == reflect.Ptr {
+	if base.Kind() == reflect.Pointer {
 		base = base.Elem()
 		pointer = true
 	}

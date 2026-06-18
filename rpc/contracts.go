@@ -103,7 +103,7 @@ func (d *endpointDefinition) NewRequest() any {
 	if d == nil || d.reqType == nil {
 		return nil
 	}
-	if d.reqType.Kind() == reflect.Ptr {
+	if d.reqType.Kind() == reflect.Pointer {
 		return reflect.New(d.reqType.Elem()).Interface()
 	}
 	return reflect.New(d.reqType).Interface()

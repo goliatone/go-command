@@ -83,32 +83,32 @@ func (c *interfaceBadFactoryCommand) MessageValue() any {
 func TestMessageTypeForCommandValue(t *testing.T) {
 	meta := MessageTypeForCommand(&valueCommand{})
 
-	assert.Equal(t, reflect.TypeOf(valueMessage{}), meta.MessageTypeValue)
-	assert.Equal(t, reflect.TypeOf(valueMessage{}), reflect.TypeOf(meta.MessageValue))
+	assert.Equal(t, reflect.TypeFor[valueMessage](), meta.MessageTypeValue)
+	assert.Equal(t, reflect.TypeFor[valueMessage](), reflect.TypeOf(meta.MessageValue))
 	assert.Equal(t, GetMessageType(valueMessage{}), meta.MessageType)
 }
 
 func TestMessageTypeForCommandPointer(t *testing.T) {
 	meta := MessageTypeForCommand(&pointerCommand{})
 
-	assert.Equal(t, reflect.TypeOf((*pointerMessage)(nil)), meta.MessageTypeValue)
-	assert.Equal(t, reflect.TypeOf((*pointerMessage)(nil)), reflect.TypeOf(meta.MessageValue))
+	assert.Equal(t, reflect.TypeFor[*pointerMessage](), meta.MessageTypeValue)
+	assert.Equal(t, reflect.TypeFor[*pointerMessage](), reflect.TypeOf(meta.MessageValue))
 	assert.Equal(t, GetMessageType(&pointerMessage{}), meta.MessageType)
 }
 
 func TestMessageTypeForCommandQueryPreference(t *testing.T) {
 	meta := MessageTypeForCommand(&dualCommand{})
 
-	assert.Equal(t, reflect.TypeOf(queryMessage{}), meta.MessageTypeValue)
-	assert.Equal(t, reflect.TypeOf(queryMessage{}), reflect.TypeOf(meta.MessageValue))
+	assert.Equal(t, reflect.TypeFor[queryMessage](), meta.MessageTypeValue)
+	assert.Equal(t, reflect.TypeFor[queryMessage](), reflect.TypeOf(meta.MessageValue))
 	assert.Equal(t, GetMessageType(queryMessage{}), meta.MessageType)
 }
 
 func TestMessageTypeForCommandInterfaceWithFactory(t *testing.T) {
 	meta := MessageTypeForCommand(&interfaceCommand{})
 
-	assert.Equal(t, reflect.TypeOf(interfaceMessageImpl{}), meta.MessageTypeValue)
-	assert.Equal(t, reflect.TypeOf(interfaceMessageImpl{}), reflect.TypeOf(meta.MessageValue))
+	assert.Equal(t, reflect.TypeFor[interfaceMessageImpl](), meta.MessageTypeValue)
+	assert.Equal(t, reflect.TypeFor[interfaceMessageImpl](), reflect.TypeOf(meta.MessageValue))
 	assert.Equal(t, GetMessageType(interfaceMessageImpl{}), meta.MessageType)
 }
 

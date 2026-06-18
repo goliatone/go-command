@@ -14,7 +14,7 @@ type shimAuditMsg struct {
 func (shimAuditMsg) Type() string { return "shim.audit" }
 
 func TestStateMachineShimPolicyExecuteOnlyCompatibilityBridge(t *testing.T) {
-	stateMachineType := reflect.TypeOf((*StateMachine[shimAuditMsg])(nil))
+	stateMachineType := reflect.TypeFor[*StateMachine[shimAuditMsg]]()
 
 	if _, ok := stateMachineType.MethodByName("Execute"); !ok {
 		t.Fatal("expected Execute compatibility wrapper")

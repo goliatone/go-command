@@ -110,10 +110,7 @@ func (s *InMemoryAuthoringStore) List(_ context.Context, opts AuthoringListOptio
 		offset = len(ids)
 	}
 
-	end := offset + limit
-	if end > len(ids) {
-		end = len(ids)
-	}
+	end := min(offset+limit, len(ids))
 	items := make([]*AuthoringMachineRecord, 0, end-offset)
 	for _, id := range ids[offset:end] {
 		cloned, err := cloneAuthoringMachineRecord(s.records[id])

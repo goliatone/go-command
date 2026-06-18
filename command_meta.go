@@ -17,8 +17,8 @@ type MessageFactory interface {
 }
 
 var (
-	contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
-	errorType   = reflect.TypeOf((*error)(nil)).Elem()
+	contextType = reflect.TypeFor[context.Context]()
+	errorType   = reflect.TypeFor[error]()
 )
 
 func MessageTypeForCommand(cmd any) CommandMeta {
@@ -131,7 +131,7 @@ func messageValueForType(msgType reflect.Type) any {
 		return nil
 	}
 
-	if msgType.Kind() == reflect.Ptr {
+	if msgType.Kind() == reflect.Pointer {
 		return reflect.New(msgType.Elem()).Interface()
 	}
 
@@ -142,5 +142,5 @@ func isInterfaceType(msgType reflect.Type) bool {
 	if msgType.Kind() == reflect.Interface {
 		return true
 	}
-	return msgType.Kind() == reflect.Ptr && msgType.Elem().Kind() == reflect.Interface
+	return msgType.Kind() == reflect.Pointer && msgType.Elem().Kind() == reflect.Interface
 }

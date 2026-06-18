@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -768,10 +769,8 @@ func appendUniqueString(in []string, value string) []string {
 	if value == "" {
 		return in
 	}
-	for _, existing := range in {
-		if existing == value {
-			return in
-		}
+	if slices.Contains(in, value) {
+		return in
 	}
 	return append(in, value)
 }
