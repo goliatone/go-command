@@ -1,6 +1,7 @@
 package command
 
 import (
+	"maps"
 	"strings"
 	"sync"
 
@@ -137,9 +138,7 @@ func (r *Registry) Initialize() error {
 	copy(resolverOrder, r.resolverOrder)
 
 	resolvers := make(map[string]Resolver, len(r.resolvers))
-	for key, resolver := range r.resolvers {
-		resolvers[key] = resolver
-	}
+	maps.Copy(resolvers, r.resolvers)
 	r.mu.Unlock()
 
 	var errs error

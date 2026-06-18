@@ -121,10 +121,7 @@ func (s *Scheduler) ScheduleAt(at time.Time, opts command.HandlerConfig, handler
 	s.storeHandle(sub)
 
 	go func() {
-		wait := time.Until(at)
-		if wait < 0 {
-			wait = 0
-		}
+		wait := max(time.Until(at), 0)
 
 		timer := time.NewTimer(wait)
 		defer timer.Stop()
@@ -414,9 +411,9 @@ func tryCommandRunnable(handler any, h *runner.Handler) func() error {
 }
 
 func commandFuncMessageType(handlerType reflect.Type) (reflect.Type, bool) {
-	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
-	errorType := reflect.TypeOf((*error)(nil)).Elem()
-	messageType := reflect.TypeOf((*command.Message)(nil)).Elem()
+	contextType := reflect.TypeFor[context.Context]()
+	errorType := reflect.TypeFor[error]()
+	messageType := reflect.TypeFor[command.Message]()
 
 	if handlerType.NumIn() != 2 || handlerType.NumOut() != 1 {
 		return nil, false
@@ -435,9 +432,9 @@ func commandFuncMessageType(handlerType reflect.Type) (reflect.Type, bool) {
 }
 
 func commandExecuteMessageType(handlerType reflect.Type) (reflect.Type, bool) {
-	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
-	errorType := reflect.TypeOf((*error)(nil)).Elem()
-	messageType := reflect.TypeOf((*command.Message)(nil)).Elem()
+	contextType := reflect.TypeFor[context.Context]()
+	errorType := reflect.TypeFor[error]()
+	messageType := reflect.TypeFor[command.Message]()
 
 	method, ok := handlerType.MethodByName("Execute")
 	if !ok {
@@ -466,10 +463,10 @@ func implementsMessage(msgType, messageType reflect.Type) bool {
 	if msgType.Implements(messageType) {
 		return true
 	}
-	if msgType.Kind() == reflect.Ptr && msgType.Elem().Implements(messageType) {
+	if msgType.Kind() == reflect.Pointer && msgType.Elem().Implements(messageType) {
 		return true
 	}
-	if msgType.Kind() != reflect.Ptr && reflect.PtrTo(msgType).Implements(messageType) {
+	if msgType.Kind() != reflect.Pointer && reflect.PtrTo(msgType).Implements(messageType) {
 		return true
 	}
 	return false

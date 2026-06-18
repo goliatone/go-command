@@ -604,7 +604,7 @@ func TestRegisterCommandDoesNotSubscribeBeforeGlobalStateLock(t *testing.T) {
 
 	// RegisterCommand should not leak a dispatcher subscription while blocked
 	// on the global state lock.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		err := dispatcher.Dispatch(context.Background(), TestMessage{Content: "locked-state"})
 		if err == nil {
 			globalStateMu.Unlock()
@@ -635,14 +635,14 @@ func TestGlobalRegistryConcurrentAccessRaceSafety(t *testing.T) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		workerID := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
 
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error { return nil })
 				qry := command.QueryFunc[TestMessage, TestResponse](func(ctx context.Context, msg TestMessage) (TestResponse, error) {
 					return TestResponse{Result: "ok"}, nil
@@ -675,7 +675,7 @@ func TestGlobalRegistryConcurrentAccessRaceSafety(t *testing.T) {
 		defer wg.Done()
 		<-start
 
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			WithTestRegistry(func() {
 				cmd := command.CommandFunc[TestMessage](func(ctx context.Context, msg TestMessage) error { return nil })
 				qry := command.QueryFunc[TestMessage, TestResponse](func(ctx context.Context, msg TestMessage) (TestResponse, error) {

@@ -116,14 +116,14 @@ type cronLogger struct {
 	logger Logger
 }
 
-func (l *cronLogger) Info(msg string, args ...interface{})  { l.logger.Info(msg, args...) }
-func (l *cronLogger) Error(msg string, args ...interface{}) { l.logger.Error(msg, args...) }
+func (l *cronLogger) Info(msg string, args ...any)  { l.logger.Info(msg, args...) }
+func (l *cronLogger) Error(msg string, args ...any) { l.logger.Error(msg, args...) }
 
 type errorAdapter struct {
 	handler func(error)
 }
 
-func (e *errorAdapter) Error(msg string, args ...interface{}) {
+func (e *errorAdapter) Error(msg string, args ...any) {
 	if err, ok := args[0].(error); ok {
 		e.handler(err)
 	}
