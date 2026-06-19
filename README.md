@@ -178,6 +178,73 @@ _ = dispatcher.SetCommandRoutingMode(
 `DispatchWith` enforces canonical command ids (`Type() string`) for queued/policy paths.
 Inline compatibility remains unchanged for legacy reflection-derived message types.
 
+#### Command Run Events and Progress
+
+Register command run observers to receive lifecycle and cooperative progress events from dispatcher execution:
+
+```go
+sub := dispatcher.AddCommandRunObserver(command.CommandRunObserverFunc(
+    func(ctx context.Context, ev command.CommandRunEvent) error {
+        log.Printf("command=%s run=%s phase=%s current=%d total=%d",
+            ev.CommandID, ev.RunID, ev.Phase, ev.Current, ev.Total)
+        return nil
+    },
+))
+defer sub.Unsubscribe()
+```
+
+Inline `dispatcher.Dispatch` and inline `dispatcher.DispatchWith` automatically emit `started` and one terminal event per handler run. Terminal phases are `succeeded`, `failed`, or `canceled`; observer errors and panics are ignored so command results are unchanged. Runner policy skips, such as exhausted `WithRunOnce(true)` or `WithMaxRuns(n)` handlers, do not emit false successful lifecycle events.
+
+Handlers can report checkpoints and progress through context helpers:
+
+```go
+func (h *ImportUsers) Execute(ctx context.Context, msg ImportUsersCommand) error {
+    command.Checkpoint(ctx, "loaded")
+    for i, user := range msg.Users {
+        if err := h.importOne(ctx, user); err != nil {
+            return err
+        }
+        command.Progress(ctx, int64(i+1), int64(len(msg.Users)))
+    }
+    return nil
+}
+```
+
+`command.Checkpoint` and `command.Progress` are noops when no progress reporter is present, so commands do not need host-specific branching.
+
+Queued dispatch can opt into matching acceptance events:
+
+```go
+_ = dispatcher.RegisterObservedExecutor(command.ExecutionModeQueued, queueExecutor)
+```
+
+Observed executors emit `submitted` after an accepted queued receipt and `rejected` for acceptance failures. The executor can read `command.DispatchRunFromContext(ctx)` during `Execute` and persist the run ID with its queued job. Later, the worker can reuse that run context:
+
+```go
+run := storedRunContext
+run.DispatchID = storedDispatchID
+
+err := dispatcher.RunObservedCommand(ctx, run, func(runCtx context.Context) error {
+    command.Checkpoint(runCtx, "dequeued")
+    return runner.RunCommand(runCtx, runner.NewHandler(), cmd, msg)
+})
+```
+
+Observer adapters are available for common host integrations:
+
+```go
+statsObserver := command.CommandRunStatsObserver(statsRecorder)
+storeObserver := command.CommandRunStoreObserver(runStore)
+safeObserver := command.SanitizingCommandRunObserver(storeObserver, func(metadata map[string]any) map[string]any {
+    delete(metadata, "token")
+    return metadata
+})
+```
+
+Event metadata is defensively copied at context, reporting, and fan-out boundaries, but core does not inspect payloads or enforce a global redaction policy. Hosts should only attach safe metadata or use a sanitizing observer before storing, streaming, or rendering events.
+
+Command catalog descriptors can optionally expose progress metadata by implementing `command.CommandProgressDescriber`. Commands that do not implement it omit the `progress` field.
+
 ### 2. Registry System with CLI, Cron, and RPC
 
 The registry allows commands to be registered once and executed through multiple interfaces:
