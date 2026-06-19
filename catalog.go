@@ -10,25 +10,26 @@ import (
 // CommandDescriptor is the reusable command catalog contract. It describes an
 // intentionally exposed command without importing an admin UI or transport.
 type CommandDescriptor struct {
-	ID             string                  `json:"id"`
-	MessageType    string                  `json:"message_type,omitempty"`
-	Label          string                  `json:"label,omitempty"`
-	Summary        string                  `json:"summary,omitempty"`
-	Description    string                  `json:"description,omitempty"`
-	Domain         string                  `json:"domain,omitempty"`
-	Group          string                  `json:"group,omitempty"`
-	Tags           []string                `json:"tags,omitempty"`
-	ExposeInAdmin  bool                    `json:"expose_in_admin,omitempty"`
-	Mutating       bool                    `json:"mutating,omitempty"`
-	ExecutionMode  ExecutionMode           `json:"execution_mode,omitempty"`
-	Permissions    []string                `json:"permissions,omitempty"`
-	Roles          []string                `json:"roles,omitempty"`
-	Exposure       CommandExposure         `json:"exposure,omitempty"`
-	RPC            RPCConfig               `json:"rpc,omitempty"`
-	Input          CommandInputSchema      `json:"input,omitempty"`
-	Result         CommandResultDescriptor `json:"result,omitempty"`
-	DisplayHints   map[string]any          `json:"display_hints,omitempty"`
-	RedactionHints []string                `json:"redaction_hints,omitempty"`
+	ID             string                     `json:"id"`
+	MessageType    string                     `json:"message_type,omitempty"`
+	Label          string                     `json:"label,omitempty"`
+	Summary        string                     `json:"summary,omitempty"`
+	Description    string                     `json:"description,omitempty"`
+	Domain         string                     `json:"domain,omitempty"`
+	Group          string                     `json:"group,omitempty"`
+	Tags           []string                   `json:"tags,omitempty"`
+	ExposeInAdmin  bool                       `json:"expose_in_admin,omitempty"`
+	Mutating       bool                       `json:"mutating,omitempty"`
+	ExecutionMode  ExecutionMode              `json:"execution_mode,omitempty"`
+	Permissions    []string                   `json:"permissions,omitempty"`
+	Roles          []string                   `json:"roles,omitempty"`
+	Exposure       CommandExposure            `json:"exposure,omitempty"`
+	RPC            RPCConfig                  `json:"rpc,omitempty"`
+	Input          CommandInputSchema         `json:"input,omitempty"`
+	Result         CommandResultDescriptor    `json:"result,omitempty"`
+	Progress       *CommandProgressDescriptor `json:"progress,omitempty"`
+	DisplayHints   map[string]any             `json:"display_hints,omitempty"`
+	RedactionHints []string                   `json:"redaction_hints,omitempty"`
 }
 
 // CommandInputSchema is a renderer-neutral, JSON Schema/OpenAPI-compatible
@@ -157,6 +158,10 @@ func DescriptorForCommand(cmd any, meta CommandMeta) (CommandDescriptor, bool) {
 	if provider, ok := cmd.(CommandInputSchemaProvider); ok && len(descriptor.Input.Fields) == 0 && len(descriptor.Input.JSONSchema) == 0 && !descriptor.Input.NoInput {
 		descriptor.Input = provider.CommandInputSchema()
 	}
+	if provider, ok := cmd.(CommandProgressDescriber); ok && descriptor.Progress == nil {
+		progress := provider.CommandProgressDescriptor()
+		descriptor.Progress = cloneCommandProgressDescriptorPtr(&progress)
+	}
 	if !descriptor.ExposeInAdmin && !descriptor.Exposure.ExposeInAdmin {
 		return CommandDescriptor{}, false
 	}
@@ -200,6 +205,7 @@ func MergeCommandDescriptor(meta CommandMeta, exposure CommandExposure, rpcConfi
 	if out.ExecutionMode == "" {
 		out.ExecutionMode = ExecutionModeInline
 	}
+	out.Progress = cloneCommandProgressDescriptorPtr(out.Progress)
 	out.Tags = uniqueCatalogStrings(out.Tags)
 	out.Permissions = uniqueCatalogStrings(out.Permissions)
 	out.Roles = uniqueCatalogStrings(out.Roles)
