@@ -25,14 +25,16 @@ type captureExecutor struct {
 	called       bool
 	gotCommandID string
 	gotOpts      command.DispatchOptions
+	gotRun       command.DispatchRunContext
 	receipt      command.DispatchReceipt
 	err          error
 }
 
-func (e *captureExecutor) Execute(_ context.Context, _ any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
+func (e *captureExecutor) Execute(ctx context.Context, _ any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
 	e.called = true
 	e.gotCommandID = commandID
 	e.gotOpts = opts
+	e.gotRun, _ = command.DispatchRunFromContext(ctx)
 	return e.receipt, e.err
 }
 
@@ -352,6 +354,136 @@ func TestDispatchWithQueuedModeRequiresCanonicalCommandID(t *testing.T) {
 	gerr := mustGoError(t, err)
 	assert.Equal(t, command.TextCodeInvalidCommandID, gerr.TextCode)
 	assert.False(t, queuedExec.called)
+}
+
+func TestObservedExecutorEmitsSubmittedAfterAcceptedReceipt(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	now := time.Now().UTC()
+	queuedExec := &captureExecutor{
+		receipt: command.DispatchReceipt{
+			Accepted:   true,
+			DispatchID: "dispatch-observed",
+			EnqueuedAt: &now,
+		},
+	}
+	require.NoError(t, RegisterObservedExecutor(command.ExecutionModeQueued, queuedExec))
+
+	metadata := map[string]any{"source": "api"}
+	receipt, err := DispatchWith(context.Background(), routingDispatchMessage{}, command.DispatchOptions{
+		Mode:           command.ExecutionModeQueued,
+		CorrelationID:  "corr-observed",
+		IdempotencyKey: "idem-observed",
+		Metadata:       metadata,
+	})
+	require.NoError(t, err)
+	require.NoError(t, command.ValidateDispatchReceipt(receipt))
+	metadata["source"] = "mutated"
+
+	require.True(t, queuedExec.called)
+	assert.NotEmpty(t, queuedExec.gotRun.RunID)
+	assert.Equal(t, "routing.dispatch.test", queuedExec.gotRun.CommandID)
+	require.Len(t, events, 1)
+	assert.Equal(t, command.CommandRunPhaseSubmitted, events[0].Phase)
+	assert.Equal(t, queuedExec.gotRun.RunID, events[0].RunID)
+	assert.Equal(t, "dispatch-observed", events[0].DispatchID)
+	assert.Equal(t, command.ExecutionModeQueued, events[0].ExecutionMode)
+	assert.Equal(t, "corr-observed", events[0].CorrelationID)
+	assert.Equal(t, "idem-observed", events[0].IdempotencyKey)
+	assert.Equal(t, "api", events[0].Metadata["source"])
+}
+
+func TestRunObservedCommandEmitsQueuedLifecycleWithCapturedRunContext(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	now := time.Now().UTC()
+	queuedExec := &captureExecutor{
+		receipt: command.DispatchReceipt{
+			Accepted:   true,
+			DispatchID: "dispatch-delayed",
+			EnqueuedAt: &now,
+		},
+	}
+	require.NoError(t, RegisterObservedExecutor(command.ExecutionModeQueued, queuedExec))
+
+	receipt, err := DispatchWith(context.Background(), routingDispatchMessage{}, command.DispatchOptions{
+		Mode:           command.ExecutionModeQueued,
+		CorrelationID:  "corr-delayed",
+		IdempotencyKey: "idem-delayed",
+		Metadata:       map[string]any{"source": "queue"},
+	})
+	require.NoError(t, err)
+
+	run := queuedExec.gotRun
+	run.DispatchID = receipt.DispatchID
+	run.Handler = "delayed-worker"
+	err = RunObservedCommand(context.Background(), run, func(ctx context.Context) error {
+		gotRun, ok := command.DispatchRunFromContext(ctx)
+		require.True(t, ok)
+		assert.Equal(t, run.RunID, gotRun.RunID)
+		assert.Equal(t, "dispatch-delayed", gotRun.DispatchID)
+		command.Checkpoint(ctx, "dequeued")
+		command.Progress(ctx, 5, 10, command.WithProgressMetadata(map[string]any{"worker": "a"}))
+		return nil
+	})
+	require.NoError(t, err)
+
+	require.Len(t, events, 5)
+	wantPhases := []command.CommandRunPhase{
+		command.CommandRunPhaseSubmitted,
+		command.CommandRunPhaseStarted,
+		command.CommandRunPhaseCheckpoint,
+		command.CommandRunPhaseProgress,
+		command.CommandRunPhaseSucceeded,
+	}
+	for i, phase := range wantPhases {
+		assert.Equal(t, phase, events[i].Phase)
+		assert.Equal(t, run.RunID, events[i].RunID)
+		assert.Equal(t, "dispatch-delayed", events[i].DispatchID)
+		assert.Equal(t, command.ExecutionModeQueued, events[i].ExecutionMode)
+		assert.Equal(t, "corr-delayed", events[i].CorrelationID)
+		assert.Equal(t, "idem-delayed", events[i].IdempotencyKey)
+		assert.Equal(t, "queue", events[i].Metadata["source"])
+	}
+	assert.Equal(t, "dequeued", events[2].Checkpoint)
+	assert.Equal(t, int64(5), events[3].Current)
+	assert.Equal(t, int64(10), events[3].Total)
+	assert.Equal(t, "a", events[3].Metadata["worker"])
+}
+
+func TestObservedExecutorEmitsRejectedForAcceptanceError(t *testing.T) {
+	setupDispatchRoutingTest(t)
+
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	acceptErr := stderrors.New("queue unavailable")
+	queuedExec := &captureExecutor{err: acceptErr}
+	require.NoError(t, RegisterObservedExecutor(command.ExecutionModeQueued, queuedExec))
+
+	_, err := DispatchWith(context.Background(), routingDispatchMessage{}, command.DispatchOptions{
+		Mode: command.ExecutionModeQueued,
+	})
+	require.ErrorIs(t, err, acceptErr)
+	require.Len(t, events, 1)
+	assert.Equal(t, command.CommandRunPhaseRejected, events[0].Phase)
+	assert.ErrorIs(t, events[0].Error, acceptErr)
+	assert.NotEqual(t, command.CommandRunPhaseFailed, events[0].Phase)
 }
 
 func TestDispatchWithInlineCompatibilityAllowsNonCanonicalMessage(t *testing.T) {

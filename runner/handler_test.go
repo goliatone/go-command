@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/goliatone/go-command"
 )
 
 func TestHandler_NoError_NoRetries(t *testing.T) {
@@ -219,6 +221,109 @@ func TestRunCommand(t *testing.T) {
 	}
 }
 
+func TestRunCommandExposesAttemptContext(t *testing.T) {
+	cmd := &attemptCommander{}
+	handler := NewHandler(WithMaxRetries(2))
+
+	err := RunCommand(context.Background(), handler, cmd, testMessage{name: "attempted"})
+	if err != nil {
+		t.Fatalf("run command failed: %v", err)
+	}
+
+	want := []command.CommandRunAttempt{
+		{Attempt: 1, MaxAttempts: 3},
+		{Attempt: 2, MaxAttempts: 3},
+	}
+	if fmt.Sprint(cmd.attempts) != fmt.Sprint(want) {
+		t.Fatalf("expected attempts %v, got %v", want, cmd.attempts)
+	}
+}
+
+func TestRunWithOutcomeReportsSkippedRunOnce(t *testing.T) {
+	handler := NewHandler(WithRunOnce(true))
+	var calls int
+
+	outcome, err := handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("first run failed: %v", err)
+	}
+	if !outcome.Executed || outcome.Skipped {
+		t.Fatalf("expected first run to execute, got %+v", outcome)
+	}
+
+	outcome, err = handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+	if outcome.Executed || !outcome.Skipped || outcome.SkipReason != RunSkipReasonRunOnce {
+		t.Fatalf("expected run-once skip, got %+v", outcome)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one function call, got %d", calls)
+	}
+}
+
+func TestRunWithOutcomeReportsSkippedMaxRuns(t *testing.T) {
+	handler := NewHandler(WithMaxRuns(1))
+	var calls int
+
+	outcome, err := handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("first run failed: %v", err)
+	}
+	if !outcome.Executed || outcome.Skipped {
+		t.Fatalf("expected first run to execute, got %+v", outcome)
+	}
+
+	outcome, err = handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+	if outcome.Executed || !outcome.Skipped || outcome.SkipReason != RunSkipReasonMaxRuns {
+		t.Fatalf("expected max-runs skip, got %+v", outcome)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one function call, got %d", calls)
+	}
+}
+
+func TestRunWithOutcomeStartHookRunsOnlyWhenExecuted(t *testing.T) {
+	handler := NewHandler(WithRunOnce(true))
+	var starts int
+
+	startHook := WithRunStartHook(func(ctx context.Context) context.Context {
+		starts++
+		return ctx
+	})
+	_, err := handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		return nil
+	}, startHook)
+	if err != nil {
+		t.Fatalf("first run failed: %v", err)
+	}
+	_, err = handler.RunWithOutcome(context.Background(), func(context.Context) error {
+		return nil
+	}, startHook)
+	if err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+	if starts != 1 {
+		t.Fatalf("expected start hook once, got %d", starts)
+	}
+}
+
 func TestRunQuery(t *testing.T) {
 	q := &mockQuerier{
 		failMax: 1,
@@ -315,6 +420,22 @@ func (m *mockCommander) Execute(ctx context.Context, msg testMessage) error {
 	return nil
 }
 
+type attemptCommander struct {
+	attempts []command.CommandRunAttempt
+}
+
+func (a *attemptCommander) Execute(ctx context.Context, msg testMessage) error {
+	attempt, ok := command.CommandRunAttemptFromContext(ctx)
+	if !ok {
+		return errors.New("missing attempt context")
+	}
+	a.attempts = append(a.attempts, attempt)
+	if attempt.Attempt == 1 {
+		return errors.New("retry me")
+	}
+	return nil
+}
+
 type mockQuerier struct {
 	callCount int
 	failMax   int
@@ -360,6 +481,40 @@ func (c *controlAwareCommander) ExecuteWithControl(_ context.Context, _ testMess
 	return nil
 }
 
+type progressAwareCommander struct {
+	calledWithProgress bool
+	reporter           command.CommandProgressReporter
+}
+
+func (c *progressAwareCommander) Execute(context.Context, testMessage) error {
+	return nil
+}
+
+func (c *progressAwareCommander) ExecuteWithProgress(_ context.Context, _ testMessage, reporter command.CommandProgressReporter) error {
+	c.calledWithProgress = true
+	c.reporter = reporter
+	return nil
+}
+
+type controlAndProgressAwareCommander struct {
+	calledWithControl  bool
+	calledWithProgress bool
+}
+
+func (c *controlAndProgressAwareCommander) Execute(context.Context, testMessage) error {
+	return nil
+}
+
+func (c *controlAndProgressAwareCommander) ExecuteWithControl(context.Context, testMessage, ExecutionControl) error {
+	c.calledWithControl = true
+	return nil
+}
+
+func (c *controlAndProgressAwareCommander) ExecuteWithProgress(context.Context, testMessage, command.CommandProgressReporter) error {
+	c.calledWithProgress = true
+	return nil
+}
+
 type fixedDecisionStrategy struct {
 	decision RetryDecision
 }
@@ -382,6 +537,40 @@ func TestRunCommandUsesControlAwareCommander(t *testing.T) {
 	}
 	if !cmd.calledWithControl {
 		t.Fatal("expected ExecuteWithControl to receive control")
+	}
+}
+
+func TestRunCommandUsesProgressAwareCommander(t *testing.T) {
+	reporter := command.CommandProgressReporterFunc(func(context.Context, command.ProgressUpdate) {})
+	ctx := command.ContextWithCommandProgressReporter(context.Background(), reporter)
+	cmd := &progressAwareCommander{}
+	handler := NewHandler()
+
+	err := RunCommand(ctx, handler, cmd, testMessage{name: "progress"})
+	if err != nil {
+		t.Fatalf("run command failed: %v", err)
+	}
+	if !cmd.calledWithProgress {
+		t.Fatal("expected ExecuteWithProgress to be called")
+	}
+	if cmd.reporter == nil {
+		t.Fatal("expected progress reporter to be passed")
+	}
+}
+
+func TestRunCommandPrefersControlAwareOverProgressAware(t *testing.T) {
+	cmd := &controlAndProgressAwareCommander{}
+	handler := NewHandler()
+
+	err := RunCommand(context.Background(), handler, cmd, testMessage{name: "both"})
+	if err != nil {
+		t.Fatalf("run command failed: %v", err)
+	}
+	if !cmd.calledWithControl {
+		t.Fatal("expected ExecuteWithControl to be called")
+	}
+	if cmd.calledWithProgress {
+		t.Fatal("did not expect ExecuteWithProgress when control-aware path is available")
 	}
 }
 

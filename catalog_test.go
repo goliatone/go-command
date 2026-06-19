@@ -73,12 +73,36 @@ func (catalogCommand) CommandDescriptor() CommandDescriptor {
 	}
 }
 
+func (catalogCommand) CommandProgressDescriptor() CommandProgressDescriptor {
+	return CommandProgressDescriptor{
+		Units: "records",
+		Total: 100,
+		Checkpoints: []CommandProgressCheckpoint{
+			{
+				ID:       "load",
+				Label:    "Load",
+				Order:    1,
+				Metadata: map[string]any{"phase": "input"},
+			},
+		},
+		Metadata: map[string]any{"safe": "yes"},
+	}
+}
+
 type hiddenCatalogCommand struct{}
 
 func (hiddenCatalogCommand) Execute(context.Context, catalogMessage) error { return nil }
 
 func (hiddenCatalogCommand) Exposure() CommandExposure {
 	return CommandExposure{ExposeInAdmin: false}
+}
+
+type noProgressCatalogCommand struct{}
+
+func (noProgressCatalogCommand) Execute(context.Context, catalogMessage) error { return nil }
+
+func (noProgressCatalogCommand) Exposure() CommandExposure {
+	return CommandExposure{ExposeInAdmin: true}
 }
 
 func TestDescriptorForCommandMergesExposureRPCAndExplicitDescriptor(t *testing.T) {
@@ -100,6 +124,32 @@ func TestDescriptorForCommandMergesExposureRPCAndExplicitDescriptor(t *testing.T
 	require.Len(t, descriptor.Input.Fields, 1)
 	require.Equal(t, "catalog.entities", descriptor.Input.Fields[0].OptionSource.ID)
 	require.True(t, descriptor.Result.Inline)
+	require.NotNil(t, descriptor.Progress)
+	require.Equal(t, "records", descriptor.Progress.Units)
+	require.Equal(t, int64(100), descriptor.Progress.Total)
+	require.Equal(t, "load", descriptor.Progress.Checkpoints[0].ID)
+}
+
+func TestDescriptorForCommandOmitsProgressWhenCommandDoesNotDescribeProgress(t *testing.T) {
+	meta := MessageTypeForCommand(noProgressCatalogCommand{})
+	descriptor, ok := DescriptorForCommand(noProgressCatalogCommand{}, meta)
+	require.True(t, ok)
+	require.Nil(t, descriptor.Progress)
+}
+
+func TestDescriptorForCommandClonesProgressDescriptor(t *testing.T) {
+	meta := MessageTypeForCommand(catalogCommand{})
+	descriptor, ok := DescriptorForCommand(catalogCommand{}, meta)
+	require.True(t, ok)
+	require.NotNil(t, descriptor.Progress)
+
+	descriptor.Progress.Metadata["safe"] = "mutated"
+	descriptor.Progress.Checkpoints[0].Metadata["phase"] = "mutated"
+
+	descriptor, ok = DescriptorForCommand(catalogCommand{}, meta)
+	require.True(t, ok)
+	require.Equal(t, "yes", descriptor.Progress.Metadata["safe"])
+	require.Equal(t, "input", descriptor.Progress.Checkpoints[0].Metadata["phase"])
 }
 
 func TestRegistryCollectsCatalogDescriptorsFromExposedCommands(t *testing.T) {
@@ -194,6 +244,15 @@ func TestRegistryCatalogDescriptorClonesNestedMetadata(t *testing.T) {
 				},
 			},
 		},
+		Progress: &CommandProgressDescriptor{
+			Metadata: map[string]any{
+				"nested": map[string]any{"safe": true},
+			},
+			Checkpoints: []CommandProgressCheckpoint{{
+				ID:       "queued",
+				Metadata: map[string]any{"phase": "accept"},
+			}},
+		},
 	}))
 
 	descriptor, ok := registry.CatalogDescriptor("external.command")
@@ -202,6 +261,8 @@ func TestRegistryCatalogDescriptorClonesNestedMetadata(t *testing.T) {
 	descriptor.Input.JSONSchema["properties"].(map[string]any)["entity_id"].(map[string]any)["type"] = "integer"
 	descriptor.Input.Fields[0].OptionSource.Params["filters"].(map[string]any)["status"] = "mutated"
 	descriptor.Result.ResultSchema["properties"].(map[string]any)["count"].(map[string]any)["type"] = "string"
+	descriptor.Progress.Metadata["nested"].(map[string]any)["safe"] = false
+	descriptor.Progress.Checkpoints[0].Metadata["phase"] = "mutated"
 
 	descriptor, ok = registry.CatalogDescriptor("external.command")
 	require.True(t, ok)
@@ -209,6 +270,8 @@ func TestRegistryCatalogDescriptorClonesNestedMetadata(t *testing.T) {
 	require.Equal(t, "string", descriptor.Input.JSONSchema["properties"].(map[string]any)["entity_id"].(map[string]any)["type"])
 	require.Equal(t, "active", descriptor.Input.Fields[0].OptionSource.Params["filters"].(map[string]any)["status"])
 	require.Equal(t, "integer", descriptor.Result.ResultSchema["properties"].(map[string]any)["count"].(map[string]any)["type"])
+	require.Equal(t, true, descriptor.Progress.Metadata["nested"].(map[string]any)["safe"])
+	require.Equal(t, "accept", descriptor.Progress.Checkpoints[0].Metadata["phase"])
 }
 
 func TestCommandInputSchemaFromMessageUsesStablePayloadPaths(t *testing.T) {
