@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -257,9 +258,7 @@ func commandRunEventFromContext(
 		event.Metadata = command.CloneCommandRunMetadata(run.Metadata)
 	} else if len(run.Metadata) > 0 {
 		merged := command.CloneCommandRunMetadata(run.Metadata)
-		for key, value := range event.Metadata {
-			merged[key] = value
-		}
+		maps.Copy(merged, event.Metadata)
 		event.Metadata = merged
 	} else {
 		event.Metadata = command.CloneCommandRunMetadata(event.Metadata)
