@@ -430,7 +430,24 @@ func cloneCommandDescriptor(in CommandDescriptor) CommandDescriptor {
 	out.Result.ResultSchema = cloneCatalogMap(in.Result.ResultSchema)
 	out.Result.RedactionHints = cloneCatalogStrings(in.Result.RedactionHints)
 	out.Result.DisplayHints = cloneCatalogMap(in.Result.DisplayHints)
+	out.Progress = cloneCommandProgressDescriptorPtr(in.Progress)
 	return out
+}
+
+func cloneCommandProgressDescriptorPtr(in *CommandProgressDescriptor) *CommandProgressDescriptor {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Metadata = cloneCatalogMap(in.Metadata)
+	if len(in.Checkpoints) > 0 {
+		out.Checkpoints = make([]CommandProgressCheckpoint, len(in.Checkpoints))
+		for i, checkpoint := range in.Checkpoints {
+			out.Checkpoints[i] = checkpoint
+			out.Checkpoints[i].Metadata = cloneCatalogMap(checkpoint.Metadata)
+		}
+	}
+	return &out
 }
 
 func cloneCommandInputSchema(in CommandInputSchema) CommandInputSchema {
