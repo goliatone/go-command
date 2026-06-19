@@ -1,0 +1,272 @@
+package dispatcher
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/goliatone/go-command"
+)
+
+var (
+	commandRunObserversMu     sync.RWMutex
+	commandRunObservers       = map[uint64]command.CommandRunObserver{}
+	commandRunObserverNextID  uint64
+	commandRunObserverEmitted atomic.Uint64
+	commandRunIDSeq           atomic.Uint64
+)
+
+type commandRunObserverSubscription struct {
+	id   uint64
+	once sync.Once
+}
+
+func (s *commandRunObserverSubscription) Unsubscribe() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() {
+		commandRunObserversMu.Lock()
+		defer commandRunObserversMu.Unlock()
+		delete(commandRunObservers, s.id)
+	})
+}
+
+type noopSubscription struct{}
+
+func (noopSubscription) Unsubscribe() {}
+
+// AddCommandRunObserver registers a command run observer and returns an
+// idempotent unsubscribe handle.
+func AddCommandRunObserver(observer command.CommandRunObserver) Subscription {
+	if observer == nil {
+		return noopSubscription{}
+	}
+
+	id := atomic.AddUint64(&commandRunObserverNextID, 1)
+
+	commandRunObserversMu.Lock()
+	defer commandRunObserversMu.Unlock()
+	commandRunObservers[id] = observer
+	return &commandRunObserverSubscription{id: id}
+}
+
+// SetCommandRunObservers replaces all registered command run observers.
+func SetCommandRunObservers(observers ...command.CommandRunObserver) {
+	commandRunObserversMu.Lock()
+	defer commandRunObserversMu.Unlock()
+
+	commandRunObservers = map[uint64]command.CommandRunObserver{}
+	for _, observer := range observers {
+		if observer == nil {
+			continue
+		}
+		id := atomic.AddUint64(&commandRunObserverNextID, 1)
+		commandRunObservers[id] = observer
+	}
+}
+
+// CommandRunObservers returns a snapshot of currently registered observers.
+func CommandRunObservers() []command.CommandRunObserver {
+	commandRunObserversMu.RLock()
+	defer commandRunObserversMu.RUnlock()
+
+	if len(commandRunObservers) == 0 {
+		return nil
+	}
+	out := make([]command.CommandRunObserver, 0, len(commandRunObservers))
+	for _, observer := range commandRunObservers {
+		out = append(out, observer)
+	}
+	return out
+}
+
+func emitCommandRunEvent(ctx context.Context, event command.CommandRunEvent) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	observers := CommandRunObservers()
+	if len(observers) == 0 {
+		return
+	}
+
+	for _, observer := range observers {
+		if observer == nil {
+			continue
+		}
+		func() {
+			defer func() {
+				_ = recover()
+			}()
+			_ = observer.OnCommandRunEvent(ctx, event.Clone())
+			commandRunObserverEmitted.Add(1)
+		}()
+	}
+}
+
+func resetCommandRunObservers() {
+	commandRunObserversMu.Lock()
+	defer commandRunObserversMu.Unlock()
+	commandRunObservers = map[uint64]command.CommandRunObserver{}
+}
+
+type commandRunProgressReporter struct {
+	run command.DispatchRunContext
+}
+
+type observedExecutor struct {
+	inner CommandExecutor
+}
+
+// ObserveExecutor wraps a queued executor with acceptance lifecycle events.
+func ObserveExecutor(exec CommandExecutor) CommandExecutor {
+	if exec == nil {
+		return nil
+	}
+	return observedExecutor{inner: exec}
+}
+
+// RegisterObservedExecutor registers a queued executor with acceptance
+// lifecycle instrumentation. Inline execution is already observed directly.
+func RegisterObservedExecutor(mode command.ExecutionMode, exec CommandExecutor) error {
+	return RegisterExecutor(mode, ObserveExecutor(exec))
+}
+
+func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
+	run := command.DispatchRunContext{
+		RunID:          newCommandRunID(),
+		CommandID:      commandID,
+		ExecutionMode:  command.NormalizeExecutionMode(opts.Mode),
+		CorrelationID:  opts.CorrelationID,
+		IdempotencyKey: opts.IdempotencyKey,
+		Metadata:       command.CloneCommandRunMetadata(opts.Metadata),
+	}
+	if run.ExecutionMode == "" {
+		run.ExecutionMode = command.ExecutionModeQueued
+	}
+
+	execCtx := command.ContextWithDispatchRun(ctx, run)
+	receipt, err := e.inner.Execute(execCtx, msg, commandID, opts)
+	if err != nil {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Error: err,
+		}))
+		return receipt, err
+	}
+
+	receipt = normalizeDispatchReceipt(receipt, run.ExecutionMode, commandID, opts.CorrelationID)
+	run.DispatchID = receipt.DispatchID
+	if !receipt.Accepted {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{}))
+		return receipt, nil
+	}
+	if err := command.ValidateDispatchReceipt(receipt); err != nil {
+		return receipt, err
+	}
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSubmitted, time.Now(), command.CommandRunEvent{}))
+	return receipt, nil
+}
+
+// RunObservedCommand wraps delayed queued command execution with lifecycle and
+// progress events using a run context captured at acceptance time.
+func RunObservedCommand(ctx context.Context, run command.DispatchRunContext, fn func(context.Context) error) error {
+	if strings.TrimSpace(run.RunID) == "" {
+		return fmt.Errorf("command run id is required")
+	}
+	if strings.TrimSpace(run.CommandID) == "" {
+		return fmt.Errorf("command id is required")
+	}
+	if fn == nil {
+		return fmt.Errorf("observed command function is required")
+	}
+	run.ExecutionMode = command.NormalizeExecutionMode(run.ExecutionMode)
+	if run.ExecutionMode == "" {
+		run.ExecutionMode = command.ExecutionModeQueued
+	}
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now()
+	}
+	run.Metadata = command.CloneCommandRunMetadata(run.Metadata)
+
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, run.StartedAt, command.CommandRunEvent{}))
+
+	runCtx := command.ContextWithDispatchRun(ctx, run)
+	runCtx = command.ContextWithCommandRunAttemptTracker(runCtx)
+	runCtx = command.ContextWithCommandProgressReporter(runCtx, commandRunProgressReporter{run: run})
+
+	err := fn(runCtx)
+	if attempt, ok := command.CommandRunAttemptFromContext(runCtx); ok {
+		run.Attempt = attempt.Attempt
+		run.MaxAttempts = attempt.MaxAttempts
+	}
+	if err != nil {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+			Duration: time.Since(run.StartedAt),
+			Error:    err,
+		}))
+		return err
+	}
+
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+		Duration: time.Since(run.StartedAt),
+	}))
+	return nil
+}
+
+func (r commandRunProgressReporter) ReportProgress(ctx context.Context, update command.ProgressUpdate) {
+	phase := command.CommandRunPhaseProgress
+	if update.Checkpoint != "" {
+		phase = command.CommandRunPhaseCheckpoint
+	}
+	run := r.run
+	if attempt, ok := command.CommandRunAttemptFromContext(ctx); ok {
+		run.Attempt = attempt.Attempt
+		run.MaxAttempts = attempt.MaxAttempts
+	}
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, phase, time.Now(), command.CommandRunEvent{
+		Checkpoint: update.Checkpoint,
+		Message:    update.Message,
+		Current:    update.Current,
+		Total:      update.Total,
+		Metadata:   update.Metadata,
+	}))
+}
+
+func commandRunEventFromContext(
+	run command.DispatchRunContext,
+	phase command.CommandRunPhase,
+	occurredAt time.Time,
+	event command.CommandRunEvent,
+) command.CommandRunEvent {
+	event.RunID = run.RunID
+	event.DispatchID = run.DispatchID
+	event.CommandID = run.CommandID
+	event.Handler = run.Handler
+	event.ExecutionMode = run.ExecutionMode
+	event.Phase = phase
+	event.CorrelationID = run.CorrelationID
+	event.IdempotencyKey = run.IdempotencyKey
+	event.Attempt = run.Attempt
+	event.MaxAttempts = run.MaxAttempts
+	event.StartedAt = run.StartedAt
+	event.OccurredAt = occurredAt
+	if len(event.Metadata) == 0 {
+		event.Metadata = command.CloneCommandRunMetadata(run.Metadata)
+	} else if len(run.Metadata) > 0 {
+		merged := command.CloneCommandRunMetadata(run.Metadata)
+		for key, value := range event.Metadata {
+			merged[key] = value
+		}
+		event.Metadata = merged
+	} else {
+		event.Metadata = command.CloneCommandRunMetadata(event.Metadata)
+	}
+	return event
+}
+
+func newCommandRunID() string {
+	return fmt.Sprintf("run-%d-%d", time.Now().UnixNano(), commandRunIDSeq.Add(1))
+}
