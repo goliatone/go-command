@@ -2,9 +2,11 @@ package dispatcher
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
@@ -86,6 +88,7 @@ func Reset() {
 	testQueryMux = nil
 	resetSubscriptionCounters()
 	resetDispatchRoutingState()
+	resetCommandRunObservers()
 }
 
 // Subscribe a CommandHandler for a particular message type T.
@@ -230,16 +233,23 @@ type commandWrapper[T any] struct {
 }
 
 type dispatchRunnable interface {
-	run(ctx context.Context, msg any) error
 	handler() any
 }
 
-func (w *commandWrapper[T]) run(ctx context.Context, msg any) error {
+type dispatchRunnableWithOutcome interface {
+	run(ctx context.Context, msg any, execOpts ...runner.RunExecutionOption) (runner.RunOutcome, error)
+}
+
+type legacyDispatchRunnable interface {
+	run(ctx context.Context, msg any) error
+}
+
+func (w *commandWrapper[T]) run(ctx context.Context, msg any, execOpts ...runner.RunExecutionOption) (runner.RunOutcome, error) {
 	typedMsg, ok := msg.(T)
 	if !ok {
-		return fmt.Errorf("dispatcher message type mismatch for handler %T", w.cmd)
+		return runner.RunOutcome{}, fmt.Errorf("dispatcher message type mismatch for handler %T", w.cmd)
 	}
-	return runner.RunCommand(ctx, w.runner, w.cmd, typedMsg)
+	return runner.RunCommandWithOutcome(ctx, w.runner, w.cmd, typedMsg, execOpts...)
 }
 
 func (w *commandWrapper[T]) handler() any {
@@ -297,6 +307,14 @@ func commandHandlerCount(commandID string) int {
 }
 
 func dispatchInline(ctx context.Context, msg any, messageType string) error {
+	return dispatchInlineWithRunContext(ctx, msg, command.DispatchRunContext{
+		CommandID:     messageType,
+		ExecutionMode: command.ExecutionModeInline,
+	})
+}
+
+func dispatchInlineWithRunContext(ctx context.Context, msg any, runtime command.DispatchRunContext) error {
+	messageType := runtime.CommandID
 	handlers, err := getDispatchHandlers(messageType)
 	if err != nil {
 		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
@@ -313,16 +331,107 @@ func dispatchInline(ctx context.Context, msg any, messageType string) error {
 
 	var errs error
 	for _, h := range handlers {
-		if err := h.run(ctx, msg); err != nil {
+		run := runtime
+		run.RunID = newCommandRunID()
+		run.Handler = fmt.Sprintf("%T", h.handler())
+		run.ExecutionMode = command.NormalizeExecutionMode(run.ExecutionMode)
+		if run.ExecutionMode == "" {
+			run.ExecutionMode = command.ExecutionModeInline
+		}
+		run.Metadata = command.CloneCommandRunMetadata(runtime.Metadata)
+
+		handlerCtx := command.ContextWithCommandRunAttemptTracker(ctx)
+		startedAt := time.Time{}
+		outcome, err := runDispatchRunnable(
+			h,
+			handlerCtx,
+			msg,
+			runner.WithRunStartHook(func(startCtx context.Context) context.Context {
+				startedAt = time.Now()
+				run.StartedAt = startedAt
+				if attempt, ok := command.CommandRunAttemptFromContext(startCtx); ok {
+					run.Attempt = attempt.Attempt
+					run.MaxAttempts = attempt.MaxAttempts
+				}
+				startCtx = command.ContextWithDispatchRun(startCtx, run)
+				startCtx = command.ContextWithCommandProgressReporter(startCtx, commandRunProgressReporter{run: run})
+				emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
+				return startCtx
+			}),
+		)
+		if !outcome.Executed {
+			if err != nil {
+				wrappedErr := wrapHandlerError(err, msg, h.handler())
+				if ExitOnErr {
+					return wrappedErr
+				}
+				errs = errors.Join(errs, wrappedErr)
+			}
+			continue
+		}
+		if err != nil {
+			if attempt, ok := command.CommandRunAttemptFromContext(handlerCtx); ok {
+				run.Attempt = attempt.Attempt
+				run.MaxAttempts = attempt.MaxAttempts
+			}
+			emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+				Duration: time.Since(startedAt),
+				Error:    err,
+			}))
 			wrappedErr := wrapHandlerError(err, msg, h.handler())
 			if ExitOnErr {
 				return wrappedErr
 			}
 			errs = errors.Join(errs, wrappedErr)
+			continue
 		}
+		if attempt, ok := command.CommandRunAttemptFromContext(handlerCtx); ok {
+			run.Attempt = attempt.Attempt
+			run.MaxAttempts = attempt.MaxAttempts
+		}
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+			Duration: time.Since(startedAt),
+		}))
 	}
 
 	return errs
+}
+
+func terminalCommandRunPhase(err error) command.CommandRunPhase {
+	if err != nil && (stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded)) {
+		return command.CommandRunPhaseCanceled
+	}
+	return command.CommandRunPhaseFailed
+}
+
+func runDispatchRunnable(
+	h dispatchRunnable,
+	ctx context.Context,
+	msg any,
+	execOpts ...runner.RunExecutionOption,
+) (runner.RunOutcome, error) {
+	if h == nil {
+		return runner.RunOutcome{}, fmt.Errorf("handler cannot be nil")
+	}
+	if withOutcome, ok := h.(dispatchRunnableWithOutcome); ok {
+		return withOutcome.run(ctx, msg, execOpts...)
+	}
+	legacy, ok := h.(legacyDispatchRunnable)
+	if !ok {
+		return runner.RunOutcome{}, fmt.Errorf("handler does not implement runnable command handler")
+	}
+	hooks := runner.RunExecutionHooks{}
+	for _, opt := range execOpts {
+		if opt != nil {
+			opt(&hooks)
+		}
+	}
+	if hooks.OnStart != nil {
+		if startedCtx := hooks.OnStart(ctx); startedCtx != nil {
+			ctx = startedCtx
+		}
+	}
+	return runner.RunOutcome{Executed: true}, legacy.run(ctx, msg)
 }
 
 func getDispatchHandlers(messageType string) ([]dispatchRunnable, error) {

@@ -28,7 +28,13 @@ type ModeResolver interface {
 type inlineCommandExecutor struct{}
 
 func (e inlineCommandExecutor) Execute(ctx context.Context, msg any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
-	if err := dispatchInline(ctx, msg, commandID); err != nil {
+	if err := dispatchInlineWithRunContext(ctx, msg, command.DispatchRunContext{
+		CommandID:      commandID,
+		ExecutionMode:  command.ExecutionModeInline,
+		CorrelationID:  strings.TrimSpace(opts.CorrelationID),
+		IdempotencyKey: strings.TrimSpace(opts.IdempotencyKey),
+		Metadata:       mergeDispatchMetadata(opts.Metadata, nil),
+	}); err != nil {
 		return command.DispatchReceipt{}, err
 	}
 	return command.DispatchReceipt{
