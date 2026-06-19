@@ -1,5 +1,33 @@
 # Changelog
 
+# [0.22.0](https://github.com/goliatone/go-command/compare/v0.21.0...v0.22.0) - (2026-06-19)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Code quality ([66db4f2](https://github.com/goliatone/go-command/commit/66db4f20b190d1c9b8b27f4308c5d58cb3657d69))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.22.0 ([c82505e](https://github.com/goliatone/go-command/commit/c82505e3f6fe2a189c4464901a7be55f7d90359e))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Command progress descriptor ([9bb4ff5](https://github.com/goliatone/go-command/commit/9bb4ff563474eb43283e04c9104de6aca82ccfad))  - (goliatone)
+- Dispatcher with context include progress ([e15c419](https://github.com/goliatone/go-command/commit/e15c419f1ba400a2415e086c299174af8abaf297))  - (goliatone)
+- Runner handler integrate progress ([a6067ac](https://github.com/goliatone/go-command/commit/a6067ac6d0df0d29ff3f28a99420df6e26aa2db5))  - (goliatone)
+- Dispatcher progress implementation ([4b08927](https://github.com/goliatone/go-command/commit/4b08927576fa999426251936b4b002ef81c48a9f))  - (goliatone)
+- Progress support in commands ([722f0c6](https://github.com/goliatone/go-command/commit/722f0c64f4cb373278d509952daf4edcceb245ae))  - (goliatone)
+- Setup linter ([7d209a2](https://github.com/goliatone/go-command/commit/7d209a2f2dc07cc47a910d4e4a4a4e785b90ea40))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.21.0 ([0175222](https://github.com/goliatone/go-command/commit/0175222f0a763b38c87ebbe700682d1dd78919e1))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([94f33fa](https://github.com/goliatone/go-command/commit/94f33fa8df01bdefa023475a5ae048e5b8725a82))  - (goliatone)
+- Update tasks ([c3bd439](https://github.com/goliatone/go-command/commit/c3bd4399a837fdbd9dd451e76129fb0388a06583))  - (goliatone)
+
 # [0.21.0](https://github.com/goliatone/go-command/compare/v0.20.0...v0.21.0) - (2026-06-17)
 
 ## <!-- 13 -->📦 Bumps
