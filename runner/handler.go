@@ -51,6 +51,31 @@ type Handler struct {
 	panicContextBuilder func(ctx context.Context, reqCtx map[string]any)
 }
 
+type RunSkipReason string
+
+const (
+	RunSkipReasonRunOnce RunSkipReason = "run_once"
+	RunSkipReasonMaxRuns RunSkipReason = "max_runs"
+)
+
+type RunOutcome struct {
+	Executed   bool
+	Skipped    bool
+	SkipReason RunSkipReason
+}
+
+type RunExecutionHooks struct {
+	OnStart func(context.Context) context.Context
+}
+
+type RunExecutionOption func(*RunExecutionHooks)
+
+func WithRunStartHook(fn func(context.Context) context.Context) RunExecutionOption {
+	return func(hooks *RunExecutionHooks) {
+		hooks.OnStart = fn
+	}
+}
+
 // NewHandler constructs a Runner from various options, applying defaults if unset.
 func NewHandler(opts ...Option) *Handler {
 	r := &Handler{
@@ -103,16 +128,21 @@ func (h *Handler) execute(ctx context.Context, fn func(context.Context) error) e
 }
 
 func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error {
+	_, err := h.RunWithOutcome(ctx, fn)
+	return err
+}
+
+func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) error, execOpts ...RunExecutionOption) (RunOutcome, error) {
 	h.mu.Lock()
 
 	if h.runOnce && h.successfulRuns >= 1 {
 		h.mu.Unlock()
-		return nil
+		return RunOutcome{Skipped: true, SkipReason: RunSkipReasonRunOnce}, nil
 	}
 
 	if h.successfulRuns >= h.maxRuns && h.maxRuns > 0 {
 		h.mu.Unlock()
-		return nil
+		return RunOutcome{Skipped: true, SkipReason: RunSkipReasonMaxRuns}, nil
 	}
 
 	maxRetries := h.maxRetries
@@ -120,6 +150,13 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	control := h.control
 	middleware := h.middleware
 	h.mu.Unlock()
+
+	hooks := RunExecutionHooks{}
+	for _, opt := range execOpts {
+		if opt != nil {
+			opt(&hooks)
+		}
+	}
 
 	if control == nil {
 		control = noopExecutionControl{}
@@ -136,10 +173,17 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	var finalErr error
 	interruptedByControl := false
 	executionStart := time.Now()
+	outcome := RunOutcome{}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		attemptInfo := command.CommandRunAttempt{
+			Attempt:     attempt + 1,
+			MaxAttempts: maxRetries + 1,
+		}
+		command.RecordCommandRunAttempt(ctx, attemptInfo)
+
 		if err := h.waitIfPausedOrCanceled(ctx, control); err != nil {
-			return errors.Wrap(err, errors.CategoryExternal, "execution paused/canceled").
+			return outcome, errors.Wrap(err, errors.CategoryExternal, "execution paused/canceled").
 				WithTextCode("HANDLER_EXECUTION_CONTROLLED").
 				WithMetadata(map[string]any{
 					"attempt":     attempt + 1,
@@ -148,7 +192,7 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 		}
 
 		if ctx.Err() != nil {
-			return errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled during handler execution").
+			return outcome, errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled during handler execution").
 				WithTextCode("HANDLER_CONTEXT_CANCELLED").
 				WithMetadata(map[string]any{
 					"attempt":         attempt + 1,
@@ -160,7 +204,17 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 				})
 		}
 		attemptStart := time.Now()
-		err := h.execute(ctx, wrapped)
+		attemptCtx := command.ContextWithCommandRunAttempt(ctx, attemptInfo)
+		if !outcome.Executed {
+			outcome.Executed = true
+			if hooks.OnStart != nil {
+				if startedCtx := hooks.OnStart(attemptCtx); startedCtx != nil {
+					attemptCtx = startedCtx
+					ctx = startedCtx
+				}
+			}
+		}
+		err := h.execute(attemptCtx, wrapped)
 		attemptDuration := time.Since(attemptStart)
 
 		if err == nil {
@@ -213,7 +267,7 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 	} else {
 		if interruptedByControl {
 			h.handleError(finalErr)
-			return finalErr
+			return outcome, finalErr
 		}
 
 		finalErr = errors.Wrap(
@@ -239,7 +293,7 @@ func (h *Handler) Run(ctx context.Context, fn func(context.Context) error) error
 		h.done()
 	}
 
-	return finalErr
+	return outcome, finalErr
 }
 
 func (h *Handler) shouldRetryError(err error, attempt int, maxRetries int) bool {
@@ -352,15 +406,30 @@ func (h *Handler) contextWithSettings(parent context.Context) (context.Context, 
 }
 
 func RunCommand[T any](ctx context.Context, h *Handler, c command.Commander[T], msg T) error {
+	_, err := RunCommandWithOutcome(ctx, h, c, msg)
+	return err
+}
+
+func RunCommandWithOutcome[T any](
+	ctx context.Context,
+	h *Handler,
+	c command.Commander[T],
+	msg T,
+	execOpts ...RunExecutionOption,
+) (RunOutcome, error) {
 	if h == nil {
-		return fmt.Errorf("handler cannot be nil")
+		return RunOutcome{}, fmt.Errorf("handler cannot be nil")
 	}
-	return h.Run(ctx, func(ctx context.Context) error {
+	return h.RunWithOutcome(ctx, func(ctx context.Context) error {
 		if controlled, ok := any(c).(ControlAwareCommander[T]); ok {
 			return controlled.ExecuteWithControl(ctx, msg, h.getControl())
 		}
+		if progressAware, ok := any(c).(command.ProgressAwareCommander[T]); ok {
+			reporter, _ := command.CommandProgressReporterFromContext(ctx)
+			return progressAware.ExecuteWithProgress(ctx, msg, reporter)
+		}
 		return c.Execute(ctx, msg)
-	})
+	}, execOpts...)
 }
 
 func RunQuery[T any, R any](ctx context.Context, h *Handler, q command.Querier[T, R], msg T) (R, error) {
