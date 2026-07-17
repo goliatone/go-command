@@ -33,6 +33,7 @@ type Registry struct {
 	resolverOrder      []string
 	descriptors        map[string]CommandDescriptor
 	descriptorOrder    []string
+	registrations      *MessageRegistrationIndex
 }
 
 func NewRegistry() *Registry {
@@ -42,6 +43,7 @@ func NewRegistry() *Registry {
 		resolvers:     make(map[string]Resolver),
 		resolverOrder: make([]string, 0, 2),
 		descriptors:   make(map[string]CommandDescriptor),
+		registrations: &MessageRegistrationIndex{},
 	}
 
 	_ = registry.AddResolver("cli", func(cmd any, _ CommandMeta, r *Registry) error {
@@ -142,6 +144,23 @@ func (r *Registry) Initialize() error {
 	r.mu.Unlock()
 
 	var errs error
+	registrations := make([]MessageRegistration, 0, len(commands))
+	var registrationErrs error
+	for _, item := range commands {
+		discovered, err := MessageRegistrationsForCommand(item.cmd)
+		if err != nil {
+			registrationErrs = errors.Join(registrationErrs, err)
+			continue
+		}
+		registrations = append(registrations, discovered...)
+	}
+	if registrationErrs == nil {
+		if _, err := buildRegistrationSnapshot(registrations); err != nil {
+			registrationErrs = err
+		}
+	}
+	errs = errors.Join(errs, registrationErrs)
+
 	for _, item := range commands {
 		for _, key := range resolverOrder {
 			resolver := resolvers[key]
@@ -161,6 +180,12 @@ func (r *Registry) Initialize() error {
 		opts = builtOpts
 	}
 
+	if errs == nil {
+		if err := r.registrations.Replace(registrations); err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if opts != nil {
@@ -170,6 +195,27 @@ func (r *Registry) Initialize() error {
 	r.initializing = false
 
 	return errs
+}
+
+func (r *Registry) RegistrationByID(kind HandlerKind, stableID string) (MessageRegistration, bool) {
+	if r == nil || r.registrations == nil {
+		return nil, false
+	}
+	return r.registrations.RegistrationByID(kind, stableID)
+}
+
+func (r *Registry) RegistrationByMessageType(kind HandlerKind, messageType string) (MessageRegistration, bool) {
+	if r == nil || r.registrations == nil {
+		return nil, false
+	}
+	return r.registrations.RegistrationByMessageType(kind, messageType)
+}
+
+func (r *Registry) Registrations() []MessageRegistration {
+	if r == nil || r.registrations == nil {
+		return nil
+	}
+	return r.registrations.Registrations()
 }
 
 func (r *Registry) registerWithCron(cronCmd CronCommand) error {
