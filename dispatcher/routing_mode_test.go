@@ -136,7 +136,7 @@ func TestSetCommandRoutingModeRejectsInstalledRuntimeSubscriptions(t *testing.T)
 }
 
 func TestConcurrentRoutingModeChangeNeverOrphansSubscription(t *testing.T) {
-	for iteration := 0; iteration < 100; iteration++ {
+	for iteration := range 100 {
 		Reset()
 		start := make(chan struct{})
 		var wg sync.WaitGroup
