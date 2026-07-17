@@ -129,11 +129,11 @@ func TestMessageRegistrationIndexReturnsCopiedSlicesAndSupportsConcurrentReads(t
 	assert.NotNil(t, index.Registrations()[0])
 
 	var wg sync.WaitGroup
-	for n := 0; n < 32; n++ {
+	for range 32 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for iteration := 0; iteration < 100; iteration++ {
+			for range 100 {
 				registration, ok := index.RegistrationByID(HandlerKindCommand, "one")
 				assert.True(t, ok)
 				assert.Equal(t, "one", registration.MessageType())

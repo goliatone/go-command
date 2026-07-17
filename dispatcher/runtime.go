@@ -140,6 +140,30 @@ func (r *Runtime) replaceMuxes(commandMux, queryMux *router.Mux) {
 	r.muxMu.Unlock()
 }
 
+// replaceMuxesIfUnsubscribed atomically verifies subscription ownership and
+// replaces both muxes. Subscription helpers hold muxMu for the complete add,
+// so a successful replacement cannot orphan a concurrently added handler.
+func (r *Runtime) replaceMuxesIfUnsubscribed(commandMux, queryMux *router.Mux) bool {
+	if r == nil {
+		return false
+	}
+	if commandMux == nil {
+		commandMux = newMuxForRouting(routingConfig{mode: RoutingModeExact})
+	}
+	if queryMux == nil {
+		queryMux = newMuxForRouting(routingConfig{mode: RoutingModeExact})
+	}
+	r.muxMu.Lock()
+	defer r.muxMu.Unlock()
+	if r.commandSubscriptions.Load() > 0 || r.querySubscriptions.Load() > 0 {
+		return false
+	}
+	r.commandMux = commandMux
+	r.queryMux = queryMux
+	r.subscriptionEpoch.Add(1)
+	return true
+}
+
 // Reset clears subscriptions, executors, and routed configuration owned by one
 // runtime. Existing subscription handles remain safe and idempotent.
 func (r *Runtime) Reset() {

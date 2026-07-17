@@ -127,7 +127,7 @@ func TestConcurrentProviderPolicyReplacementAndDispatch(t *testing.T) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			_, err := runtime.Dispatch(context.Background(), command.HandlerKindCommand, dynamicCommandMessage{}, command.DispatchOptions{})
 			if err != nil {
 				errorsCh <- err
@@ -136,7 +136,7 @@ func TestConcurrentProviderPolicyReplacementAndDispatch(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			policy := local
 			if i%2 == 0 {
 				policy = remotePolicy
@@ -148,7 +148,7 @@ func TestConcurrentProviderPolicyReplacementAndDispatch(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			if err := runtime.AttachRegistrationProvider(provider); err != nil {
 				errorsCh <- err
 			}

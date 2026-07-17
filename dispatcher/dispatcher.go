@@ -95,12 +95,19 @@ func Reset() {
 // TODO: should this return an error?!
 func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
 	runtime := defaultRuntimeInstance()
-	sub, err := subscribeCommandToMux(runtime, getCommandMux(), cmd, runnerOpts...)
+	testMuxMu.RLock()
+	mux := testCommandMux
+	if mux == nil {
+		mux = runtime.commandMuxSnapshot()
+	}
+	sub, err := subscribeCommandToMux(runtime, mux, cmd, runnerOpts...)
 	if err != nil || sub == nil {
+		testMuxMu.RUnlock()
 		return nil
 	}
 	epoch := legacySubscriptionEpoch.Load()
 	atomic.AddInt64(&commandSubscriptionCount, 1)
+	testMuxMu.RUnlock()
 	return &trackedSubscription{
 		inner: sub,
 		onUnsubscribe: func() {
@@ -119,12 +126,19 @@ func SubscribeCommandFunc[T any](handler command.CommandFunc[T], runnerOpts ...r
 // Subscribe a QueryHandler for a particular message type T, R.
 func SubscribeQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) Subscription {
 	runtime := defaultRuntimeInstance()
-	sub, err := subscribeQueryToMux(runtime, getQueryMux(), qry, runnerOpts...)
+	testMuxMu.RLock()
+	mux := testQueryMux
+	if mux == nil {
+		mux = runtime.queryMuxSnapshot()
+	}
+	sub, err := subscribeQueryToMux(runtime, mux, qry, runnerOpts...)
 	if err != nil || sub == nil {
+		testMuxMu.RUnlock()
 		return nil
 	}
 	epoch := legacySubscriptionEpoch.Load()
 	atomic.AddInt64(&querySubscriptionCount, 1)
+	testMuxMu.RUnlock()
 	return &trackedSubscription{
 		inner: sub,
 		onUnsubscribe: func() {

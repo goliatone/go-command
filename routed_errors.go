@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 
@@ -81,9 +82,7 @@ func NewPlacementResolutionError(reg MessageRegistration, source error) *errors.
 	}
 	var structured *errors.Error
 	if errors.As(source, &structured) {
-		for key, value := range structured.Metadata {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, structured.Metadata)
 		if structured.TextCode != "" {
 			metadata["source_text_code"] = structured.TextCode
 		}

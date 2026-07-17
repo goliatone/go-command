@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/goliatone/go-command"
@@ -132,4 +133,35 @@ func TestSetCommandRoutingModeRejectsInstalledRuntimeSubscriptions(t *testing.T)
 	err = SetCommandRoutingMode(RoutingModeRich)
 	assertStructuredTextCode(t, err, TextCodeDispatchRoutingLocked)
 	require.NoError(t, DispatchTo(context.Background(), runtime, routingDispatchMessage{}))
+}
+
+func TestConcurrentRoutingModeChangeNeverOrphansSubscription(t *testing.T) {
+	for iteration := 0; iteration < 100; iteration++ {
+		Reset()
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var sub Subscription
+		var modeErr error
+		go func() {
+			defer wg.Done()
+			<-start
+			sub = SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil }))
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			modeErr = SetCommandRoutingMode(RoutingModeRich)
+		}()
+		close(start)
+		wg.Wait()
+
+		require.NotNil(t, sub)
+		if modeErr != nil {
+			assertStructuredTextCode(t, modeErr, TextCodeDispatchRoutingLocked)
+		}
+		require.NoError(t, Dispatch(context.Background(), routingDispatchMessage{}), "iteration %d", iteration)
+		sub.Unsubscribe()
+	}
+	Reset()
 }
