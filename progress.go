@@ -25,30 +25,37 @@ const (
 // CommandRunEvent is the transport-neutral event emitted for command run
 // lifecycle and cooperative progress updates.
 type CommandRunEvent struct {
-	RunID          string
-	DispatchID     string
-	CommandID      string
-	Handler        string
-	ExecutionMode  ExecutionMode
-	Phase          CommandRunPhase
-	Checkpoint     string
-	Message        string
-	Current        int64
-	Total          int64
-	CorrelationID  string
-	IdempotencyKey string
-	Attempt        int
-	MaxAttempts    int
-	OccurredAt     time.Time
-	StartedAt      time.Time
-	Duration       time.Duration
-	Metadata       map[string]any
-	Error          error
+	RunID           string
+	DispatchID      string
+	CommandID       string
+	Handler         string
+	HandlerKind     HandlerKind
+	DispatchTarget  DispatchTarget
+	Route           string
+	ExecutionMode   ExecutionMode
+	Phase           CommandRunPhase
+	Checkpoint      string
+	Message         string
+	Current         int64
+	Total           int64
+	CorrelationID   string
+	IdempotencyKey  string
+	Attempt         int
+	MaxAttempts     int
+	OccurredAt      time.Time
+	StartedAt       time.Time
+	Duration        time.Duration
+	Receipt         DispatchReceipt
+	Provenance      DispatchProvenance
+	FailureCategory string
+	Metadata        map[string]any
+	Error           error
 }
 
 // Clone returns an event copy with isolated metadata.
 func (e CommandRunEvent) Clone() CommandRunEvent {
 	e.Metadata = CloneCommandRunMetadata(e.Metadata)
+	e.Receipt = cloneDispatchReceipt(e.Receipt)
 	return e
 }
 
@@ -173,18 +180,32 @@ type DispatchRunContext struct {
 	DispatchID     string
 	CommandID      string
 	Handler        string
+	HandlerKind    HandlerKind
+	DispatchTarget DispatchTarget
+	Route          string
 	ExecutionMode  ExecutionMode
 	CorrelationID  string
 	IdempotencyKey string
 	Attempt        int
 	MaxAttempts    int
 	StartedAt      time.Time
+	Receipt        DispatchReceipt
+	Provenance     DispatchProvenance
 	Metadata       map[string]any
 }
 
 func (r DispatchRunContext) clone() DispatchRunContext {
 	r.Metadata = CloneCommandRunMetadata(r.Metadata)
+	r.Receipt = cloneDispatchReceipt(r.Receipt)
 	return r
+}
+
+func cloneDispatchReceipt(receipt DispatchReceipt) DispatchReceipt {
+	if receipt.EnqueuedAt != nil {
+		enqueuedAt := *receipt.EnqueuedAt
+		receipt.EnqueuedAt = &enqueuedAt
+	}
+	return receipt
 }
 
 type dispatchRunContextKey struct{}
