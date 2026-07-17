@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.23.1](https://github.com/goliatone/go-command/compare/v0.23.0...v0.23.1) - (2026-07-17)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.23.1 ([69da891](https://github.com/goliatone/go-command/commit/69da891bca652887bb1c4d254aa0732f8ee981fc))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.23.0 ([018bee7](https://github.com/goliatone/go-command/commit/018bee7d8aa6d97627dbaae4f67454ddcda6ce53))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Code quality ([661e285](https://github.com/goliatone/go-command/commit/661e285057c1f117d3306dddc39b5f977bb70ebb))  - (goliatone)
+
 # [0.23.0](https://github.com/goliatone/go-command/compare/v0.22.0...v0.23.0) - (2026-07-17)
 
 ## <!-- 1 -->🐛 Bug Fixes
