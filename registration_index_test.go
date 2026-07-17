@@ -155,6 +155,16 @@ func TestMessageRegistrationIndexPreservesValidatedFactoryBehavior(t *testing.T)
 	assert.Equal(t, "factory-2", first.ID)
 	assert.Equal(t, "factory-3", second.ID)
 	assert.NotSame(t, first, second)
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.NotNil(t, registration.NewMessage())
+		}()
+	}
+	wg.Wait()
 }
 
 func TestRegistryPublishesDualCapabilityRegistrationSnapshot(t *testing.T) {

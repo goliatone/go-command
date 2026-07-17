@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -26,6 +27,7 @@ type immutableMessageRegistration struct {
 	resultType     reflect.Type
 	newMessageType reflect.Type
 	newMessage     func() any
+	factoryMu      sync.Mutex
 }
 
 func (r *immutableMessageRegistration) ID() string {
@@ -53,6 +55,8 @@ func (r *immutableMessageRegistration) NewMessage() any {
 	if r == nil || r.newMessageType == nil || r.newMessage == nil {
 		return nil
 	}
+	r.factoryMu.Lock()
+	defer r.factoryMu.Unlock()
 	message := r.newMessage()
 	if message == nil || reflect.TypeOf(message) != r.newMessageType {
 		return nil
