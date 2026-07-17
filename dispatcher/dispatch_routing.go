@@ -60,6 +60,21 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 		return command.DispatchReceipt{}, err
 	}
 
+	if runtime := defaultRuntimeInstance(); runtime.RegistrationProvider() != nil {
+		resolvedOptions, err := resolveLegacyDispatchOptions(ctx, msg, opts)
+		if err != nil {
+			return command.DispatchReceipt{}, err
+		}
+		outcome, err := runtime.Dispatch(ctx, command.HandlerKindCommand, msg, resolvedOptions)
+		if err != nil {
+			return command.DispatchReceipt{}, err
+		}
+		if err := storePresentDynamicResult(ctx, outcome); err != nil {
+			return command.DispatchReceipt{}, err
+		}
+		return outcome.Receipt, nil
+	}
+
 	commandID := command.GetMessageType(msg)
 	ctxOpts, _ := command.DispatchOptionsFromContext(ctx)
 	mergedOpts := mergeDispatchOptions(ctxOpts, opts)
@@ -134,14 +149,22 @@ func RegisterExecutor(mode command.ExecutionMode, exec CommandExecutor) error {
 	if err := command.ValidateExecutionMode(mode); err != nil {
 		return err
 	}
-	if exec == nil {
+	if isNilCommandExecutor(exec) {
 		return errors.New("executor cannot be nil", errors.CategoryBadInput).
 			WithTextCode("DISPATCH_EXECUTOR_NIL")
 	}
 
 	dispatchRoutingMu.Lock()
-	defer dispatchRoutingMu.Unlock()
 	dispatchExecutors[mode] = exec
+	dispatchRoutingMu.Unlock()
+	if mode != command.ExecutionModeInline {
+		if err := defaultRuntimeInstance().RegisterExecutor(mode, exec); err != nil {
+			dispatchRoutingMu.Lock()
+			delete(dispatchExecutors, mode)
+			dispatchRoutingMu.Unlock()
+			return err
+		}
+	}
 	return nil
 }
 
@@ -154,6 +177,7 @@ func UnregisterExecutor(mode command.ExecutionMode) {
 	dispatchRoutingMu.Lock()
 	defer dispatchRoutingMu.Unlock()
 	delete(dispatchExecutors, mode)
+	defaultRuntimeInstance().UnregisterExecutor(mode)
 }
 
 func ExecutorForMode(mode command.ExecutionMode) (CommandExecutor, bool) {
@@ -345,6 +369,32 @@ func cloneTimePtr(src *time.Time) *time.Time {
 	}
 	dst := *src
 	return &dst
+}
+
+func resolveLegacyDispatchOptions[T any](ctx context.Context, msg T, explicit command.DispatchOptions) (command.DispatchOptions, error) {
+	contextOptions, _ := command.DispatchOptionsFromContext(ctx)
+	merged := mergeDispatchOptions(contextOptions, explicit)
+	resolver := getModeResolver()
+	requiresCanonical, err := shouldUseCanonicalForResolution(explicit.Mode, contextOptions.Mode, resolver != nil)
+	if err != nil {
+		return command.DispatchOptions{}, err
+	}
+	resolveID := command.GetMessageType(msg)
+	if requiresCanonical {
+		resolveID, err = command.CanonicalCommandID(msg)
+		if err != nil {
+			return command.DispatchOptions{}, err
+		}
+	}
+	mode, err := resolveDispatchMode(ctx, resolveID, explicit.Mode, contextOptions.Mode)
+	if err != nil {
+		return command.DispatchOptions{}, err
+	}
+	merged.Mode = mode
+	if err := command.ValidateDispatchOptions(mode, merged); err != nil {
+		return command.DispatchOptions{}, err
+	}
+	return merged, nil
 }
 
 func newDispatchExecutorNotConfiguredError(mode command.ExecutionMode, commandID string) *errors.Error {

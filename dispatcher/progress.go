@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-errors"
 )
 
 var (
@@ -122,10 +123,20 @@ type observedExecutor struct {
 	inner CommandExecutor
 }
 
+type lifecycleObservedExecutor interface {
+	CommandExecutor
+	lifecycleObserved()
+}
+
+func (observedExecutor) lifecycleObserved() {}
+
 // ObserveExecutor wraps a queued executor with acceptance lifecycle events.
 func ObserveExecutor(exec CommandExecutor) CommandExecutor {
-	if exec == nil {
+	if isNilCommandExecutor(exec) {
 		return nil
+	}
+	if _, ok := exec.(lifecycleObservedExecutor); ok {
+		return exec
 	}
 	return observedExecutor{inner: exec}
 }
@@ -137,37 +148,60 @@ func RegisterObservedExecutor(mode command.ExecutionMode, exec CommandExecutor) 
 }
 
 func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
-	run := command.DispatchRunContext{
-		RunID:          newCommandRunID(),
-		CommandID:      commandID,
-		ExecutionMode:  command.NormalizeExecutionMode(opts.Mode),
-		CorrelationID:  opts.CorrelationID,
-		IdempotencyKey: opts.IdempotencyKey,
-		Metadata:       command.CloneCommandRunMetadata(opts.Metadata),
+	run, ok := command.DispatchRunFromContext(ctx)
+	if !ok {
+		run = command.DispatchRunContext{}
+	}
+	if strings.TrimSpace(run.RunID) == "" {
+		run.RunID = newCommandRunID()
+	}
+	if strings.TrimSpace(run.CommandID) == "" {
+		run.CommandID = commandID
+	}
+	if run.ExecutionMode == "" {
+		run.ExecutionMode = command.NormalizeExecutionMode(opts.Mode)
 	}
 	if run.ExecutionMode == "" {
 		run.ExecutionMode = command.ExecutionModeQueued
+	}
+	if run.CorrelationID == "" {
+		run.CorrelationID = opts.CorrelationID
+	}
+	if run.IdempotencyKey == "" {
+		run.IdempotencyKey = opts.IdempotencyKey
+	}
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now()
+	}
+	if len(run.Metadata) == 0 {
+		run.Metadata = command.CloneCommandRunMetadata(opts.Metadata)
 	}
 
 	execCtx := command.ContextWithDispatchRun(ctx, run)
 	receipt, err := e.inner.Execute(execCtx, msg, commandID, opts)
 	if err != nil {
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
-			Error: err,
+			Duration: time.Since(run.StartedAt),
+			Error:    err,
 		}))
 		return receipt, err
 	}
 
 	receipt = normalizeDispatchReceipt(receipt, run.ExecutionMode, commandID, opts.CorrelationID)
 	run.DispatchID = receipt.DispatchID
+	run.Receipt = receipt
 	if !receipt.Accepted {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{}))
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(run.StartedAt)}))
 		return receipt, nil
 	}
 	if err := command.ValidateDispatchReceipt(receipt); err != nil {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Duration: time.Since(run.StartedAt),
+			Error:    err,
+		}))
 		return receipt, err
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSubmitted, time.Now(), command.CommandRunEvent{}))
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSubmitted, time.Now(), command.CommandRunEvent{Duration: time.Since(run.StartedAt)}))
 	return receipt, nil
 }
 
@@ -246,6 +280,9 @@ func commandRunEventFromContext(
 	event.DispatchID = run.DispatchID
 	event.CommandID = run.CommandID
 	event.Handler = run.Handler
+	event.HandlerKind = run.HandlerKind
+	event.DispatchTarget = run.DispatchTarget
+	event.Route = run.Route
 	event.ExecutionMode = run.ExecutionMode
 	event.Phase = phase
 	event.CorrelationID = run.CorrelationID
@@ -253,6 +290,16 @@ func commandRunEventFromContext(
 	event.Attempt = run.Attempt
 	event.MaxAttempts = run.MaxAttempts
 	event.StartedAt = run.StartedAt
+	event.Receipt = run.Receipt
+	event.Provenance = run.Provenance
+	if event.Error != nil && event.FailureCategory == "" {
+		var structured *errors.Error
+		if errors.As(event.Error, &structured) {
+			event.FailureCategory = structured.Category.String()
+		} else {
+			event.FailureCategory = errors.RootCategory(event.Error).String()
+		}
+	}
 	event.OccurredAt = occurredAt
 	if len(event.Metadata) == 0 {
 		event.Metadata = command.CloneCommandRunMetadata(run.Metadata)

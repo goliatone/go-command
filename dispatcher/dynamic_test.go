@@ -208,6 +208,33 @@ func TestRuntimeDynamicQueuedCommandEmitsCompleteLifecycleOnce(t *testing.T) {
 	assert.Equal(t, "corr-queued", event.CorrelationID)
 	assert.False(t, event.StartedAt.IsZero())
 	assert.GreaterOrEqual(t, event.Duration, time.Duration(0))
+	assert.Equal(t, command.HandlerKindCommand, executor.gotRun.HandlerKind)
+	assert.Equal(t, command.DispatchTargetLocal, executor.gotRun.DispatchTarget)
+	assert.Equal(t, "delivery-queued", executor.gotRun.Provenance.DeliveryID)
+}
+
+func TestRuntimeDynamicQueuedFailureEmitsClassifiedLifecycle(t *testing.T) {
+	SetCommandRunObservers()
+	t.Cleanup(func() { SetCommandRunObservers() })
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	runtime, provider := buildDynamicRuntime(t)
+	executorErr := gerrors.New("queue unavailable", gerrors.CategoryExternal).WithTextCode("QUEUE_UNAVAILABLE")
+	executor := &captureExecutor{err: executorErr}
+	require.NoError(t, runtime.RegisterExecutor(command.ExecutionModeQueued, executor))
+	registration, ok := provider.RegistrationByMessageType(command.HandlerKindCommand, "dynamic.command")
+	require.True(t, ok)
+	_, err := runtime.InvokeLocal(context.Background(), registration, dynamicCommandMessage{}, command.DispatchOptions{Mode: command.ExecutionModeQueued})
+	assert.Same(t, executorErr, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, command.CommandRunPhaseRejected, events[0].Phase)
+	assert.Equal(t, gerrors.CategoryExternal.String(), events[0].FailureCategory)
+	assert.Equal(t, command.HandlerKindCommand, events[0].HandlerKind)
+	assert.Equal(t, command.DispatchTargetLocal, events[0].DispatchTarget)
 }
 
 type typedNilExecutor struct{}

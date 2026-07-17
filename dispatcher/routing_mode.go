@@ -66,15 +66,17 @@ func SetCommandRoutingMode(mode RoutingMode, opts ...RoutingOption) error {
 	testMuxMu.Lock()
 	defer testMuxMu.Unlock()
 
-	if hasTrackedSubscriptions() {
+	if hasTrackedSubscriptions() || defaultRuntimeInstance().hasSubscriptions() {
 		return errors.New("cannot change routing mode after subscriptions are registered", errors.CategoryConflict).
 			WithCode(errors.CodeConflict).
 			WithTextCode(TextCodeDispatchRoutingLocked)
 	}
 
 	commandRoutingConfig = cfg
-	defaultCommandMux = newMuxForRouting(commandRoutingConfig)
-	defaultQueryMux = newMuxForRouting(commandRoutingConfig)
+	defaultRuntimeInstance().replaceMuxes(
+		newMuxForRouting(commandRoutingConfig),
+		newMuxForRouting(commandRoutingConfig),
+	)
 
 	return nil
 }
@@ -102,8 +104,6 @@ func resetRoutingConfigLocked() {
 	commandRoutingConfig = routingConfig{
 		mode: RoutingModeExact,
 	}
-	defaultCommandMux = newMuxForRouting(commandRoutingConfig)
-	defaultQueryMux = newMuxForRouting(commandRoutingConfig)
 }
 
 func newMuxForRouting(cfg routingConfig) *router.Mux {

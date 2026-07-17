@@ -21,14 +21,13 @@ type Subscription interface {
 var ExitOnErr = false
 
 var (
-	defaultCommandMux = newMuxForRouting(commandRoutingConfig)
-	defaultQueryMux   = newMuxForRouting(commandRoutingConfig)
-	testCommandMux    *router.Mux // Only set during tests for isolation
-	testQueryMux      *router.Mux // Only set during tests for isolation
-	testMuxMu         sync.RWMutex
+	testCommandMux *router.Mux // Only set during tests for isolation
+	testQueryMux   *router.Mux // Only set during tests for isolation
+	testMuxMu      sync.RWMutex
 
 	commandSubscriptionCount int64
 	querySubscriptionCount   int64
+	legacySubscriptionEpoch  atomic.Uint64
 )
 
 type trackedSubscription struct {
@@ -58,7 +57,7 @@ func getCommandMux() *router.Mux {
 	if testCommandMux != nil {
 		return testCommandMux
 	}
-	return defaultCommandMux
+	return defaultRuntimeInstance().commandMuxSnapshot()
 }
 
 // getQueryMux returns the active query mux (test override or default)
@@ -68,7 +67,7 @@ func getQueryMux() *router.Mux {
 	if testQueryMux != nil {
 		return testQueryMux
 	}
-	return defaultQueryMux
+	return defaultRuntimeInstance().queryMuxSnapshot()
 }
 
 // setTestMuxes overrides muxes for testing (package-private, test-only)
@@ -89,23 +88,26 @@ func Reset() {
 	resetSubscriptionCounters()
 	resetDispatchRoutingState()
 	resetCommandRunObservers()
+	defaultRuntimeInstance().Reset()
 }
 
 // Subscribe a CommandHandler for a particular message type T.
 // TODO: should this return an error?!
 func SubscribeCommand[T any](cmd command.Commander[T], runnerOpts ...runner.Option) Subscription {
-	var msg T
-	h := runner.NewHandler(runnerOpts...)
-	wrapper := &commandWrapper[T]{
-		runner: h,
-		cmd:    cmd,
+	runtime := defaultRuntimeInstance()
+	sub, err := subscribeCommandToMux(runtime, getCommandMux(), cmd, runnerOpts...)
+	if err != nil || sub == nil {
+		return nil
 	}
-	sub := getCommandMux().Add(command.GetMessageType(msg), wrapper)
+	epoch := legacySubscriptionEpoch.Load()
 	atomic.AddInt64(&commandSubscriptionCount, 1)
 	return &trackedSubscription{
 		inner: sub,
 		onUnsubscribe: func() {
-			atomic.AddInt64(&commandSubscriptionCount, -1)
+			if legacySubscriptionEpoch.Load() != epoch {
+				return
+			}
+			decrementLegacyCounter(&commandSubscriptionCount)
 		},
 	}
 }
@@ -116,18 +118,20 @@ func SubscribeCommandFunc[T any](handler command.CommandFunc[T], runnerOpts ...r
 
 // Subscribe a QueryHandler for a particular message type T, R.
 func SubscribeQuery[T any, R any](qry command.Querier[T, R], runnerOpts ...runner.Option) Subscription {
-	var msg T
-	r := runner.NewHandler(runnerOpts...)
-	wrapper := &queryWrapper[T, R]{
-		runner: r,
-		qry:    qry,
+	runtime := defaultRuntimeInstance()
+	sub, err := subscribeQueryToMux(runtime, getQueryMux(), qry, runnerOpts...)
+	if err != nil || sub == nil {
+		return nil
 	}
-	sub := getQueryMux().Add(command.GetMessageType(msg), wrapper)
+	epoch := legacySubscriptionEpoch.Load()
 	atomic.AddInt64(&querySubscriptionCount, 1)
 	return &trackedSubscription{
 		inner: sub,
 		onUnsubscribe: func() {
-			atomic.AddInt64(&querySubscriptionCount, -1)
+			if legacySubscriptionEpoch.Load() != epoch {
+				return
+			}
+			decrementLegacyCounter(&querySubscriptionCount)
 		},
 	}
 }
@@ -140,7 +144,7 @@ func DispatchWithResult[T any, R any](ctx context.Context, msg T) (R, error) {
 	result := command.NewResult[R]()
 	ctx = command.ContextWithResult(ctx, result)
 
-	if err := Dispatch(ctx, msg); err != nil {
+	if _, err := DispatchWith(ctx, msg, command.DispatchOptions{}); err != nil {
 		var zero R
 		// TODO: how do we handle agumenting a returned errors.Error?
 		return zero, errors.Wrap(err, errors.CategoryCommand, "dispatch generated error").
@@ -163,6 +167,11 @@ func Dispatch[T any](ctx context.Context, msg T) error {
 		return err
 	}
 
+	runtime := defaultRuntimeInstance()
+	if runtime.RegistrationProvider() != nil {
+		_, err := runtime.Dispatch(ctx, command.HandlerKindCommand, msg, command.DispatchOptions{})
+		return err
+	}
 	return dispatchInline(ctx, msg, command.GetMessageType(msg))
 }
 
@@ -189,42 +198,16 @@ func getQueryHandler[T any, R any]() (*queryWrapper[T, R], error) {
 
 // Query executes the single registered QueryHandler for T, returning R.
 func Query[T any, R any](ctx context.Context, msg T) (R, error) {
-	if err := command.ValidateMessage(msg); err != nil {
-		var zero R
-		return zero, err
+	runtime := defaultRuntimeInstance()
+	if runtime.RegistrationProvider() != nil {
+		outcome, err := runtime.Dispatch(ctx, command.HandlerKindQuery, msg, command.DispatchOptions{})
+		if err != nil {
+			var zero R
+			return zero, err
+		}
+		return dynamicOutcomeResultAs[R](outcome)
 	}
-
-	var zero R
-	qw, err := getQueryHandler[T, R]()
-	if err != nil {
-		return zero, errors.Wrap(err, errors.CategoryHandler, "failed to get query handler").
-			WithTextCode("QUERY_HANDLER_LOOKUP_ERROR").
-			WithMetadata(map[string]any{
-				"message_type": command.GetMessageType(msg),
-				"result_type":  fmt.Sprintf("%T", zero),
-			})
-	}
-
-	if ctx.Err() != nil {
-		return zero, errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
-			WithTextCode("CONTEXT_ERROR")
-	}
-
-	result, qerr := runner.RunQuery(ctx, qw.runner, qw.qry, msg)
-	if qerr != nil {
-		return zero, errors.Wrap(
-			qerr,
-			errors.CategoryHandler,
-			fmt.Sprintf("query handler failed for type %s", command.GetMessageType(msg)),
-		).
-			WithTextCode("QUERY_EXECUTION_FAILED").
-			WithMetadata(map[string]any{
-				"message_type": command.GetMessageType(msg),
-				"result_type":  fmt.Sprintf("%T", zero),
-				"handler":      fmt.Sprintf("%T", qw.qry),
-			})
-	}
-	return result, nil
+	return queryWithMux[T, R](ctx, getQueryMux(), msg)
 }
 
 type commandWrapper[T any] struct {
@@ -259,6 +242,23 @@ func (w *commandWrapper[T]) handler() any {
 type queryWrapper[T any, R any] struct {
 	runner *runner.Handler
 	qry    command.Querier[T, R]
+}
+
+type dynamicQueryRunnable interface {
+	runQuery(context.Context, any) (any, error)
+	handler() any
+}
+
+func (w *queryWrapper[T, R]) runQuery(ctx context.Context, msg any) (any, error) {
+	typedMsg, ok := msg.(T)
+	if !ok {
+		return nil, fmt.Errorf("dispatcher query message type mismatch for handler %T", w.qry)
+	}
+	return runner.RunQuery(ctx, w.runner, w.qry, typedMsg)
+}
+
+func (w *queryWrapper[T, R]) handler() any {
+	return w.qry
 }
 
 func wrapHandlerError[T any](err error, msg T, handler any) *errors.Error {
@@ -308,14 +308,23 @@ func commandHandlerCount(commandID string) int {
 
 func dispatchInline(ctx context.Context, msg any, messageType string) error {
 	return dispatchInlineWithRunContext(ctx, msg, command.DispatchRunContext{
-		CommandID:     messageType,
-		ExecutionMode: command.ExecutionModeInline,
+		CommandID:      messageType,
+		HandlerKind:    command.HandlerKindCommand,
+		DispatchTarget: command.DispatchTargetLocal,
+		ExecutionMode:  command.ExecutionModeInline,
 	})
 }
 
 func dispatchInlineWithRunContext(ctx context.Context, msg any, runtime command.DispatchRunContext) error {
-	messageType := runtime.CommandID
-	handlers, err := getDispatchHandlers(messageType)
+	return dispatchInlineWithRunContextOn(getCommandMux(), ctx, msg, runtime)
+}
+
+func dispatchInlineWithRunContextOn(mux *router.Mux, ctx context.Context, msg any, runtime command.DispatchRunContext) error {
+	return dispatchInlineWithRunContextOnType(mux, ctx, msg, runtime.CommandID, runtime)
+}
+
+func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, msg any, messageType string, runtime command.DispatchRunContext) error {
+	handlers, err := getDispatchHandlersFrom(mux, messageType)
 	if err != nil {
 		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
 			WithTextCode("HANDLER_LOOKUP_ERROR").
@@ -389,6 +398,12 @@ func dispatchInlineWithRunContext(ctx context.Context, msg any, runtime command.
 			run.Attempt = attempt.Attempt
 			run.MaxAttempts = attempt.MaxAttempts
 		}
+		run.Receipt = command.DispatchReceipt{
+			Accepted:      true,
+			Mode:          run.ExecutionMode,
+			CommandID:     run.CommandID,
+			CorrelationID: run.CorrelationID,
+		}
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
 			Duration: time.Since(startedAt),
 		}))
@@ -435,7 +450,14 @@ func runDispatchRunnable(
 }
 
 func getDispatchHandlers(messageType string) ([]dispatchRunnable, error) {
-	handlers := getCommandMux().Get(messageType)
+	return getDispatchHandlersFrom(getCommandMux(), messageType)
+}
+
+func getDispatchHandlersFrom(mux *router.Mux, messageType string) ([]dispatchRunnable, error) {
+	if mux == nil {
+		return nil, fmt.Errorf("command mux is not configured")
+	}
+	handlers := mux.Get(messageType)
 	if len(handlers) == 0 {
 		return nil, fmt.Errorf("no command handlers for message type %s", messageType)
 	}
@@ -462,6 +484,22 @@ func hasTrackedSubscriptions() bool {
 }
 
 func resetSubscriptionCounters() {
+	legacySubscriptionEpoch.Add(1)
 	atomic.StoreInt64(&commandSubscriptionCount, 0)
 	atomic.StoreInt64(&querySubscriptionCount, 0)
+}
+
+func decrementLegacyCounter(counter *int64) {
+	if counter == nil {
+		return
+	}
+	for {
+		current := atomic.LoadInt64(counter)
+		if current <= 0 {
+			return
+		}
+		if atomic.CompareAndSwapInt64(counter, current, current-1) {
+			return
+		}
+	}
 }
