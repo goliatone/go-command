@@ -178,6 +178,12 @@ _ = dispatcher.SetCommandRoutingMode(
 `DispatchWith` enforces canonical command ids (`Type() string`) for queued/policy paths.
 Inline compatibility remains unchanged for legacy reflection-derived message types.
 
+#### Local, Hybrid, and Worker Dispatch
+
+`dispatcher.Runtime` provides isolated local command/query muxes plus optional immutable registration, placement, and remote-dispatch generations. Existing package-level APIs remain local when unconfigured and can use a concurrency-safe installed default runtime for hybrid routing.
+
+See [Routed Message Dispatch](docs/ROUTED_DISPATCH.md) for local-only assembly, hybrid policies, worker and authorized event ingress, command/query replies, readiness, forced-local loop protection, and the transport adapter contract.
+
 #### Command Run Events and Progress
 
 Register command run observers to receive lifecycle and cooperative progress events from dispatcher execution:
