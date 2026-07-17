@@ -1,5 +1,35 @@
 # Changelog
 
+# [0.23.0](https://github.com/goliatone/go-command/compare/v0.22.0...v0.23.0) - (2026-07-17)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Code quality ([e9b2b22](https://github.com/goliatone/go-command/commit/e9b2b2267f18b0a7d82528c24c9a88c1e9858159))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.23.0 ([2ef83f6](https://github.com/goliatone/go-command/commit/2ef83f682a7d6b86d5f982a0226348ba2348c13d))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Runtime registry ([dfdcfad](https://github.com/goliatone/go-command/commit/dfdcfad124f7f070c97dc08b27d15378cbbdb853))  - (goliatone)
+- Dynamic result sync ([da4b7fa](https://github.com/goliatone/go-command/commit/da4b7fa9f415ec5b21063f21143cec793aa9655d))  - (goliatone)
+- Command registration and routing ([c9038ed](https://github.com/goliatone/go-command/commit/c9038ed912b771a4eee330a48bbb157dd5f85332))  - (goliatone)
+- Command registration ([5192c07](https://github.com/goliatone/go-command/commit/5192c0783aa9070dc966feca18a0e67ba5d5d96e))  - (goliatone)
+- Dispatcher routing ([685bafa](https://github.com/goliatone/go-command/commit/685bafa1f769b24d496e1f76e55bde2a69c2560f))  - (goliatone)
+- Dispatch context ([e061e1d](https://github.com/goliatone/go-command/commit/e061e1dbb4d7a18b0f23e32581918542dc8fe703))  - (goliatone)
+- Routing primitives ([f190fc3](https://github.com/goliatone/go-command/commit/f190fc32ac9d1c9118f03c93cc65c7831f779808))  - (goliatone)
+- Dispatcher placement and provenance ([543ab81](https://github.com/goliatone/go-command/commit/543ab81d43a2dd4a662380c70ef13d2e90fd1d2e))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.22.0 ([9aa364a](https://github.com/goliatone/go-command/commit/9aa364a7f68401085cc5f08a1e852c091d4c7b49))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([87b182c](https://github.com/goliatone/go-command/commit/87b182c7829a59f4f4cc465965a6bb7f609f7b16))  - (goliatone)
+- Update tests ([346da88](https://github.com/goliatone/go-command/commit/346da8844b5cf7ed53a9d8523d67f25fb30e670f))  - (goliatone)
+
 # [0.22.0](https://github.com/goliatone/go-command/compare/v0.21.0...v0.22.0) - (2026-06-19)
 
 ## <!-- 1 -->🐛 Bug Fixes
