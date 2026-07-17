@@ -20,10 +20,11 @@ type CronScheduler interface {
 type RuntimeDependencies struct {
 	Registry *command.Registry
 
-	Dispatcher   any
-	Router       *router.Mux
-	Scheduler    CronScheduler
-	Orchestrator any
+	Dispatcher      any
+	DispatchRuntime *dispatcher.Runtime
+	Router          *router.Mux
+	Scheduler       CronScheduler
+	Orchestrator    any
 
 	RunnerDefaults []runner.Option
 
@@ -47,6 +48,9 @@ func NewRuntimeContainer(deps RuntimeDependencies) *RuntimeContainer {
 	reg := deps.Registry
 	if reg == nil {
 		reg = command.NewRegistry()
+	}
+	if deps.DispatchRuntime == nil {
+		deps.DispatchRuntime, _ = deps.Dispatcher.(*dispatcher.Runtime)
 	}
 
 	rt := &RuntimeContainer{
@@ -98,18 +102,26 @@ func (r *RuntimeContainer) RegisterCommand(cmd any) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
+	var sub dispatcher.Subscription
 	if r.deps.SubscribeCommand != nil {
-		sub, err := r.deps.SubscribeCommand(cmd, r.deps.RunnerDefaults...)
+		var err error
+		sub, err = r.deps.SubscribeCommand(cmd, r.deps.RunnerDefaults...)
 		if err != nil {
 			return err
 		}
-		if sub != nil {
-			r.mu.Lock()
-			r.subs = append(r.subs, sub)
-			r.mu.Unlock()
-		}
 	}
-	return r.reg.RegisterCommand(cmd)
+	if err := r.reg.RegisterCommand(cmd); err != nil {
+		if sub != nil {
+			sub.Unsubscribe()
+		}
+		return err
+	}
+	if sub != nil {
+		r.mu.Lock()
+		r.subs = append(r.subs, sub)
+		r.mu.Unlock()
+	}
+	return nil
 }
 
 // RegisterQuery registers query in injected dispatcher hooks (optional) and registry.
@@ -117,18 +129,26 @@ func (r *RuntimeContainer) RegisterQuery(qry any) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
+	var sub dispatcher.Subscription
 	if r.deps.SubscribeQuery != nil {
-		sub, err := r.deps.SubscribeQuery(qry, r.deps.RunnerDefaults...)
+		var err error
+		sub, err = r.deps.SubscribeQuery(qry, r.deps.RunnerDefaults...)
 		if err != nil {
 			return err
 		}
-		if sub != nil {
-			r.mu.Lock()
-			r.subs = append(r.subs, sub)
-			r.mu.Unlock()
-		}
 	}
-	return r.reg.RegisterCommand(qry)
+	if err := r.reg.RegisterCommand(qry); err != nil {
+		if sub != nil {
+			sub.Unsubscribe()
+		}
+		return err
+	}
+	if sub != nil {
+		r.mu.Lock()
+		r.subs = append(r.subs, sub)
+		r.mu.Unlock()
+	}
+	return nil
 }
 
 // AddResolver adds a resolver to the backing registry.
@@ -152,7 +172,13 @@ func (r *RuntimeContainer) Start(_ context.Context) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
-	return r.reg.Initialize()
+	if err := r.reg.Initialize(); err != nil {
+		return err
+	}
+	if r.deps.DispatchRuntime != nil {
+		return r.deps.DispatchRuntime.AttachRegistrationProvider(r.reg)
+	}
+	return nil
 }
 
 // Stop unsubscribes runtime subscriptions and clears local state.
