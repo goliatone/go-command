@@ -4,9 +4,9 @@ go 1.23.4
 
 require (
 	github.com/alecthomas/kong v1.11.0
-	github.com/goliatone/go-errors v0.10.0
+	github.com/goliatone/go-errors v0.11.0
 	github.com/goliatone/go-generators v0.17.0
-	github.com/goliatone/go-logger v0.8.0
+	github.com/goliatone/go-logger v0.8.4
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
