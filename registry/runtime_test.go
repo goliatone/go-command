@@ -138,3 +138,77 @@ func TestRuntimeContainerStopUnsubscribesTrackedSubs(t *testing.T) {
 	assert.True(t, subA.unsubscribed)
 	assert.True(t, subB.unsubscribed)
 }
+
+func TestRuntimeContainerRollsBackSubscriptionWhenRegistryRejectsRegistration(t *testing.T) {
+	registry := command.NewRegistry()
+	require.NoError(t, registry.Initialize())
+	commandSub := &runtimeSubscription{}
+	querySub := &runtimeSubscription{}
+	container := NewRuntimeContainer(RuntimeDependencies{
+		Registry: registry,
+		SubscribeCommand: func(any, ...runner.Option) (dispatcher.Subscription, error) {
+			return commandSub, nil
+		},
+		SubscribeQuery: func(any, ...runner.Option) (dispatcher.Subscription, error) {
+			return querySub, nil
+		},
+	})
+
+	err := container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil }))
+	require.Error(t, err)
+	assert.True(t, commandSub.unsubscribed)
+	err = container.RegisterQuery(command.QueryFunc[TestMessage, TestResponse](func(context.Context, TestMessage) (TestResponse, error) { return TestResponse{}, nil }))
+	require.Error(t, err)
+	assert.True(t, querySub.unsubscribed)
+}
+
+func TestRuntimeContainerWiresSelectedDispatcherRuntimeAndProvider(t *testing.T) {
+	dispatchRuntime := dispatcher.NewRuntime()
+	container := NewRuntimeContainer(RuntimeDependencies{
+		Registry:         command.NewRegistry(),
+		DispatchRuntime:  dispatchRuntime,
+		SubscribeCommand: dispatcher.CommandSubscriptionHook[TestMessage](dispatchRuntime),
+		SubscribeQuery:   dispatcher.QuerySubscriptionHook[TestMessage, TestResponse](dispatchRuntime),
+	})
+	require.NoError(t, container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error {
+		return nil
+	})))
+	require.NoError(t, container.RegisterQuery(command.QueryFunc[TestMessage, TestResponse](func(context.Context, TestMessage) (TestResponse, error) {
+		return TestResponse{Result: "runtime"}, nil
+	})))
+
+	require.Error(t, dispatchRuntime.RoutedReady())
+	require.NoError(t, container.Start(context.Background()))
+	require.NoError(t, dispatchRuntime.RoutedReady())
+	assert.Len(t, dispatchRuntime.RegistrationProvider().Registrations(), 2)
+	require.NoError(t, dispatcher.DispatchTo(context.Background(), dispatchRuntime, TestMessage{}))
+	result, err := dispatcher.QueryTo[TestMessage, TestResponse](context.Background(), dispatchRuntime, TestMessage{})
+	require.NoError(t, err)
+	assert.Equal(t, "runtime", result.Result)
+}
+
+func TestRuntimeContainerDoesNotAttachProviderAfterFailedInitialization(t *testing.T) {
+	dispatchRuntime := dispatcher.NewRuntime()
+	container := NewRuntimeContainer(RuntimeDependencies{
+		Registry:        command.NewRegistry(),
+		DispatchRuntime: dispatchRuntime,
+	})
+	require.NoError(t, container.AddResolver("fail", func(any, command.CommandMeta, *command.Registry) error {
+		return assert.AnError
+	}))
+	require.NoError(t, container.Registry().RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error {
+		return nil
+	})))
+	require.Error(t, container.Start(context.Background()))
+	assert.Error(t, dispatchRuntime.RoutedReady())
+	assert.Nil(t, dispatchRuntime.RegistrationProvider())
+}
+
+func TestLocalTypedRuntimeDoesNotRequireRegistrationProvider(t *testing.T) {
+	dispatchRuntime := dispatcher.NewRuntime()
+	dispatcher.SubscribeCommandTo(dispatchRuntime, command.CommandFunc[TestMessage](func(context.Context, TestMessage) error {
+		return nil
+	}))
+	require.NoError(t, dispatcher.DispatchTo(context.Background(), dispatchRuntime, TestMessage{}))
+	assert.Error(t, dispatchRuntime.RoutedReady())
+}

@@ -103,3 +103,33 @@ func TestSetCommandRoutingModeFailsAfterSubscriptions(t *testing.T) {
 	require.True(t, gerrors.As(err, &gerr))
 	assert.Equal(t, TextCodeDispatchRoutingLocked, gerr.TextCode)
 }
+
+func TestStaleDefaultSubscriptionDoesNotUnlockRoutingForNewGeneration(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+	stale := SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil }))
+	require.NotNil(t, stale)
+	Reset()
+	current := SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil }))
+	require.NotNil(t, current)
+
+	stale.Unsubscribe()
+	err := SetCommandRoutingMode(RoutingModeRich)
+	assertStructuredTextCode(t, err, TextCodeDispatchRoutingLocked)
+	current.Unsubscribe()
+	require.NoError(t, SetCommandRoutingMode(RoutingModeRich))
+}
+
+func TestSetCommandRoutingModeRejectsInstalledRuntimeSubscriptions(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+	runtime := NewRuntime()
+	restore, err := InstallDefaultRuntime(runtime)
+	require.NoError(t, err)
+	t.Cleanup(restore)
+	require.NotNil(t, SubscribeCommandTo(runtime, command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil })))
+
+	err = SetCommandRoutingMode(RoutingModeRich)
+	assertStructuredTextCode(t, err, TextCodeDispatchRoutingLocked)
+	require.NoError(t, DispatchTo(context.Background(), runtime, routingDispatchMessage{}))
+}
