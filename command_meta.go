@@ -21,6 +21,12 @@ type MessageFactory interface {
 var (
 	contextType = reflect.TypeFor[context.Context]()
 	errorType   = reflect.TypeFor[error]()
+
+	// Fixed stripes avoid retaining handler instances forever while ensuring all
+	// discovery and decode calls for one MessageFactory share a synchronization
+	// boundary. Unrelated factories may contend on a stripe, but factory calls
+	// are intentionally short and correctness takes precedence over fan-out.
+	messageFactoryLocks [64]sync.Mutex
 )
 
 func MessageTypeForCommand(cmd any) CommandMeta {
@@ -107,7 +113,7 @@ func messageMetaFromFactory(cmd any, msgType reflect.Type) (CommandMeta, bool) {
 		return CommandMeta{}, false
 	}
 
-	msgValue := factory.MessageValue()
+	msgValue := messageFactoryValue(factory, false)
 	if msgValue == nil {
 		return CommandMeta{}, false
 	}
@@ -305,10 +311,7 @@ func registrationMessageFactory(cmd any, declaredType reflect.Type) func() any {
 	if isInterfaceType(declaredType) {
 		factory, _ := cmd.(MessageFactory)
 		return func() any {
-			if factory == nil {
-				return nil
-			}
-			return cloneMessageDecodeTarget(factory.MessageValue())
+			return messageFactoryValue(factory, true)
 		}
 	}
 	return func() any {
@@ -328,17 +331,158 @@ func cloneMessageDecodeTarget(message any) any {
 		return nil
 	}
 	value := reflect.ValueOf(message)
+	if isNilReflectValue(value) {
+		return nil
+	}
+	clone := cloneMessageValue(value, make(map[messageCloneVisit]reflect.Value))
 	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return nil
-		}
-		clone := reflect.New(value.Type().Elem())
-		clone.Elem().Set(value.Elem())
 		return clone.Interface()
 	}
-	clone := reflect.New(value.Type())
-	clone.Elem().Set(value)
-	return clone.Interface()
+	// Dynamic decoders require an addressable target even when the factory
+	// returns a value implementing the declared interface.
+	target := reflect.New(value.Type())
+	target.Elem().Set(clone)
+	return target.Interface()
+}
+
+type messageCloneVisit struct {
+	typeValue reflect.Type
+	pointer   uintptr
+	length    int
+}
+
+func cloneMessageValue(value reflect.Value, visited map[messageCloneVisit]reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return reflect.Value{}
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		clone := cloneMessageValue(value.Elem(), visited)
+		out := reflect.New(value.Type()).Elem()
+		if clone.IsValid() && clone.Type().AssignableTo(value.Type()) {
+			out.Set(clone)
+		} else if clone.IsValid() && clone.Type().Implements(value.Type()) {
+			out.Set(clone)
+		}
+		return out
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := messageCloneVisit{typeValue: value.Type(), pointer: value.Pointer()}
+		if clone, ok := visited[visit]; ok {
+			return clone
+		}
+		out := reflect.New(value.Type().Elem())
+		visited[visit] = out
+		out.Elem().Set(cloneMessageValue(value.Elem(), visited))
+		return out
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := messageCloneVisit{typeValue: value.Type(), pointer: value.Pointer()}
+		if clone, ok := visited[visit]; ok {
+			return clone
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		visited[visit] = out
+		iterator := value.MapRange()
+		for iterator.Next() {
+			out.SetMapIndex(
+				cloneMessageValue(iterator.Key(), visited),
+				cloneMessageValue(iterator.Value(), visited),
+			)
+		}
+		return out
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		visit := messageCloneVisit{typeValue: value.Type(), pointer: value.Pointer(), length: value.Len()}
+		if clone, ok := visited[visit]; ok {
+			return clone
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		visited[visit] = out
+		for index := 0; index < value.Len(); index++ {
+			out.Index(index).Set(cloneMessageValue(value.Index(index), visited))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(value.Type()).Elem()
+		for index := 0; index < value.Len(); index++ {
+			out.Index(index).Set(cloneMessageValue(value.Index(index), visited))
+		}
+		return out
+	case reflect.Struct:
+		// Copy the complete value first so opaque standard-library fields retain
+		// their valid representation, then recursively isolate settable fields.
+		out := reflect.New(value.Type()).Elem()
+		out.Set(value)
+		for index := 0; index < value.NumField(); index++ {
+			if !out.Field(index).CanSet() || !value.Field(index).CanInterface() {
+				continue
+			}
+			out.Field(index).Set(cloneMessageValue(value.Field(index), visited))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func messageFactoryValue(factory MessageFactory, clone bool) any {
+	if factory == nil {
+		return nil
+	}
+	value := reflect.ValueOf(factory)
+	if isNilReflectValue(value) {
+		return nil
+	}
+	gate := messageFactoryLock(factory)
+	gate.Lock()
+	defer gate.Unlock()
+	message := factory.MessageValue()
+	if !clone {
+		return message
+	}
+	return cloneMessageDecodeTarget(message)
+}
+
+func messageFactoryLock(factory MessageFactory) *sync.Mutex {
+	value := reflect.ValueOf(factory)
+	for value.IsValid() && value.Kind() == reflect.Interface {
+		value = value.Elem()
+	}
+	hash := uint64(1469598103934665603)
+	if value.IsValid() {
+		for _, character := range value.Type().String() {
+			hash ^= uint64(character)
+			hash *= 1099511628211
+		}
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice:
+			hash ^= uint64(value.Pointer())
+			hash *= 1099511628211
+		}
+	}
+	return &messageFactoryLocks[hash%uint64(len(messageFactoryLocks))]
+}
+
+func isNilReflectValue(value reflect.Value) bool {
+	if !value.IsValid() {
+		return true
+	}
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func stableRegistrationID(cmd any, fallback string) string {
