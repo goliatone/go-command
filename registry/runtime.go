@@ -9,7 +9,10 @@ import (
 	"github.com/goliatone/go-command/dispatcher"
 	"github.com/goliatone/go-command/router"
 	"github.com/goliatone/go-command/runner"
+	"github.com/goliatone/go-errors"
 )
+
+const textCodeRuntimeContainerStopped = "RUNTIME_CONTAINER_STOPPED"
 
 // CronScheduler is the minimum cron dependency needed for runtime composition.
 type CronScheduler interface {
@@ -37,10 +40,13 @@ type RuntimeDependencies struct {
 
 // RuntimeContainer is an instance-first registry composition container.
 type RuntimeContainer struct {
-	mu   sync.Mutex
-	deps RuntimeDependencies
-	reg  *command.Registry
-	subs []dispatcher.Subscription
+	mu          sync.Mutex
+	lifecycleMu sync.Mutex
+	deps        RuntimeDependencies
+	reg         *command.Registry
+	subs        []dispatcher.Subscription
+	started     bool
+	stopped     bool
 }
 
 // NewRuntimeContainer builds a runtime with explicit dependencies.
@@ -102,11 +108,17 @@ func (r *RuntimeContainer) RegisterCommand(cmd any) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if err := r.requireRegistrable(); err != nil {
+		return err
+	}
 	var sub dispatcher.Subscription
 	if r.deps.SubscribeCommand != nil {
 		var err error
 		sub, err = r.deps.SubscribeCommand(cmd, r.deps.RunnerDefaults...)
 		if err != nil {
+			unsubscribe(sub)
 			return err
 		}
 	}
@@ -129,11 +141,17 @@ func (r *RuntimeContainer) RegisterQuery(qry any) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if err := r.requireRegistrable(); err != nil {
+		return err
+	}
 	var sub dispatcher.Subscription
 	if r.deps.SubscribeQuery != nil {
 		var err error
 		sub, err = r.deps.SubscribeQuery(qry, r.deps.RunnerDefaults...)
 		if err != nil {
+			unsubscribe(sub)
 			return err
 		}
 	}
@@ -172,12 +190,27 @@ func (r *RuntimeContainer) Start(_ context.Context) error {
 	if r == nil || r.reg == nil {
 		return nil
 	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if r.started {
+		return nil
+	}
+	if r.stopped {
+		return runtimeContainerStoppedError()
+	}
 	if err := r.reg.Initialize(); err != nil {
+		r.rollbackSubscriptions()
+		r.stopped = true
 		return err
 	}
 	if r.deps.DispatchRuntime != nil {
-		return r.deps.DispatchRuntime.AttachRegistrationProvider(r.reg)
+		if err := r.deps.DispatchRuntime.AttachRegistrationProvider(r.reg); err != nil {
+			r.rollbackSubscriptions()
+			r.stopped = true
+			return err
+		}
 	}
+	r.started = true
 	return nil
 }
 
@@ -186,14 +219,41 @@ func (r *RuntimeContainer) Stop(_ context.Context) error {
 	if r == nil {
 		return nil
 	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if r.stopped {
+		return nil
+	}
+	r.rollbackSubscriptions()
+	r.stopped = true
+	return nil
+}
+
+func (r *RuntimeContainer) requireRegistrable() error {
+	if r.started || r.stopped {
+		return runtimeContainerStoppedError()
+	}
+	return nil
+}
+
+func runtimeContainerStoppedError() *errors.Error {
+	return errors.New("runtime container no longer accepts registrations", errors.CategoryConflict).
+		WithCode(errors.CodeConflict).
+		WithTextCode(textCodeRuntimeContainerStopped)
+}
+
+func (r *RuntimeContainer) rollbackSubscriptions() {
 	r.mu.Lock()
 	subs := r.subs
 	r.subs = nil
 	r.mu.Unlock()
 	for _, sub := range subs {
-		if sub != nil {
-			sub.Unsubscribe()
-		}
+		unsubscribe(sub)
 	}
-	return nil
+}
+
+func unsubscribe(sub dispatcher.Subscription) {
+	if sub != nil {
+		sub.Unsubscribe()
+	}
 }
