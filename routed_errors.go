@@ -21,6 +21,7 @@ const (
 	TextCodeInvalidDispatchRoute              = "INVALID_DISPATCH_ROUTE"
 	TextCodeRemoteDispatcherNotConfigured     = "REMOTE_DISPATCHER_NOT_CONFIGURED"
 	TextCodeLocalInvocationRequired           = "LOCAL_INVOCATION_REQUIRED"
+	TextCodeDispatchRejected                  = "DISPATCH_REJECTED"
 )
 
 func NewRegistrationNotFoundError(kind HandlerKind, key string) *errors.Error {
@@ -121,6 +122,19 @@ func NewLocalInvocationRequiredError(reg MessageRegistration) *errors.Error {
 		WithMetadata(map[string]any{
 			"handler_kind":    registrationKind(reg),
 			"registration_id": registrationID(reg),
+		})
+}
+
+// NewDispatchRejectedError reports a structurally valid receipt that did not
+// accept the command. APIs that cannot return receipts still surface rejection
+// as a classified error rather than silently reporting success.
+func NewDispatchRejectedError(commandID string, receipt DispatchReceipt) *errors.Error {
+	return errors.New("dispatch was rejected", errors.CategoryCommand).
+		WithTextCode(TextCodeDispatchRejected).
+		WithMetadata(map[string]any{
+			"command_id":     strings.TrimSpace(commandID),
+			"mode":           NormalizeExecutionMode(receipt.Mode),
+			"correlation_id": strings.TrimSpace(receipt.CorrelationID),
 		})
 }
 
