@@ -1,5 +1,31 @@
 # Changelog
 
+# [0.23.3](https://github.com/goliatone/go-command/compare/v0.23.2...v0.23.3) - (2026-07-20)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Dispatcher impl ([982fc60](https://github.com/goliatone/go-command/commit/982fc60bcdb65b165771cade4f71b0ac81d9c758))  - (goliatone)
+- Prevent data race ([8e35f06](https://github.com/goliatone/go-command/commit/8e35f066059de07489fd105058222ee816048ca6))  - (goliatone)
+- Normalize routes ([07716a2](https://github.com/goliatone/go-command/commit/07716a2fac985b74a043152fe794bfcc532efc86))  - (goliatone)
+- Message clone ([53b1115](https://github.com/goliatone/go-command/commit/53b1115164f115323ad84d6c0abb95da86ff629d))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.23.3 ([05c920b](https://github.com/goliatone/go-command/commit/05c920ba94d250cdf32531693d01a0bf4169fd63))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Routed errors ([121daf3](https://github.com/goliatone/go-command/commit/121daf3bfe9293c03894fd942360536ac409c333))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.23.2 ([c83a52e](https://github.com/goliatone/go-command/commit/c83a52ea08478b3dbdc5c48c3b132b8b334425d9))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update linting ([2dfc6aa](https://github.com/goliatone/go-command/commit/2dfc6aad1154aea19beeab47acbb8496bba51942))  - (goliatone)
+- Update tests ([9a2647a](https://github.com/goliatone/go-command/commit/9a2647af38db84260d14d9306355061a7c412af7))  - (goliatone)
+
 # [0.23.2](https://github.com/goliatone/go-command/compare/v0.23.1...v0.23.2) - (2026-07-17)
 
 ## <!-- 13 -->📦 Bumps
