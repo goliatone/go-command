@@ -148,6 +148,56 @@ func TestRuntimeRemoteRejectsUncorrelatedReceipt(t *testing.T) {
 	assertStructuredTextCode(t, err, command.TextCodeDispatchReceiptInvalid)
 }
 
+func TestRuntimeRemoteRejectedReceiptIsClassifiedAndPreserved(t *testing.T) {
+	for _, kind := range []command.HandlerKind{command.HandlerKindCommand, command.HandlerKindQuery} {
+		t.Run(string(kind), func(t *testing.T) {
+			remote := &fakeRemoteDispatcher{dispatch: func(_ context.Context, _ command.DispatchRoute, registration command.MessageRegistration, _ any, _ command.DispatchOptions) (command.DispatchOutcome, error) {
+				return command.DispatchOutcome{Receipt: command.DispatchReceipt{
+					Accepted: false, Mode: command.ExecutionModeInline, CommandID: registration.ID(),
+				}}, nil
+			}}
+			runtime, registration := configureRemoteRuntime(t, kind, remote)
+			message := any(dynamicCommandMessage{})
+			if kind == command.HandlerKindQuery {
+				message = dynamicQueryMessage{}
+			}
+			var events []command.CommandRunEvent
+			sub := AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+				events = append(events, event)
+				return nil
+			}))
+			defer sub.Unsubscribe()
+
+			outcome, err := runtime.Dispatch(context.Background(), kind, message, command.DispatchOptions{})
+			assertStructuredTextCode(t, err, command.TextCodeDispatchRejected)
+			assert.False(t, outcome.Receipt.Accepted)
+			assert.Equal(t, registration.ID(), outcome.Receipt.CommandID)
+			assert.Equal(t, command.DispatchTargetRemote, outcome.Target)
+			require.Len(t, events, 1)
+			assert.Equal(t, command.CommandRunPhaseRejected, events[0].Phase)
+			assert.Error(t, events[0].Error)
+		})
+	}
+}
+
+func TestRuntimeNormalizesCustomRouteBeforeRemoteInvocation(t *testing.T) {
+	runtime, _ := buildDynamicRuntime(t)
+	require.NoError(t, runtime.ConfigurePlacementResolver(placementResolverFunc(func(context.Context, command.MessageRegistration, command.DispatchOptions) (command.DispatchRoute, bool, error) {
+		return command.DispatchRoute{Target: command.DispatchTargetRemote, Name: "  worker-custom  "}, true, nil
+	})))
+	remote := &fakeRemoteDispatcher{dispatch: func(_ context.Context, route command.DispatchRoute, registration command.MessageRegistration, _ any, _ command.DispatchOptions) (command.DispatchOutcome, error) {
+		assert.Equal(t, "worker-custom", route.Name)
+		return command.DispatchOutcome{Receipt: command.DispatchReceipt{
+			Accepted: true, Mode: command.ExecutionModeInline, CommandID: registration.ID(),
+		}}, nil
+	}}
+	require.NoError(t, runtime.ConfigureRemoteDispatcher(remote))
+
+	outcome, err := runtime.Dispatch(context.Background(), command.HandlerKindCommand, dynamicCommandMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "worker-custom", outcome.Route)
+}
+
 func TestRuntimeRemoteConfigurationRequiresProviderAndAcceptsTypedNilClear(t *testing.T) {
 	runtime := NewRuntime()
 	remote := &fakeRemoteDispatcher{dispatch: func(context.Context, command.DispatchRoute, command.MessageRegistration, any, command.DispatchOptions) (command.DispatchOutcome, error) {

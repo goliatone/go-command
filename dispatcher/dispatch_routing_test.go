@@ -44,9 +44,17 @@ type captureResolver struct {
 	err    error
 	calls  int
 	lastID string
+	gotNil bool
 }
 
-func (r *captureResolver) ResolveMode(_ context.Context, commandID string) (command.ExecutionMode, bool, error) {
+type typedNilModeResolver struct{}
+
+func (*typedNilModeResolver) ResolveMode(context.Context, string) (command.ExecutionMode, bool, error) {
+	panic("typed-nil mode resolver must be cleared")
+}
+
+func (r *captureResolver) ResolveMode(ctx context.Context, commandID string) (command.ExecutionMode, bool, error) {
+	r.gotNil = ctx == nil
 	r.calls++
 	r.lastID = commandID
 	return r.mode, r.found, r.err
@@ -190,6 +198,29 @@ func TestDispatchWithResolverIgnoresModeValueWhenNotFound(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, inlineCalled)
 	assert.Equal(t, command.ExecutionModeInline, receipt.Mode)
+}
+
+func TestSetModeResolverTreatsTypedNilAsClear(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil }))
+	var resolver *typedNilModeResolver
+	SetModeResolver(resolver)
+
+	receipt, err := DispatchWith(nil, routingDispatchMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	assert.True(t, receipt.Accepted)
+	assert.Equal(t, command.ExecutionModeInline, receipt.Mode)
+}
+
+func TestDispatchWithNormalizesNilContextBeforeModeResolution(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	SubscribeCommand(command.CommandFunc[routingDispatchMessage](func(context.Context, routingDispatchMessage) error { return nil }))
+	resolver := &captureResolver{found: false}
+	SetModeResolver(resolver)
+
+	_, err := DispatchWith(nil, routingDispatchMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	assert.False(t, resolver.gotNil)
 }
 
 func TestDispatchWithFallsBackToInlineWhenModeMissingEverywhere(t *testing.T) {

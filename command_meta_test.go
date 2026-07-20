@@ -3,7 +3,10 @@ package command
 import (
 	"context"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	gerrors "github.com/goliatone/go-errors"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +36,38 @@ type interfaceMessage interface {
 type interfaceMessageImpl struct{}
 
 func (interfaceMessageImpl) Marker() {}
+
+type nestedInterfaceMessage struct {
+	Labels map[string][]string
+	Child  *nestedMessageChild
+	Value  any
+}
+
+type nestedMessageChild struct {
+	Values []int
+}
+
+func (*nestedInterfaceMessage) Marker() {}
+
+type reusableFactoryCommand struct {
+	template *nestedInterfaceMessage
+	active   atomic.Int32
+	overlaps atomic.Int32
+}
+
+func (c *reusableFactoryCommand) MessageValue() any {
+	if c.active.Add(1) != 1 {
+		c.overlaps.Add(1)
+	}
+	defer c.active.Add(-1)
+	time.Sleep(time.Millisecond)
+	return c.template
+}
+
+func (*reusableFactoryCommand) Execute(context.Context, interfaceMessage) error { return nil }
+func (*reusableFactoryCommand) Query(context.Context, interfaceMessage) (string, error) {
+	return "", nil
+}
 
 type valueCommand struct{}
 
@@ -190,4 +225,49 @@ func TestMessageRegistrationsForCommandReturnsFreshMessages(t *testing.T) {
 	first := registrations[0].NewMessage().(*pointerMessage)
 	second := registrations[0].NewMessage().(*pointerMessage)
 	assert.NotSame(t, first, second)
+}
+
+func TestInterfaceFactoryDecodeTargetsAreDeeplyIsolated(t *testing.T) {
+	template := &nestedInterfaceMessage{
+		Labels: map[string][]string{"role": {"admin"}},
+		Child:  &nestedMessageChild{Values: []int{1, 2}},
+		Value:  map[string]any{"nested": []string{"original"}},
+	}
+	factory := &reusableFactoryCommand{template: template}
+	registrations, err := MessageRegistrationsForCommand(factory)
+	require.NoError(t, err)
+	require.Len(t, registrations, 2)
+
+	first := registrations[0].NewMessage().(*nestedInterfaceMessage)
+	second := registrations[0].NewMessage().(*nestedInterfaceMessage)
+	first.Labels["role"][0] = "mutated"
+	first.Child.Values[0] = 99
+	first.Value.(map[string]any)["nested"].([]string)[0] = "mutated"
+
+	assert.Equal(t, "admin", second.Labels["role"][0])
+	assert.Equal(t, 1, second.Child.Values[0])
+	assert.Equal(t, "original", second.Value.(map[string]any)["nested"].([]string)[0])
+	assert.Equal(t, "admin", template.Labels["role"][0])
+	assert.Equal(t, 1, template.Child.Values[0])
+	assert.Equal(t, "original", template.Value.(map[string]any)["nested"].([]string)[0])
+}
+
+func TestDualCapabilityRegistrationsSerializeSharedFactory(t *testing.T) {
+	factory := &reusableFactoryCommand{template: &nestedInterfaceMessage{}}
+	registrations, err := MessageRegistrationsForCommand(factory)
+	require.NoError(t, err)
+	require.Len(t, registrations, 2)
+
+	var wg sync.WaitGroup
+	for index := 0; index < 20; index++ {
+		for _, registration := range registrations {
+			wg.Add(1)
+			go func(reg MessageRegistration) {
+				defer wg.Done()
+				require.NotNil(t, reg.NewMessage())
+			}(registration)
+		}
+	}
+	wg.Wait()
+	assert.Zero(t, factory.overlaps.Load())
 }

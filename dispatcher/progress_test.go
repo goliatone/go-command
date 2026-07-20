@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/runner"
@@ -132,6 +133,54 @@ func TestCommandRunObserversConcurrentRegisterUnregisterEmit(t *testing.T) {
 	wg.Wait()
 }
 
+func TestObservedExecutorValidatesRejectedReceiptBeforeClassification(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	executor := &captureExecutor{receipt: command.DispatchReceipt{
+		Accepted: false, Mode: command.ExecutionModeQueued, CommandID: "lifecycle.test", DispatchID: "must-be-empty",
+	}}
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	receipt, err := ObserveExecutor(executor).Execute(context.Background(), lifecycleMessage{}, "lifecycle.test", command.DispatchOptions{Mode: command.ExecutionModeQueued})
+	assertStructuredTextCode(t, err, command.TextCodeDispatchReceiptInvalid)
+	assert.Equal(t, "must-be-empty", receipt.DispatchID)
+	require.Len(t, events, 1)
+	assert.Equal(t, command.CommandRunPhaseRejected, events[0].Phase)
+	assert.Error(t, events[0].Error)
+}
+
+func TestObservedExecutorReturnsErrorForValidRejection(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	executor := &captureExecutor{receipt: command.DispatchReceipt{
+		Accepted: false, Mode: command.ExecutionModeQueued, CommandID: "lifecycle.test",
+	}}
+
+	receipt, err := ObserveExecutor(executor).Execute(context.Background(), lifecycleMessage{}, "lifecycle.test", command.DispatchOptions{Mode: command.ExecutionModeQueued})
+	assertStructuredTextCode(t, err, command.TextCodeDispatchRejected)
+	assert.False(t, receipt.Accepted)
+}
+
+func TestRunObservedCommandStartsExecutionClockAtWorkerInvocation(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	acceptedAt := time.Now().Add(-time.Hour)
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+
+	err := RunObservedCommand(context.Background(), command.DispatchRunContext{
+		RunID: "queued-run", CommandID: "lifecycle.test", StartedAt: acceptedAt,
+	}, func(context.Context) error { return nil })
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.True(t, events[0].StartedAt.After(acceptedAt))
+	assert.Less(t, events[1].Duration, time.Minute)
+}
+
 func TestDispatchEmitsInlineLifecycleAndProgressEvents(t *testing.T) {
 	setupDispatchRoutingTest(t)
 
@@ -177,6 +226,72 @@ func TestDispatchEmitsInlineLifecycleAndProgressEvents(t *testing.T) {
 		assert.NotEmpty(t, event.Handler)
 	}
 	assert.GreaterOrEqual(t, events[3].Duration, int64(0))
+}
+
+func TestLocalTypedAPIsEmitCompleteLifecycleContext(t *testing.T) {
+	setupDispatchRoutingTest(t)
+	runtime := NewRuntime()
+	assertRun := func(ctx context.Context) {
+		run, ok := command.DispatchRunFromContext(ctx)
+		require.True(t, ok)
+		assert.Equal(t, command.DispatchTargetLocal, run.DispatchTarget)
+		assert.Equal(t, command.ExecutionModeInline, run.ExecutionMode)
+		assert.Equal(t, "corr-local", run.CorrelationID)
+		assert.Equal(t, "delivery-local", run.Provenance.DeliveryID)
+	}
+	commandHandler := command.CommandFunc[lifecycleMessage](func(ctx context.Context, _ lifecycleMessage) error {
+		assertRun(ctx)
+		return nil
+	})
+	queryHandler := command.QueryFunc[lifecycleMessage, string](func(ctx context.Context, _ lifecycleMessage) (string, error) {
+		assertRun(ctx)
+		return "ok", nil
+	})
+	SubscribeCommand(commandHandler)
+	SubscribeQuery(queryHandler)
+	SubscribeCommandTo(runtime, commandHandler)
+	SubscribeQueryTo(runtime, queryHandler)
+
+	var events []command.CommandRunEvent
+	AddCommandRunObserver(command.CommandRunObserverFunc(func(_ context.Context, event command.CommandRunEvent) error {
+		events = append(events, event)
+		return nil
+	}))
+	ctx := command.ContextWithDispatchProvenance(context.Background(), command.DispatchProvenance{DeliveryID: "delivery-local"})
+	ctx = command.ContextWithDispatchOptions(ctx, command.DispatchOptions{CorrelationID: "corr-local", Metadata: map[string]any{"source": "test"}})
+
+	require.NoError(t, Dispatch(ctx, lifecycleMessage{}))
+	_, err := DispatchWith(ctx, lifecycleMessage{}, command.DispatchOptions{})
+	require.NoError(t, err)
+	require.NoError(t, DispatchTo(ctx, runtime, lifecycleMessage{}))
+	_, err = Query[lifecycleMessage, string](ctx, lifecycleMessage{})
+	require.NoError(t, err)
+	_, err = QueryTo[lifecycleMessage, string](ctx, runtime, lifecycleMessage{})
+	require.NoError(t, err)
+
+	require.Len(t, events, 10)
+	wantKinds := []command.HandlerKind{
+		command.HandlerKindCommand,
+		command.HandlerKindCommand,
+		command.HandlerKindCommand,
+		command.HandlerKindQuery,
+		command.HandlerKindQuery,
+	}
+	for operation, kind := range wantKinds {
+		started := events[operation*2]
+		finished := events[operation*2+1]
+		assert.Equal(t, command.CommandRunPhaseStarted, started.Phase)
+		assert.Equal(t, command.CommandRunPhaseSucceeded, finished.Phase)
+		for _, event := range []command.CommandRunEvent{started, finished} {
+			assert.Equal(t, kind, event.HandlerKind)
+			assert.Equal(t, command.DispatchTargetLocal, event.DispatchTarget)
+			assert.Equal(t, command.ExecutionModeInline, event.ExecutionMode)
+			assert.Equal(t, "corr-local", event.CorrelationID)
+			assert.Equal(t, "delivery-local", event.Provenance.DeliveryID)
+			assert.Equal(t, "test", event.Metadata["source"])
+			assert.NotEmpty(t, event.Handler)
+		}
+	}
 }
 
 func TestDispatchEmitsFailedAndCanceledTerminalEvents(t *testing.T) {

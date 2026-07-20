@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,11 +26,15 @@ func (s *runtimeCronScheduler) AddHandler(opts command.HandlerConfig, handler an
 }
 
 type runtimeSubscription struct {
-	unsubscribed bool
+	unsubscribed atomic.Bool
 }
 
+type runtimeAttachFailureMessage struct{}
+
+func (runtimeAttachFailureMessage) Type() string { return "runtime.attach.failure" }
+
 func (s *runtimeSubscription) Unsubscribe() {
-	s.unsubscribed = true
+	s.unsubscribed.Store(true)
 }
 
 func TestNewRuntimeContainerWiresSchedulerAndRegistry(t *testing.T) {
@@ -135,8 +140,8 @@ func TestRuntimeContainerStopUnsubscribesTrackedSubs(t *testing.T) {
 	})))
 
 	require.NoError(t, rt.Stop(context.Background()))
-	assert.True(t, subA.unsubscribed)
-	assert.True(t, subB.unsubscribed)
+	assert.True(t, subA.unsubscribed.Load())
+	assert.True(t, subB.unsubscribed.Load())
 }
 
 func TestRuntimeContainerRollsBackSubscriptionWhenRegistryRejectsRegistration(t *testing.T) {
@@ -156,10 +161,89 @@ func TestRuntimeContainerRollsBackSubscriptionWhenRegistryRejectsRegistration(t 
 
 	err := container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil }))
 	require.Error(t, err)
-	assert.True(t, commandSub.unsubscribed)
+	assert.True(t, commandSub.unsubscribed.Load())
 	err = container.RegisterQuery(command.QueryFunc[TestMessage, TestResponse](func(context.Context, TestMessage) (TestResponse, error) { return TestResponse{}, nil }))
 	require.Error(t, err)
-	assert.True(t, querySub.unsubscribed)
+	assert.True(t, querySub.unsubscribed.Load())
+}
+
+func TestRuntimeContainerRollsBackPartialHookSubscription(t *testing.T) {
+	sub := &runtimeSubscription{}
+	container := NewRuntimeContainer(RuntimeDependencies{
+		SubscribeCommand: func(any, ...runner.Option) (dispatcher.Subscription, error) {
+			return sub, assert.AnError
+		},
+	})
+
+	err := container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil }))
+	require.Error(t, err)
+	assert.True(t, sub.unsubscribed.Load())
+}
+
+func TestRuntimeContainerFailedStartRollsBackInstalledSubscriptions(t *testing.T) {
+	sub := &runtimeSubscription{}
+	container := NewRuntimeContainer(RuntimeDependencies{
+		SubscribeCommand: func(any, ...runner.Option) (dispatcher.Subscription, error) { return sub, nil },
+	})
+	require.NoError(t, container.AddResolver("fail", func(any, command.CommandMeta, *command.Registry) error { return assert.AnError }))
+	require.NoError(t, container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil })))
+
+	require.Error(t, container.Start(context.Background()))
+	assert.True(t, sub.unsubscribed.Load())
+	require.Error(t, container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil })))
+}
+
+func TestRuntimeContainerSerializesConcurrentRegisterAndStop(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	sub := &runtimeSubscription{}
+	container := NewRuntimeContainer(RuntimeDependencies{
+		SubscribeCommand: func(any, ...runner.Option) (dispatcher.Subscription, error) {
+			close(entered)
+			<-release
+			return sub, nil
+		},
+	})
+	registerDone := make(chan error, 1)
+	go func() {
+		registerDone <- container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil }))
+	}()
+	<-entered
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- container.Stop(context.Background()) }()
+	close(release)
+	require.NoError(t, <-registerDone)
+	require.NoError(t, <-stopDone)
+	assert.True(t, sub.unsubscribed.Load())
+	require.Error(t, container.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil })))
+}
+
+func TestRuntimeContainerProviderAttachFailureRollsBackSubscriptions(t *testing.T) {
+	dispatchRuntime := dispatcher.NewRuntime()
+	oldRegistry := command.NewRegistry()
+	require.NoError(t, oldRegistry.RegisterCommand(command.CommandFunc[TestMessage](func(context.Context, TestMessage) error { return nil })))
+	require.NoError(t, oldRegistry.Initialize())
+	require.NoError(t, dispatchRuntime.AttachRegistrationProvider(oldRegistry))
+	oldProvider := dispatchRuntime.RegistrationProvider()
+	oldRegistration, ok := oldRegistry.RegistrationByMessageType(command.HandlerKindCommand, "test_message")
+	require.True(t, ok)
+	require.NoError(t, dispatchRuntime.ReplacePlacementPolicies(command.PlacementPolicy{
+		Kind: command.HandlerKindCommand, RegistrationID: oldRegistration.ID(),
+		Route: command.DispatchRoute{Target: command.DispatchTargetLocal},
+	}))
+
+	sub := &runtimeSubscription{}
+	container := NewRuntimeContainer(RuntimeDependencies{
+		DispatchRuntime: dispatchRuntime,
+		SubscribeCommand: func(any, ...runner.Option) (dispatcher.Subscription, error) {
+			return sub, nil
+		},
+	})
+	require.NoError(t, container.RegisterCommand(command.CommandFunc[runtimeAttachFailureMessage](func(context.Context, runtimeAttachFailureMessage) error { return nil })))
+
+	require.Error(t, container.Start(context.Background()))
+	assert.True(t, sub.unsubscribed.Load())
+	assert.Same(t, oldProvider, dispatchRuntime.RegistrationProvider())
 }
 
 func TestRuntimeContainerWiresSelectedDispatcherRuntimeAndProvider(t *testing.T) {
