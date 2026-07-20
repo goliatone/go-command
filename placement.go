@@ -38,7 +38,7 @@ func NewPlacementPolicySnapshot(provider RegistrationProvider, policies ...Place
 	ordered := append([]PlacementPolicy(nil), policies...)
 	for index := range ordered {
 		ordered[index].RegistrationID = strings.TrimSpace(ordered[index].RegistrationID)
-		ordered[index].Route.Name = strings.TrimSpace(ordered[index].Route.Name)
+		ordered[index].Route = NormalizeDispatchRoute(ordered[index].Route)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
 		if ordered[i].Kind != ordered[j].Kind {
@@ -105,7 +105,7 @@ func (s *placementPolicySnapshot) PlacementPolicies() []PlacementPolicy {
 }
 
 func ValidateDispatchRoute(route DispatchRoute) error {
-	route.Name = strings.TrimSpace(route.Name)
+	route = NormalizeDispatchRoute(route)
 	switch route.Target {
 	case DispatchTargetLocal:
 		return nil
@@ -115,4 +115,11 @@ func ValidateDispatchRoute(route DispatchRoute) error {
 		}
 	}
 	return NewInvalidDispatchRouteError(route)
+}
+
+// NormalizeDispatchRoute returns the canonical logical route representation
+// used for validation, adapter invocation, outcomes, and lifecycle events.
+func NormalizeDispatchRoute(route DispatchRoute) DispatchRoute {
+	route.Name = strings.TrimSpace(route.Name)
+	return route
 }
