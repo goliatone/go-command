@@ -190,11 +190,15 @@ func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string
 	receipt = normalizeDispatchReceipt(receipt, run.ExecutionMode, commandID, opts.CorrelationID)
 	run.DispatchID = receipt.DispatchID
 	run.Receipt = receipt
-	if !receipt.Accepted {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(run.StartedAt)}))
-		return receipt, nil
-	}
 	if err := command.ValidateDispatchReceipt(receipt); err != nil {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Duration: time.Since(run.StartedAt),
+			Error:    err,
+		}))
+		return receipt, err
+	}
+	if !receipt.Accepted {
+		err := command.NewDispatchRejectedError(commandID, receipt)
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
 			Duration: time.Since(run.StartedAt),
 			Error:    err,
@@ -221,9 +225,9 @@ func RunObservedCommand(ctx context.Context, run command.DispatchRunContext, fn 
 	if run.ExecutionMode == "" {
 		run.ExecutionMode = command.ExecutionModeQueued
 	}
-	if run.StartedAt.IsZero() {
-		run.StartedAt = time.Now()
-	}
+	// A queued run's acceptance timestamp belongs to submission lifecycle.
+	// Execution timing starts when the worker actually invokes the command.
+	run.StartedAt = time.Now()
 	run.Metadata = command.CloneCommandRunMetadata(run.Metadata)
 
 	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, run.StartedAt, command.CommandRunEvent{}))

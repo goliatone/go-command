@@ -38,6 +38,7 @@ func (r *Runtime) invokeRemote(
 	message any,
 	options command.DispatchOptions,
 ) (command.DispatchOutcome, error) {
+	route = command.NormalizeDispatchRoute(route)
 	if generation == nil || generation.remote == nil {
 		return command.DispatchOutcome{}, command.NewRemoteDispatcherNotConfiguredError(registration, route)
 	}
@@ -60,16 +61,21 @@ func (r *Runtime) invokeRemote(
 		// Remote errors, including retry metadata and ambiguous outcomes, are
 		// returned unchanged. The runtime never retries or falls back locally.
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
-		return command.DispatchOutcome{}, err
-	}
-	if err := validateRemoteOutcome(registration, route, options, outcome); err != nil {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
-		return command.DispatchOutcome{}, err
+		return command.DispatchOutcome{Target: command.DispatchTargetRemote, Route: route.Name}, err
 	}
 	outcome.Target = command.DispatchTargetRemote
-	outcome.Route = strings.TrimSpace(route.Name)
+	outcome.Route = route.Name
+	if err := validateRemoteOutcome(registration, route, options, outcome); err != nil {
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		return outcome, err
+	}
 	run.Receipt = outcome.Receipt
 	run.DispatchID = outcome.Receipt.DispatchID
+	if !outcome.Receipt.Accepted {
+		err := command.NewDispatchRejectedError(registration.ID(), outcome.Receipt)
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		return outcome, err
+	}
 	phase := command.CommandRunPhaseSucceeded
 	if command.NormalizeExecutionMode(options.Mode) == command.ExecutionModeQueued {
 		phase = command.CommandRunPhaseSubmitted
@@ -124,7 +130,7 @@ func validateRemoteOutcome(
 				"route":                   strings.TrimSpace(route.Name),
 			})
 	}
-	if registration.Kind() == command.HandlerKindQuery {
+	if outcome.Receipt.Accepted && registration.Kind() == command.HandlerKindQuery {
 		return validateDynamicResult(registration, outcome.Result, outcome.ResultPresent)
 	}
 	return nil

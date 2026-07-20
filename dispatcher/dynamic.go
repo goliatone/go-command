@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -64,6 +65,7 @@ func (r *Runtime) Dispatch(ctx context.Context, kind command.HandlerKind, messag
 	if err := command.ValidateDispatchRoute(route); err != nil {
 		return command.DispatchOutcome{}, err
 	}
+	route = command.NormalizeDispatchRoute(route)
 	switch route.Target {
 	case command.DispatchTargetLocal:
 		return r.InvokeLocal(ctx, registration, normalized, merged)
@@ -177,11 +179,14 @@ func (r *Runtime) invokeLocalCommand(ctx context.Context, registration command.M
 		execCtx := command.ContextWithDispatchRun(ctx, run)
 		receipt, err := ObserveExecutor(executor).Execute(execCtx, message, registration.ID(), options)
 		if err != nil {
-			return command.DispatchOutcome{}, err
+			return command.DispatchOutcome{Receipt: receipt, Target: command.DispatchTargetLocal}, err
 		}
 		receipt = normalizeDispatchReceipt(receipt, mode, registration.ID(), options.CorrelationID)
 		if err := command.ValidateDispatchReceipt(receipt); err != nil {
-			return command.DispatchOutcome{}, err
+			return command.DispatchOutcome{Receipt: receipt, Target: command.DispatchTargetLocal}, err
+		}
+		if !receipt.Accepted {
+			return command.DispatchOutcome{Receipt: receipt, Target: command.DispatchTargetLocal}, command.NewDispatchRejectedError(registration.ID(), receipt)
 		}
 		return command.DispatchOutcome{Receipt: receipt, Target: command.DispatchTargetLocal}, nil
 	}
@@ -227,8 +232,17 @@ func (r *Runtime) invokeLocalQuery(ctx context.Context, registration command.Mes
 		Provenance:     dispatchProvenance(ctx),
 		Metadata:       command.CloneCommandRunMetadata(options.Metadata),
 	}
+	queryMux := r.queryMuxSnapshot()
+	if queryMux != nil {
+		if handlers := queryMux.Get(registration.MessageType()); len(handlers) == 1 {
+			if runnable, ok := handlers[0].Handler.(dynamicQueryRunnable); ok {
+				run.Handler = fmt.Sprintf("%T", runnable.handler())
+			}
+		}
+	}
 	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
-	result, err := invokeDynamicQuery(r.queryMuxSnapshot(), ctx, registration, message)
+	runCtx := command.ContextWithDispatchRun(ctx, run)
+	result, err := invokeDynamicQuery(queryMux, runCtx, registration, message)
 	if err != nil {
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
 		return command.DispatchOutcome{}, err

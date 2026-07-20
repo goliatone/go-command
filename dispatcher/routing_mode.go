@@ -67,10 +67,7 @@ func SetCommandRoutingMode(mode RoutingMode, opts ...RoutingOption) error {
 	defer testMuxMu.Unlock()
 
 	runtime := defaultRuntimeInstance()
-	if hasTrackedSubscriptions() || !runtime.replaceMuxesIfUnsubscribed(
-		newMuxForRouting(cfg),
-		newMuxForRouting(cfg),
-	) {
+	if hasTrackedSubscriptions() || !runtime.replaceRoutingIfUnsubscribed(cfg) {
 		return errors.New("cannot change routing mode after subscriptions are registered", errors.CategoryConflict).
 			WithCode(errors.CodeConflict).
 			WithTextCode(TextCodeDispatchRoutingLocked)

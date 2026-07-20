@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/goliatone/go-command"
+	"github.com/goliatone/go-command/router"
 	"github.com/goliatone/go-errors"
 )
 
@@ -28,12 +30,19 @@ type ModeResolver interface {
 type inlineCommandExecutor struct{}
 
 func (e inlineCommandExecutor) Execute(ctx context.Context, msg any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
-	if err := dispatchInlineWithRunContext(ctx, msg, command.DispatchRunContext{
+	return e.executeOnMux(ctx, getCommandMux(), msg, commandID, opts)
+}
+
+func (inlineCommandExecutor) executeOnMux(ctx context.Context, mux *router.Mux, msg any, commandID string, opts command.DispatchOptions) (command.DispatchReceipt, error) {
+	if err := dispatchInlineWithRunContextOn(mux, ctx, msg, command.DispatchRunContext{
 		CommandID:      commandID,
+		HandlerKind:    command.HandlerKindCommand,
+		DispatchTarget: command.DispatchTargetLocal,
 		ExecutionMode:  command.ExecutionModeInline,
 		CorrelationID:  strings.TrimSpace(opts.CorrelationID),
 		IdempotencyKey: strings.TrimSpace(opts.IdempotencyKey),
 		Metadata:       mergeDispatchMetadata(opts.Metadata, nil),
+		Provenance:     dispatchProvenance(ctx),
 	}); err != nil {
 		return command.DispatchReceipt{}, err
 	}
@@ -59,15 +68,19 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 	if err := command.ValidateMessage(msg); err != nil {
 		return command.DispatchReceipt{}, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	configuration := legacyDispatchConfigurationSnapshot()
 
-	if runtime := defaultRuntimeInstance(); runtime.RegistrationProvider() != nil {
-		resolvedOptions, err := resolveLegacyDispatchOptions(ctx, msg, opts)
+	if runtime := configuration.runtime; runtime.RegistrationProvider() != nil {
+		resolvedOptions, err := resolveLegacyDispatchOptions(ctx, msg, opts, configuration.resolver)
 		if err != nil {
 			return command.DispatchReceipt{}, err
 		}
 		outcome, err := runtime.Dispatch(ctx, command.HandlerKindCommand, msg, resolvedOptions)
 		if err != nil {
-			return command.DispatchReceipt{}, err
+			return outcome.Receipt, err
 		}
 		if err := storePresentDynamicResult(ctx, outcome); err != nil {
 			return command.DispatchReceipt{}, err
@@ -79,7 +92,7 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 	ctxOpts, _ := command.DispatchOptionsFromContext(ctx)
 	mergedOpts := mergeDispatchOptions(ctxOpts, opts)
 
-	resolver := getModeResolver()
+	resolver := configuration.resolver
 	requiresCanonicalForResolution, err := shouldUseCanonicalForResolution(opts.Mode, ctxOpts.Mode, resolver != nil)
 	if err != nil {
 		return command.DispatchReceipt{}, err
@@ -95,7 +108,7 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 		resolveCommandID = canonicalID
 	}
 
-	effectiveMode, err := resolveDispatchMode(ctx, resolveCommandID, opts.Mode, ctxOpts.Mode)
+	effectiveMode, err := resolveDispatchModeWithResolver(ctx, resolveCommandID, opts.Mode, ctxOpts.Mode, resolver)
 	if err != nil {
 		return command.DispatchReceipt{}, err
 	}
@@ -117,24 +130,32 @@ func DispatchWith[T any](ctx context.Context, msg T, opts command.DispatchOption
 	mergedOpts.Mode = effectiveMode
 
 	if effectiveMode == command.ExecutionModeQueued {
-		if count := commandHandlerCount(commandID); count > 1 {
+		if count := len(configuration.commandMux.Get(commandID)); count > 1 {
 			return command.DispatchReceipt{}, command.NewQueueMultiHandlerUnsupportedError(commandID, count)
 		}
 	}
 
-	executor, ok := getDispatchExecutor(effectiveMode)
+	executor, ok := configuration.executors[effectiveMode]
 	if !ok {
 		return command.DispatchReceipt{}, newDispatchExecutorNotConfiguredError(effectiveMode, commandID)
 	}
 
-	receipt, err := executor.Execute(ctx, msg, commandID, mergedOpts)
+	var receipt command.DispatchReceipt
+	if inline, ok := executor.(inlineCommandExecutor); ok {
+		receipt, err = inline.executeOnMux(ctx, configuration.commandMux, msg, commandID, mergedOpts)
+	} else {
+		receipt, err = executor.Execute(ctx, msg, commandID, mergedOpts)
+	}
 	if err != nil {
-		return command.DispatchReceipt{}, err
+		return receipt, err
 	}
 
 	receipt = normalizeDispatchReceipt(receipt, effectiveMode, commandID, mergedOpts.CorrelationID)
 	if err := command.ValidateDispatchReceipt(receipt); err != nil {
 		return command.DispatchReceipt{}, err
+	}
+	if !receipt.Accepted {
+		return receipt, command.NewDispatchRejectedError(commandID, receipt)
 	}
 
 	return receipt, nil
@@ -154,14 +175,19 @@ func RegisterExecutor(mode command.ExecutionMode, exec CommandExecutor) error {
 			WithTextCode("DISPATCH_EXECUTOR_NIL")
 	}
 
+	testMuxMu.RLock()
+	defer testMuxMu.RUnlock()
 	dispatchRoutingMu.Lock()
+	defer dispatchRoutingMu.Unlock()
+	previous, hadPrevious := dispatchExecutors[mode]
 	dispatchExecutors[mode] = exec
-	dispatchRoutingMu.Unlock()
 	if mode != command.ExecutionModeInline {
 		if err := defaultRuntimeInstance().RegisterExecutor(mode, exec); err != nil {
-			dispatchRoutingMu.Lock()
-			delete(dispatchExecutors, mode)
-			dispatchRoutingMu.Unlock()
+			if hadPrevious {
+				dispatchExecutors[mode] = previous
+			} else {
+				delete(dispatchExecutors, mode)
+			}
 			return err
 		}
 	}
@@ -174,6 +200,8 @@ func UnregisterExecutor(mode command.ExecutionMode) {
 		return
 	}
 
+	testMuxMu.RLock()
+	defer testMuxMu.RUnlock()
 	dispatchRoutingMu.Lock()
 	defer dispatchRoutingMu.Unlock()
 	delete(dispatchExecutors, mode)
@@ -191,6 +219,9 @@ func ExecutorForMode(mode command.ExecutionMode) (CommandExecutor, bool) {
 func SetModeResolver(resolver ModeResolver) {
 	dispatchRoutingMu.Lock()
 	defer dispatchRoutingMu.Unlock()
+	if isNilModeResolver(resolver) {
+		resolver = nil
+	}
 	dispatchModeResolver = resolver
 }
 
@@ -213,6 +244,55 @@ func getModeResolver() ModeResolver {
 	return dispatchModeResolver
 }
 
+type legacyDispatchConfiguration struct {
+	runtime    *Runtime
+	commandMux *router.Mux
+	resolver   ModeResolver
+	executors  map[command.ExecutionMode]CommandExecutor
+}
+
+// legacyDispatchConfigurationSnapshot captures every process-global input used
+// by one DispatchWith call. Install/restore and executor registration use the
+// same lock order, so an in-flight dispatch never combines generations.
+func legacyDispatchConfigurationSnapshot() legacyDispatchConfiguration {
+	defaultRuntimeInstance() // Ensure the lazy process runtime exists before read locking.
+	testMuxMu.RLock()
+	dispatchRoutingMu.RLock()
+	processRuntime.mu.RLock()
+	runtime := processRuntime.runtime
+	commandMux := testCommandMux
+	if commandMux == nil {
+		commandMux = runtime.commandMuxSnapshot()
+	}
+	executors := make(map[command.ExecutionMode]CommandExecutor, len(dispatchExecutors))
+	for mode, executor := range dispatchExecutors {
+		executors[mode] = executor
+	}
+	configuration := legacyDispatchConfiguration{
+		runtime:    runtime,
+		commandMux: commandMux,
+		resolver:   dispatchModeResolver,
+		executors:  executors,
+	}
+	processRuntime.mu.RUnlock()
+	dispatchRoutingMu.RUnlock()
+	testMuxMu.RUnlock()
+	return configuration
+}
+
+func isNilModeResolver(resolver ModeResolver) bool {
+	if resolver == nil {
+		return true
+	}
+	value := reflect.ValueOf(resolver)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
 func resetDispatchRoutingState() {
 	dispatchRoutingMu.Lock()
 	defer dispatchRoutingMu.Unlock()
@@ -228,6 +308,16 @@ func resolveDispatchMode(
 	explicitMode command.ExecutionMode,
 	contextMode command.ExecutionMode,
 ) (command.ExecutionMode, error) {
+	return resolveDispatchModeWithResolver(ctx, commandID, explicitMode, contextMode, getModeResolver())
+}
+
+func resolveDispatchModeWithResolver(
+	ctx context.Context,
+	commandID string,
+	explicitMode command.ExecutionMode,
+	contextMode command.ExecutionMode,
+	resolver ModeResolver,
+) (command.ExecutionMode, error) {
 	if mode, ok, err := parseModeCandidate(explicitMode); err != nil {
 		return "", err
 	} else if ok {
@@ -240,7 +330,7 @@ func resolveDispatchMode(
 		return mode, nil
 	}
 
-	if resolver := getModeResolver(); resolver != nil {
+	if resolver != nil {
 		mode, found, err := resolver.ResolveMode(ctx, commandID)
 		if err != nil {
 			return "", errors.Wrap(err, errors.CategoryInternal, "failed to resolve dispatch mode").
@@ -371,10 +461,9 @@ func cloneTimePtr(src *time.Time) *time.Time {
 	return &dst
 }
 
-func resolveLegacyDispatchOptions[T any](ctx context.Context, msg T, explicit command.DispatchOptions) (command.DispatchOptions, error) {
+func resolveLegacyDispatchOptions[T any](ctx context.Context, msg T, explicit command.DispatchOptions, resolver ModeResolver) (command.DispatchOptions, error) {
 	contextOptions, _ := command.DispatchOptionsFromContext(ctx)
 	merged := mergeDispatchOptions(contextOptions, explicit)
-	resolver := getModeResolver()
 	requiresCanonical, err := shouldUseCanonicalForResolution(explicit.Mode, contextOptions.Mode, resolver != nil)
 	if err != nil {
 		return command.DispatchOptions{}, err
@@ -386,7 +475,7 @@ func resolveLegacyDispatchOptions[T any](ctx context.Context, msg T, explicit co
 			return command.DispatchOptions{}, err
 		}
 	}
-	mode, err := resolveDispatchMode(ctx, resolveID, explicit.Mode, contextOptions.Mode)
+	mode, err := resolveDispatchModeWithResolver(ctx, resolveID, explicit.Mode, contextOptions.Mode, resolver)
 	if err != nil {
 		return command.DispatchOptions{}, err
 	}

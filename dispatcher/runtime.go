@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/router"
@@ -18,6 +20,7 @@ type Runtime struct {
 	muxMu      sync.RWMutex
 	commandMux *router.Mux
 	queryMux   *router.Mux
+	routing    routingConfig
 
 	commandSubscriptions atomic.Int64
 	querySubscriptions   atomic.Int64
@@ -39,9 +42,11 @@ type runtimeGeneration struct {
 type RuntimeOption func(*Runtime)
 
 func NewRuntime(options ...RuntimeOption) *Runtime {
+	routing := routingConfig{mode: RoutingModeExact}
 	runtime := &Runtime{
-		commandMux: newMuxForRouting(routingConfig{mode: RoutingModeExact}),
-		queryMux:   newMuxForRouting(routingConfig{mode: RoutingModeExact}),
+		commandMux: newMuxForRouting(routing),
+		queryMux:   newMuxForRouting(routing),
+		routing:    routing,
 		executors:  make(map[command.ExecutionMode]CommandExecutor),
 	}
 	runtime.generation.Store(&runtimeGeneration{})
@@ -134,25 +139,22 @@ func (r *Runtime) replaceMuxes(commandMux, queryMux *router.Mux) {
 	r.muxMu.Lock()
 	r.commandMux = commandMux
 	r.queryMux = queryMux
+	r.routing = routingConfig{mode: RoutingModeExact}
 	r.subscriptionEpoch.Add(1)
 	r.commandSubscriptions.Store(0)
 	r.querySubscriptions.Store(0)
 	r.muxMu.Unlock()
 }
 
-// replaceMuxesIfUnsubscribed atomically verifies subscription ownership and
-// replaces both muxes. Subscription helpers hold muxMu for the complete add,
-// so a successful replacement cannot orphan a concurrently added handler.
-func (r *Runtime) replaceMuxesIfUnsubscribed(commandMux, queryMux *router.Mux) bool {
+// replaceRoutingIfUnsubscribed atomically verifies subscription ownership and
+// replaces both muxes plus their reported configuration. Subscription helpers
+// hold muxMu for the complete add, so replacement cannot orphan a handler.
+func (r *Runtime) replaceRoutingIfUnsubscribed(cfg routingConfig) bool {
 	if r == nil {
 		return false
 	}
-	if commandMux == nil {
-		commandMux = newMuxForRouting(routingConfig{mode: RoutingModeExact})
-	}
-	if queryMux == nil {
-		queryMux = newMuxForRouting(routingConfig{mode: RoutingModeExact})
-	}
+	commandMux := newMuxForRouting(cfg)
+	queryMux := newMuxForRouting(cfg)
 	r.muxMu.Lock()
 	defer r.muxMu.Unlock()
 	if r.commandSubscriptions.Load() > 0 || r.querySubscriptions.Load() > 0 {
@@ -160,8 +162,37 @@ func (r *Runtime) replaceMuxesIfUnsubscribed(commandMux, queryMux *router.Mux) b
 	}
 	r.commandMux = commandMux
 	r.queryMux = queryMux
+	r.routing = cfg
 	r.subscriptionEpoch.Add(1)
 	return true
+}
+
+func (r *Runtime) routingConfigSnapshot() routingConfig {
+	if r == nil {
+		return routingConfig{mode: RoutingModeExact}
+	}
+	r.muxMu.RLock()
+	defer r.muxMu.RUnlock()
+	cfg := r.routing
+	if cfg.mode == "" {
+		cfg.mode = RoutingModeExact
+	}
+	return cfg
+}
+
+func (r *Runtime) executorSnapshot() map[command.ExecutionMode]CommandExecutor {
+	if r == nil {
+		return nil
+	}
+	r.executorMu.RLock()
+	defer r.executorMu.RUnlock()
+	out := make(map[command.ExecutionMode]CommandExecutor, len(r.executors))
+	for mode, executor := range r.executors {
+		if !isNilCommandExecutor(executor) {
+			out[mode] = executor
+		}
+	}
+	return out
 }
 
 // Reset clears subscriptions, executors, and routed configuration owned by one
@@ -467,9 +498,16 @@ func DispatchTo[T any](ctx context.Context, runtime *Runtime, msg T) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	opts, _ := command.DispatchOptionsFromContext(ctx)
 	return dispatchInlineWithRunContextOn(runtime.commandMuxSnapshot(), ctx, msg, command.DispatchRunContext{
-		CommandID:     command.GetMessageType(msg),
-		ExecutionMode: command.ExecutionModeInline,
+		CommandID:      command.GetMessageType(msg),
+		HandlerKind:    command.HandlerKindCommand,
+		DispatchTarget: command.DispatchTargetLocal,
+		ExecutionMode:  command.ExecutionModeInline,
+		CorrelationID:  strings.TrimSpace(opts.CorrelationID),
+		IdempotencyKey: strings.TrimSpace(opts.IdempotencyKey),
+		Metadata:       command.CloneCommandRunMetadata(opts.Metadata),
+		Provenance:     dispatchProvenance(ctx),
 	})
 }
 
@@ -521,16 +559,47 @@ func queryWithMux[T any, R any](ctx context.Context, mux *router.Mux, msg T) (R,
 		return zero, errors.Wrap(ctx.Err(), errors.CategoryExternal, "context canceled or deadline exceeded").
 			WithTextCode("CONTEXT_ERROR")
 	}
-	result, err := runner.RunQuery(ctx, queryHandler.runner, queryHandler.qry, msg)
+	opts, _ := command.DispatchOptionsFromContext(ctx)
+	startedAt := time.Now()
+	run := command.DispatchRunContext{
+		RunID:          newCommandRunID(),
+		CommandID:      command.GetMessageType(msg),
+		Handler:        fmt.Sprintf("%T", queryHandler.qry),
+		HandlerKind:    command.HandlerKindQuery,
+		DispatchTarget: command.DispatchTargetLocal,
+		ExecutionMode:  command.ExecutionModeInline,
+		CorrelationID:  strings.TrimSpace(opts.CorrelationID),
+		IdempotencyKey: strings.TrimSpace(opts.IdempotencyKey),
+		StartedAt:      startedAt,
+		Provenance:     dispatchProvenance(ctx),
+		Metadata:       command.CloneCommandRunMetadata(opts.Metadata),
+	}
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
+	runCtx := command.ContextWithDispatchRun(ctx, run)
+	result, err := runner.RunQuery(runCtx, queryHandler.runner, queryHandler.qry, msg)
 	if err != nil {
-		return zero, errors.Wrap(err, errors.CategoryHandler, fmt.Sprintf("query handler failed for type %s", command.GetMessageType(msg))).
+		wrapped := errors.Wrap(err, errors.CategoryHandler, fmt.Sprintf("query handler failed for type %s", command.GetMessageType(msg))).
 			WithTextCode("QUERY_EXECUTION_FAILED").
 			WithMetadata(map[string]any{
 				"message_type": command.GetMessageType(msg),
 				"result_type":  fmt.Sprintf("%T", zero),
 				"handler":      fmt.Sprintf("%T", queryHandler.qry),
 			})
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+			Duration: time.Since(startedAt),
+			Error:    wrapped,
+		}))
+		return zero, wrapped
 	}
+	run.Receipt = command.DispatchReceipt{
+		Accepted:      true,
+		Mode:          command.ExecutionModeInline,
+		CommandID:     run.CommandID,
+		CorrelationID: run.CorrelationID,
+	}
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+		Duration: time.Since(startedAt),
+	}))
 	return result, nil
 }
 
@@ -568,13 +637,18 @@ func InstallDefaultRuntime(runtime *Runtime) (func(), error) {
 		return nil, errors.New("dispatcher runtime cannot be nil", errors.CategoryBadInput).
 			WithTextCode("DISPATCH_RUNTIME_NIL")
 	}
+	testMuxMu.Lock()
+	dispatchRoutingMu.Lock()
 	processRuntime.mu.Lock()
 	previous := processRuntime.runtime
 	if previous == nil {
 		previous = NewRuntime()
 	}
 	processRuntime.runtime = runtime
+	syncDefaultRuntimeConfigurationLocked(runtime)
 	processRuntime.mu.Unlock()
+	dispatchRoutingMu.Unlock()
+	testMuxMu.Unlock()
 
 	var restoreMu sync.Mutex
 	restored := false
@@ -584,13 +658,37 @@ func InstallDefaultRuntime(runtime *Runtime) (func(), error) {
 		if restored {
 			return
 		}
+		testMuxMu.Lock()
+		dispatchRoutingMu.Lock()
 		processRuntime.mu.Lock()
 		if processRuntime.runtime == runtime {
 			processRuntime.runtime = previous
+			syncDefaultRuntimeConfigurationLocked(previous)
 			restored = true
 		}
 		processRuntime.mu.Unlock()
+		dispatchRoutingMu.Unlock()
+		testMuxMu.Unlock()
 	}, nil
+}
+
+// syncDefaultRuntimeConfigurationLocked updates compatibility configuration
+// from the installed runtime. Callers hold testMuxMu, dispatchRoutingMu, and
+// processRuntime.mu so install/restore cannot interleave with setters.
+func syncDefaultRuntimeConfigurationLocked(runtime *Runtime) {
+	commandRoutingConfig = runtime.routingConfigSnapshot()
+	inline := dispatchExecutors[command.ExecutionModeInline]
+	if isNilCommandExecutor(inline) {
+		inline = defaultInlineExecutor
+	}
+	dispatchExecutors = map[command.ExecutionMode]CommandExecutor{
+		command.ExecutionModeInline: inline,
+	}
+	for mode, executor := range runtime.executorSnapshot() {
+		if mode != command.ExecutionModeInline {
+			dispatchExecutors[mode] = executor
+		}
+	}
 }
 
 func isNilRegistrationProvider(provider command.RegistrationProvider) bool {

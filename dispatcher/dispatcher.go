@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -160,9 +161,7 @@ func DispatchWithResult[T any, R any](ctx context.Context, msg T) (R, error) {
 
 	if _, err := DispatchWith(ctx, msg, command.DispatchOptions{}); err != nil {
 		var zero R
-		// TODO: how do we handle agumenting a returned errors.Error?
-		return zero, errors.Wrap(err, errors.CategoryCommand, "dispatch generated error").
-			WithTextCode("DISPATCHER_ERROR")
+		return zero, err
 	}
 
 	value, stored := result.Load()
@@ -321,11 +320,19 @@ func commandHandlerCount(commandID string) int {
 }
 
 func dispatchInline(ctx context.Context, msg any, messageType string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	opts, _ := command.DispatchOptionsFromContext(ctx)
 	return dispatchInlineWithRunContext(ctx, msg, command.DispatchRunContext{
 		CommandID:      messageType,
 		HandlerKind:    command.HandlerKindCommand,
 		DispatchTarget: command.DispatchTargetLocal,
 		ExecutionMode:  command.ExecutionModeInline,
+		CorrelationID:  strings.TrimSpace(opts.CorrelationID),
+		IdempotencyKey: strings.TrimSpace(opts.IdempotencyKey),
+		Metadata:       mergeDispatchMetadata(opts.Metadata, nil),
+		Provenance:     dispatchProvenance(ctx),
 	})
 }
 
@@ -338,6 +345,18 @@ func dispatchInlineWithRunContextOn(mux *router.Mux, ctx context.Context, msg an
 }
 
 func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, msg any, messageType string, runtime command.DispatchRunContext) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if runtime.HandlerKind == "" {
+		runtime.HandlerKind = command.HandlerKindCommand
+	}
+	if runtime.DispatchTarget == "" {
+		runtime.DispatchTarget = command.DispatchTargetLocal
+	}
+	if runtime.Provenance == (command.DispatchProvenance{}) {
+		runtime.Provenance = dispatchProvenance(ctx)
+	}
 	handlers, err := getDispatchHandlersFrom(mux, messageType)
 	if err != nil {
 		return errors.Wrap(err, errors.CategoryHandler, "failed to get command handlers").
