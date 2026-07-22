@@ -196,7 +196,10 @@ func TestFSMAuthoringRPCEndpointsPayloadValidationAndErrorMapping(t *testing.T) 
 	exportRPC := RPCErrorForError(err)
 	require.NotNil(t, exportRPC)
 	assert.Equal(t, ErrCodePreconditionFailed, exportRPC.Code)
-	assert.Contains(t, exportRPC.Message, "authoring export capability unavailable")
+	assert.Equal(t, err.Error(), exportRPC.Message)
+	assert.NotContains(t, exportRPC.Message, "authoring export capability unavailable")
+	require.NotNil(t, runtimeAppError(err))
+	assert.Equal(t, "authoring export capability unavailable", runtimeAppError(err).Message)
 }
 
 func registerAuthoringRPCServer(t *testing.T, service *AuthoringService) *rpc.Server {

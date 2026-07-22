@@ -8,12 +8,51 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	gerrors "github.com/goliatone/go-errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-command/dispatcher"
 )
+
+func assertStructuredMessage(t *testing.T, err error, want string) *gerrors.Error {
+	t.Helper()
+	require.Error(t, err)
+	var structured *gerrors.Error
+	require.ErrorAs(t, err, &structured)
+	assert.Equal(t, want, structured.Message)
+	return structured
+}
+
+func assertErrorChainMessage(t *testing.T, err error, want string) {
+	t.Helper()
+	if errorChainContainsMessage(err, want) {
+		return
+	}
+	t.Errorf("error chain does not contain message %q", want)
+}
+
+func errorChainContainsMessage(err error, want string) bool {
+	if err == nil {
+		return false
+	}
+	if structured, ok := err.(*gerrors.Error); ok && structured.Message == want {
+		return true
+	}
+	if err.Error() == want {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			if errorChainContainsMessage(child, want) {
+				return true
+			}
+		}
+		return false
+	}
+	return errorChainContainsMessage(gerrors.Unwrap(err), want)
+}
 
 type TestMessage struct {
 	Content string
@@ -192,8 +231,7 @@ func TestGetCLIOptionsBeforeInitialization(t *testing.T) {
 	WithTestRegistry(func() {
 		options, err := GetCLIOptions()
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialized")
+		assertStructuredMessage(t, err, "registry not initialized")
 		assert.Nil(t, options)
 	})
 }
@@ -225,8 +263,9 @@ func TestStart(t *testing.T) {
 			require.NoError(t, err)
 
 			err = Start(context.Background())
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "mock cron registration error")
+			structured := assertStructuredMessage(t, err, "cron scheduler registration failed")
+			assert.Equal(t, "CRON_REGISTRATION_FAILED", structured.TextCode)
+			assertErrorChainMessage(t, err, "mock cron registration error")
 		})
 	})
 }
@@ -249,8 +288,7 @@ func TestStop(t *testing.T) {
 		assert.NoError(t, err)
 
 		_, err = GetCLIOptions()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialized")
+		assertStructuredMessage(t, err, "registry not initialized")
 	})
 }
 
@@ -348,8 +386,7 @@ func TestErrorPropagation(t *testing.T) {
 	WithTestRegistry(func() {
 		SetCronRegister(command.NilCronRegister)
 		_, err := RegisterCommand[TestMessage](nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command cannot be nil")
+		assertStructuredMessage(t, err, "command cannot be nil")
 
 		cmd := &GlobalTestCommand{name: "error-prop-test"}
 		_, err = RegisterCommand(cmd)
@@ -360,8 +397,7 @@ func TestErrorPropagation(t *testing.T) {
 
 		cmd2 := &GlobalTestCommand{name: "late-registration"}
 		_, err = RegisterCommand(cmd2)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot register commands after registry has been initialized")
+		assertStructuredMessage(t, err, "cannot register commands after registry has been initialized")
 	})
 }
 

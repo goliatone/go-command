@@ -252,6 +252,10 @@ func TestDispatchErrorClassification(t *testing.T) {
 		if gerr.Code != gerrors.CodeBadRequest {
 			t.Errorf("expected HTTP code %d, got %d", gerrors.CodeBadRequest, gerr.Code)
 		}
+
+		if len(gerr.ValidationErrors) != 1 || gerr.ValidationErrors[0].Field != "email" {
+			t.Errorf("expected email validation details, got %#v", gerr.ValidationErrors)
+		}
 	})
 
 	t.Run("non-validation errors remain handler execution failures", func(t *testing.T) {

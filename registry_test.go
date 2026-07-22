@@ -9,9 +9,48 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	gerrors "github.com/goliatone/go-errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func assertStructuredMessage(t *testing.T, err error, want string) *gerrors.Error {
+	t.Helper()
+	require.Error(t, err)
+	var structured *gerrors.Error
+	require.ErrorAs(t, err, &structured)
+	assert.Equal(t, want, structured.Message)
+	return structured
+}
+
+func assertErrorChainMessage(t *testing.T, err error, want string) {
+	t.Helper()
+	if errorChainContainsMessage(err, want) {
+		return
+	}
+	t.Errorf("error chain does not contain message %q", want)
+}
+
+func errorChainContainsMessage(err error, want string) bool {
+	if err == nil {
+		return false
+	}
+	if structured, ok := err.(*gerrors.Error); ok && structured.Message == want {
+		return true
+	}
+	if err.Error() == want {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			if errorChainContainsMessage(child, want) {
+				return true
+			}
+		}
+		return false
+	}
+	return errorChainContainsMessage(errors.Unwrap(err), want)
+}
 
 type TestCommand struct {
 	name string
@@ -330,8 +369,7 @@ func TestRegisterCommand(t *testing.T) {
 			err := registry.RegisterCommand(tt.cmd)
 
 			if tt.wantErr != "" {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
+				assertStructuredMessage(t, err, tt.wantErr)
 			} else {
 				assert.NoError(t, err)
 				assert.Len(t, registry.commandsToRegister, 1)
@@ -394,8 +432,7 @@ func TestInitialize(t *testing.T) {
 
 		err := registry.Initialize()
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry already initialized")
+		assertStructuredMessage(t, err, "registry already initialized")
 	})
 
 	t.Run("cron registration error", func(t *testing.T) {
@@ -408,8 +445,9 @@ func TestInitialize(t *testing.T) {
 
 		err := registry.Initialize()
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "mock cron registration error")
+		structured := assertStructuredMessage(t, err, "cron scheduler registration failed")
+		assert.Equal(t, "CRON_REGISTRATION_FAILED", structured.TextCode)
+		assertErrorChainMessage(t, err, "mock cron registration error")
 		assert.True(t, registry.initialized)
 	})
 
@@ -420,8 +458,7 @@ func TestInitialize(t *testing.T) {
 
 		err := registry.Initialize()
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cron scheduler not provided during initialization")
+		assertStructuredMessage(t, err, "cron scheduler not provided during initialization")
 	})
 }
 
@@ -479,8 +516,7 @@ func TestRegisterWithCron(t *testing.T) {
 
 		err := registry.registerWithCron(cmd)
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cron scheduler not provided during initialization")
+		assertStructuredMessage(t, err, "cron scheduler not provided during initialization")
 	})
 }
 
@@ -553,8 +589,7 @@ func TestRegisterWithRPC(t *testing.T) {
 
 		err := registry.registerWithRPC(cmd, CommandMeta{})
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "rpc transport not provided during initialization")
+		assertStructuredMessage(t, err, "rpc transport not provided during initialization")
 	})
 }
 
@@ -581,8 +616,7 @@ func TestGetCLIOptions(t *testing.T) {
 
 		options, err := registry.GetCLIOptions()
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "registry not initialized")
+		assertStructuredMessage(t, err, "registry not initialized")
 		assert.Nil(t, options)
 	})
 }
@@ -642,8 +676,7 @@ func TestRegistryMultipleInitialization(t *testing.T) {
 	assert.NoError(t, err1)
 
 	err2 := registry.Initialize()
-	assert.Error(t, err2)
-	assert.Contains(t, err2.Error(), "registry already initialized")
+	assertStructuredMessage(t, err2, "registry already initialized")
 }
 
 func TestRegistryEdgeCases(t *testing.T) {
