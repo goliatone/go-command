@@ -58,6 +58,7 @@ func TestDispatchRunContextRoundTripAndIsolation(t *testing.T) {
 	startedAt := time.Now().UTC()
 	run := DispatchRunContext{
 		RunID:          "run-1",
+		Revision:       7,
 		DispatchID:     "dispatch-1",
 		CommandID:      "command.create",
 		Handler:        "*handler",
@@ -76,6 +77,7 @@ func TestDispatchRunContextRoundTripAndIsolation(t *testing.T) {
 	got, ok := DispatchRunFromContext(ctx)
 	require.True(t, ok)
 	assert.Equal(t, "run-1", got.RunID)
+	assert.Equal(t, uint64(7), got.Revision)
 	assert.Equal(t, "api", got.Metadata["source"])
 
 	got.Metadata["source"] = "mutated-read"
@@ -86,6 +88,17 @@ func TestDispatchRunContextRoundTripAndIsolation(t *testing.T) {
 
 	_, ok = DispatchRunFromContext(context.Background())
 	assert.False(t, ok)
+}
+
+func TestDispatchRunContextReportsCurrentRevisionSequence(t *testing.T) {
+	ctx := ContextWithCommandRunRevision(context.Background(), 4)
+	ctx = ContextWithDispatchRun(ctx, DispatchRunContext{RunID: "run-sequenced", Revision: 4})
+	assert.Equal(t, uint64(5), NextCommandRunRevision(ctx))
+	assert.Equal(t, uint64(6), NextCommandRunRevision(ctx))
+
+	run, ok := DispatchRunFromContext(ctx)
+	require.True(t, ok)
+	assert.Equal(t, uint64(6), run.Revision)
 }
 
 func TestCommandRunEventCloneIsolatesMetadata(t *testing.T) {

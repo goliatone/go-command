@@ -177,6 +177,8 @@ func TestRunObservedCommandStartsExecutionClockAtWorkerInvocation(t *testing.T) 
 	}, func(context.Context) error { return nil })
 	require.NoError(t, err)
 	require.Len(t, events, 2)
+	assert.Equal(t, uint64(2), events[0].Revision)
+	assert.Equal(t, uint64(3), events[1].Revision)
 	assert.True(t, events[0].StartedAt.After(acceptedAt))
 	assert.Less(t, events[1].Duration, time.Minute)
 }
@@ -224,6 +226,9 @@ func TestDispatchEmitsInlineLifecycleAndProgressEvents(t *testing.T) {
 		assert.Equal(t, "lifecycle.test", event.CommandID)
 		assert.Equal(t, command.ExecutionModeInline, event.ExecutionMode)
 		assert.NotEmpty(t, event.Handler)
+	}
+	for i, event := range events {
+		assert.Equal(t, uint64(i+1), event.Revision)
 	}
 	assert.GreaterOrEqual(t, events[3].Duration, int64(0))
 }

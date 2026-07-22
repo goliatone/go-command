@@ -419,9 +419,11 @@ func TestObservedExecutorEmitsSubmittedAfterAcceptedReceipt(t *testing.T) {
 
 	require.True(t, queuedExec.called)
 	assert.NotEmpty(t, queuedExec.gotRun.RunID)
+	assert.Equal(t, uint64(1), queuedExec.gotRun.Revision)
 	assert.Equal(t, "routing.dispatch.test", queuedExec.gotRun.CommandID)
 	require.Len(t, events, 1)
 	assert.Equal(t, command.CommandRunPhaseSubmitted, events[0].Phase)
+	assert.Equal(t, uint64(1), events[0].Revision)
 	assert.Equal(t, queuedExec.gotRun.RunID, events[0].RunID)
 	assert.Equal(t, "dispatch-observed", events[0].DispatchID)
 	assert.Equal(t, command.ExecutionModeQueued, events[0].ExecutionMode)
@@ -467,6 +469,9 @@ func TestRunObservedCommandEmitsQueuedLifecycleWithCapturedRunContext(t *testing
 		assert.Equal(t, "dispatch-delayed", gotRun.DispatchID)
 		command.Checkpoint(ctx, "dequeued")
 		command.Progress(ctx, 5, 10, command.WithProgressMetadata(map[string]any{"worker": "a"}))
+		persisted, ok := command.DispatchRunFromContext(ctx)
+		require.True(t, ok)
+		assert.Equal(t, uint64(4), persisted.Revision)
 		return nil
 	})
 	require.NoError(t, err)
@@ -481,6 +486,7 @@ func TestRunObservedCommandEmitsQueuedLifecycleWithCapturedRunContext(t *testing
 	}
 	for i, phase := range wantPhases {
 		assert.Equal(t, phase, events[i].Phase)
+		assert.Equal(t, uint64(i+1), events[i].Revision)
 		assert.Equal(t, run.RunID, events[i].RunID)
 		assert.Equal(t, "dispatch-delayed", events[i].DispatchID)
 		assert.Equal(t, command.ExecutionModeQueued, events[i].ExecutionMode)
