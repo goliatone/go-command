@@ -5,6 +5,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,7 @@ const (
 // lifecycle and cooperative progress updates.
 type CommandRunEvent struct {
 	RunID           string
+	Revision        uint64
 	DispatchID      string
 	CommandID       string
 	Handler         string
@@ -176,7 +178,11 @@ func reportProgressUpdate(ctx context.Context, update ProgressUpdate, opts ...Pr
 // DispatchRunContext carries safe run identity and dispatch metadata through a
 // command execution context.
 type DispatchRunContext struct {
-	RunID          string
+	RunID string
+	// Revision is the last lifecycle revision reserved by the process handing
+	// this run to another executor. Persist it with queued work so a worker can
+	// continue the same monotonic sequence in another process.
+	Revision       uint64
 	DispatchID     string
 	CommandID      string
 	Handler        string
@@ -209,6 +215,49 @@ func cloneDispatchReceipt(receipt DispatchReceipt) DispatchReceipt {
 }
 
 type dispatchRunContextKey struct{}
+type commandRunRevisionContextKey struct{}
+
+type commandRunRevisionState struct {
+	value atomic.Uint64
+}
+
+// ContextWithCommandRunRevision starts a process-local sequencer from the last
+// revision persisted with a dispatch run. The state is shared by derived
+// contexts so progress reporters and lifecycle emitters allocate one sequence.
+func ContextWithCommandRunRevision(ctx context.Context, last uint64) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state := &commandRunRevisionState{}
+	state.value.Store(last)
+	return context.WithValue(ctx, commandRunRevisionContextKey{}, state)
+}
+
+// NextCommandRunRevision atomically reserves the next lifecycle revision.
+func NextCommandRunRevision(ctx context.Context) uint64 {
+	state, ok := commandRunRevisionStateFromContext(ctx)
+	if !ok {
+		return 0
+	}
+	return state.value.Add(1)
+}
+
+// CommandRunRevisionFromContext returns the latest reserved revision.
+func CommandRunRevisionFromContext(ctx context.Context) (uint64, bool) {
+	state, ok := commandRunRevisionStateFromContext(ctx)
+	if !ok {
+		return 0, false
+	}
+	return state.value.Load(), true
+}
+
+func commandRunRevisionStateFromContext(ctx context.Context) (*commandRunRevisionState, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	state, ok := ctx.Value(commandRunRevisionContextKey{}).(*commandRunRevisionState)
+	return state, ok && state != nil
+}
 
 // ContextWithDispatchRun stores command run identity in context.
 func ContextWithDispatchRun(ctx context.Context, run DispatchRunContext) context.Context {
@@ -226,6 +275,9 @@ func DispatchRunFromContext(ctx context.Context) (DispatchRunContext, bool) {
 	run, ok := ctx.Value(dispatchRunContextKey{}).(DispatchRunContext)
 	if !ok {
 		return DispatchRunContext{}, false
+	}
+	if revision, exists := CommandRunRevisionFromContext(ctx); exists && revision > run.Revision {
+		run.Revision = revision
 	}
 	return run.clone(), true
 }
