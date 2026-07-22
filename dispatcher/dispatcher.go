@@ -282,14 +282,13 @@ func wrapHandlerError[T any](err error, msg T, handler any) *errors.Error {
 	}
 
 	if isValidationError(err) {
-		wrapped := errors.Wrap(err, errors.CategoryValidation, baseMessage).
+		wrapped := errors.Reclassify(err, errors.CategoryValidation, baseMessage).
 			WithTextCode("VALIDATION_FAILED").
+			WithCode(errors.CodeBadRequest).
 			WithMetadata(metadata)
-
-		if wrapped.Code == 0 {
-			wrapped.WithCode(errors.CodeBadRequest)
+		if validationErrors, ok := errors.GetValidationErrors(err); ok {
+			wrapped.ValidationErrors = append(errors.ValidationErrors(nil), validationErrors...)
 		}
-
 		return wrapped
 	}
 
@@ -308,7 +307,7 @@ func isValidationError(err error) bool {
 		return true
 	}
 
-	if errors.IsValidation(err) {
+	if errors.HasCategory(err, errors.CategoryValidation) {
 		return true
 	}
 
