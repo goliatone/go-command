@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.24.1](https://github.com/goliatone/go-command/compare/v0.24.0...v0.24.1) - (2026-07-22)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.24.1 ([8ac9372](https://github.com/goliatone/go-command/commit/8ac93722e65a85a9e5f8fb97280245b2a00a38e6))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Context to error source ([476cf57](https://github.com/goliatone/go-command/commit/476cf57570fc31011104ce141ea32b9db113a7aa))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.24.0 ([763076e](https://github.com/goliatone/go-command/commit/763076e9c5ff1078d097874b25d824873db3b634))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([493e7bd](https://github.com/goliatone/go-command/commit/493e7bdae0fb525007cac82981961cb7f7cc1d2a))  - (goliatone)
+
 # [0.24.0](https://github.com/goliatone/go-command/compare/v0.23.3...v0.24.0) - (2026-07-22)
 
 ## <!-- 13 -->📦 Bumps
