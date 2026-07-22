@@ -240,15 +240,16 @@ func (r *Runtime) invokeLocalQuery(ctx context.Context, registration command.Mes
 			}
 		}
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
-	runCtx := command.ContextWithDispatchRun(ctx, run)
+	runCtx := command.ContextWithCommandRunRevision(ctx, run.Revision)
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
+	runCtx = command.ContextWithDispatchRun(runCtx, run)
 	result, err := invokeDynamicQuery(queryMux, runCtx, registration, message)
 	if err != nil {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
 		return command.DispatchOutcome{}, err
 	}
 	if err := validateDynamicResult(registration, result, true); err != nil {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseFailed, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseFailed, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
 		return command.DispatchOutcome{}, err
 	}
 	receipt := command.DispatchReceipt{
@@ -258,7 +259,7 @@ func (r *Runtime) invokeLocalQuery(ctx context.Context, registration command.Mes
 		CorrelationID: strings.TrimSpace(options.CorrelationID),
 	}
 	run.Receipt = receipt
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt)}))
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt)}))
 	return command.DispatchOutcome{
 		Receipt:       receipt,
 		Target:        command.DispatchTargetLocal,

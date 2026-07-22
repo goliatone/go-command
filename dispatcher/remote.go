@@ -56,31 +56,37 @@ func (r *Runtime) invokeRemote(
 		Provenance:     dispatchProvenance(ctx),
 		Metadata:       command.CloneCommandRunMetadata(options.Metadata),
 	}
-	outcome, err := generation.remote.DispatchRemote(ctx, route, registration, message, options)
+	// Remote queued dispatch reserves revision 1 before handing the run to the
+	// transport so a delayed worker can continue at revision 2.
+	if run.ExecutionMode == command.ExecutionModeQueued {
+		run.Revision = 1
+	}
+	dispatchCtx := command.ContextWithDispatchRun(ctx, run)
+	outcome, err := generation.remote.DispatchRemote(dispatchCtx, route, registration, message, options)
 	if err != nil {
 		// Remote errors, including retry metadata and ambiguous outcomes, are
 		// returned unchanged. The runtime never retries or falls back locally.
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Revision: max(run.Revision, 1), Duration: time.Since(startedAt), Error: err}))
 		return command.DispatchOutcome{Target: command.DispatchTargetRemote, Route: route.Name}, err
 	}
 	outcome.Target = command.DispatchTargetRemote
 	outcome.Route = route.Name
 	if err := validateRemoteOutcome(registration, route, options, outcome); err != nil {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Revision: max(run.Revision, 1), Duration: time.Since(startedAt), Error: err}))
 		return outcome, err
 	}
 	run.Receipt = outcome.Receipt
 	run.DispatchID = outcome.Receipt.DispatchID
 	if !outcome.Receipt.Accepted {
 		err := command.NewDispatchRejectedError(registration.ID(), outcome.Receipt)
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt), Error: err}))
+		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{Revision: max(run.Revision, 1), Duration: time.Since(startedAt), Error: err}))
 		return outcome, err
 	}
 	phase := command.CommandRunPhaseSucceeded
 	if command.NormalizeExecutionMode(options.Mode) == command.ExecutionModeQueued {
 		phase = command.CommandRunPhaseSubmitted
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, phase, time.Now(), command.CommandRunEvent{Duration: time.Since(startedAt)}))
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, phase, time.Now(), command.CommandRunEvent{Revision: max(run.Revision, 1), Duration: time.Since(startedAt)}))
 	return outcome, nil
 }
 

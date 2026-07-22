@@ -574,8 +574,9 @@ func queryWithMux[T any, R any](ctx context.Context, mux *router.Mux, msg T) (R,
 		Provenance:     dispatchProvenance(ctx),
 		Metadata:       command.CloneCommandRunMetadata(opts.Metadata),
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
-	runCtx := command.ContextWithDispatchRun(ctx, run)
+	runCtx := command.ContextWithCommandRunRevision(ctx, run.Revision)
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
+	runCtx = command.ContextWithDispatchRun(runCtx, run)
 	result, err := runner.RunQuery(runCtx, queryHandler.runner, queryHandler.qry, msg)
 	if err != nil {
 		wrapped := errors.Wrap(err, errors.CategoryHandler, fmt.Sprintf("query handler failed for type %s", command.GetMessageType(msg))).
@@ -585,7 +586,7 @@ func queryWithMux[T any, R any](ctx context.Context, mux *router.Mux, msg T) (R,
 				"result_type":  fmt.Sprintf("%T", zero),
 				"handler":      fmt.Sprintf("%T", queryHandler.qry),
 			})
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+		emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
 			Duration: time.Since(startedAt),
 			Error:    wrapped,
 		}))
@@ -597,7 +598,7 @@ func queryWithMux[T any, R any](ctx context.Context, mux *router.Mux, msg T) (R,
 		CommandID:     run.CommandID,
 		CorrelationID: run.CorrelationID,
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
 		Duration: time.Since(startedAt),
 	}))
 	return result, nil

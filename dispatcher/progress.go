@@ -119,6 +119,19 @@ type commandRunProgressReporter struct {
 	run command.DispatchRunContext
 }
 
+func commandRunEventWithRevision(
+	ctx context.Context,
+	run command.DispatchRunContext,
+	phase command.CommandRunPhase,
+	occurredAt time.Time,
+	event command.CommandRunEvent,
+) command.CommandRunEvent {
+	if event.Revision == 0 {
+		event.Revision = command.NextCommandRunRevision(ctx)
+	}
+	return commandRunEventFromContext(run, phase, occurredAt, event)
+}
+
 type observedExecutor struct {
 	inner CommandExecutor
 }
@@ -176,11 +189,18 @@ func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string
 	if len(run.Metadata) == 0 {
 		run.Metadata = command.CloneCommandRunMetadata(opts.Metadata)
 	}
+	// Acceptance owns revision 1. The executor sees that reserved baseline in
+	// DispatchRunContext and can persist it with queued work before submission is
+	// emitted after a successful receipt.
+	if run.Revision == 0 {
+		run.Revision = 1
+	}
 
 	execCtx := command.ContextWithDispatchRun(ctx, run)
 	receipt, err := e.inner.Execute(execCtx, msg, commandID, opts)
 	if err != nil {
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Revision: run.Revision,
 			Duration: time.Since(run.StartedAt),
 			Error:    err,
 		}))
@@ -192,6 +212,7 @@ func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string
 	run.Receipt = receipt
 	if err := command.ValidateDispatchReceipt(receipt); err != nil {
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Revision: run.Revision,
 			Duration: time.Since(run.StartedAt),
 			Error:    err,
 		}))
@@ -200,12 +221,16 @@ func (e observedExecutor) Execute(ctx context.Context, msg any, commandID string
 	if !receipt.Accepted {
 		err := command.NewDispatchRejectedError(commandID, receipt)
 		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseRejected, time.Now(), command.CommandRunEvent{
+			Revision: run.Revision,
 			Duration: time.Since(run.StartedAt),
 			Error:    err,
 		}))
 		return receipt, err
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSubmitted, time.Now(), command.CommandRunEvent{Duration: time.Since(run.StartedAt)}))
+	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSubmitted, time.Now(), command.CommandRunEvent{
+		Revision: run.Revision,
+		Duration: time.Since(run.StartedAt),
+	}))
 	return receipt, nil
 }
 
@@ -229,10 +254,16 @@ func RunObservedCommand(ctx context.Context, run command.DispatchRunContext, fn 
 	// Execution timing starts when the worker actually invokes the command.
 	run.StartedAt = time.Now()
 	run.Metadata = command.CloneCommandRunMetadata(run.Metadata)
+	if run.Revision == 0 && run.ExecutionMode == command.ExecutionModeQueued {
+		// Queued acceptance reserves revision 1 even when older queue payloads did
+		// not persist the new field.
+		run.Revision = 1
+	}
+	runCtx := command.ContextWithCommandRunRevision(ctx, run.Revision)
 
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, run.StartedAt, command.CommandRunEvent{}))
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseStarted, run.StartedAt, command.CommandRunEvent{}))
 
-	runCtx := command.ContextWithDispatchRun(ctx, run)
+	runCtx = command.ContextWithDispatchRun(runCtx, run)
 	runCtx = command.ContextWithCommandRunAttemptTracker(runCtx)
 	runCtx = command.ContextWithCommandProgressReporter(runCtx, commandRunProgressReporter{run: run})
 
@@ -242,14 +273,14 @@ func RunObservedCommand(ctx context.Context, run command.DispatchRunContext, fn 
 		run.MaxAttempts = attempt.MaxAttempts
 	}
 	if err != nil {
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+		emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
 			Duration: time.Since(run.StartedAt),
 			Error:    err,
 		}))
 		return err
 	}
 
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(runCtx, run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
 		Duration: time.Since(run.StartedAt),
 	}))
 	return nil
@@ -265,7 +296,7 @@ func (r commandRunProgressReporter) ReportProgress(ctx context.Context, update c
 		run.Attempt = attempt.Attempt
 		run.MaxAttempts = attempt.MaxAttempts
 	}
-	emitCommandRunEvent(ctx, commandRunEventFromContext(run, phase, time.Now(), command.CommandRunEvent{
+	emitCommandRunEvent(ctx, commandRunEventWithRevision(ctx, run, phase, time.Now(), command.CommandRunEvent{
 		Checkpoint: update.Checkpoint,
 		Message:    update.Message,
 		Current:    update.Current,

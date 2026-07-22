@@ -381,8 +381,8 @@ func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, ms
 			run.ExecutionMode = command.ExecutionModeInline
 		}
 		run.Metadata = command.CloneCommandRunMetadata(runtime.Metadata)
-
 		handlerCtx := command.ContextWithCommandRunAttemptTracker(ctx)
+		handlerCtx = command.ContextWithCommandRunRevision(handlerCtx, run.Revision)
 		startedAt := time.Time{}
 		outcome, err := runDispatchRunnable(
 			h,
@@ -397,7 +397,7 @@ func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, ms
 				}
 				startCtx = command.ContextWithDispatchRun(startCtx, run)
 				startCtx = command.ContextWithCommandProgressReporter(startCtx, commandRunProgressReporter{run: run})
-				emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
+				emitCommandRunEvent(ctx, commandRunEventWithRevision(startCtx, run, command.CommandRunPhaseStarted, startedAt, command.CommandRunEvent{}))
 				return startCtx
 			}),
 		)
@@ -416,7 +416,7 @@ func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, ms
 				run.Attempt = attempt.Attempt
 				run.MaxAttempts = attempt.MaxAttempts
 			}
-			emitCommandRunEvent(ctx, commandRunEventFromContext(run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
+			emitCommandRunEvent(ctx, commandRunEventWithRevision(handlerCtx, run, terminalCommandRunPhase(err), time.Now(), command.CommandRunEvent{
 				Duration: time.Since(startedAt),
 				Error:    err,
 			}))
@@ -437,7 +437,7 @@ func dispatchInlineWithRunContextOnType(mux *router.Mux, ctx context.Context, ms
 			CommandID:     run.CommandID,
 			CorrelationID: run.CorrelationID,
 		}
-		emitCommandRunEvent(ctx, commandRunEventFromContext(run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
+		emitCommandRunEvent(ctx, commandRunEventWithRevision(handlerCtx, run, command.CommandRunPhaseSucceeded, time.Now(), command.CommandRunEvent{
 			Duration: time.Since(startedAt),
 		}))
 	}
