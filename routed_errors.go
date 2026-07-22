@@ -93,7 +93,7 @@ func NewPlacementResolutionError(reg MessageRegistration, source error) *errors.
 			WithTextCode(TextCodePlacementResolutionFailed).
 			WithMetadata(metadata)
 	}
-	return errors.Wrap(source, errors.CategoryRouting, "failed to resolve dispatch placement").
+	return errors.AddContext(source, "failed to resolve dispatch placement").
 		WithTextCode(TextCodePlacementResolutionFailed).
 		WithMetadata(metadata)
 }
