@@ -25,6 +25,33 @@ jobs:
       - name: Unit tests
         run: go test ./...
 
+  nested-modules:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - examples/flow/state_machine
+          - examples/flow/state_store_sqlite
+          - examples/fsm_ui_builder_web_chat
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Verify standalone module
+        working-directory: ${{ matrix.module }}
+        run: |
+          GOWORK=off go mod tidy -diff
+          GOWORK=off go test -race ./...
+          GOWORK=off go vet ./...
+
   builder-delivery:
     runs-on: ubuntu-latest
     steps:
