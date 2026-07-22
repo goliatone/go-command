@@ -1,5 +1,24 @@
 # Changelog
 
+# [0.24.0](https://github.com/goliatone/go-command/compare/v0.23.3...v0.24.0) - (2026-07-22)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.24.0 ([d0f7775](https://github.com/goliatone/go-command/commit/d0f77750c3d106515dabc68c672719c0a0237aa2))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Pregress command version ([d30f7e3](https://github.com/goliatone/go-command/commit/d30f7e34f71aecc5b226f9dcf32fe9ae4c4a05de))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.23.3 ([80c9ee2](https://github.com/goliatone/go-command/commit/80c9ee2c99f764539ba7a41a759018cbb1c0bc3e))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([877eb4b](https://github.com/goliatone/go-command/commit/877eb4b9014532ccc71f8814f0d8bfeffde15344))  - (goliatone)
+- Update tests ([cfd4867](https://github.com/goliatone/go-command/commit/cfd4867ddec84f658ec5e9a321bc4c642af8a67e))  - (goliatone)
+
 # [0.23.3](https://github.com/goliatone/go-command/compare/v0.23.2...v0.23.3) - (2026-07-20)
 
 ## <!-- 1 -->🐛 Bug Fixes
