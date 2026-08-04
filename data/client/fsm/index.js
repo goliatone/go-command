@@ -128,14 +128,14 @@ function M(e) {
 function C(e) {
   const t = i(e) ?? {}, n = a(t, ["kind", "Kind"]), o = a(t, ["actionId", "ActionID"]);
   if (n === "command" || o !== "") {
-    const s = y(t, ["delayMs", "DelayMs"]), d = y(t, ["timeoutMs", "TimeoutMs"]), c = s ?? v(y(t, ["Delay", "delay"])), l = d ?? v(y(t, ["Timeout", "timeout"])), p = {
+    const s = y(t, ["delayMs", "DelayMs"]), d = y(t, ["timeoutMs", "TimeoutMs"]), c = s ?? v(y(t, ["Delay", "delay"])), l = d ?? v(y(t, ["Timeout", "timeout"])), f = {
       kind: "command",
       actionId: o,
       payload: u(t, ["payload", "Payload"]) ?? {},
       async: h(t, ["async", "Async"]),
       metadata: u(t, ["metadata", "Metadata"])
     };
-    return c !== void 0 && (p.delayMs = c), l !== void 0 && (p.timeoutMs = l), p;
+    return c !== void 0 && (f.delayMs = c), l !== void 0 && (f.timeoutMs = l), f;
   }
   return {
     kind: "emit_event",
@@ -152,7 +152,7 @@ function D(e) {
     effects: o
   };
 }
-function f(e) {
+function p(e) {
   const t = i(e) ?? {}, n = t.allowedTransitions ?? t.AllowedTransitions, o = Array.isArray(n) ? n.map((r) => A(r)) : [];
   return {
     entityId: a(t, ["entityId", "EntityID"]),
@@ -188,7 +188,7 @@ function k(e) {
     eventId: a(s, ["eventId", "EventID"]),
     version: y(s, ["version", "Version"]) ?? 0,
     transition: D(d),
-    snapshot: f(c),
+    snapshot: p(c),
     execution: l ? j(l) : void 0,
     idempotencyHit: w(s, ["idempotencyHit", "IdempotencyHit"])
   };
@@ -200,8 +200,9 @@ const H = {
 };
 class z {
   constructor(t) {
-    this.options = t, this.snapshotState = f(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? H;
+    this.options = t, this.snapshotState = p(t.snapshot), this.defaultExecCtx = t.defaultExecCtx ?? H;
   }
+  options;
   snapshotState;
   defaultExecCtx;
   async dispatch(t, n = {}, o = this.defaultExecCtx, r = {}) {
@@ -213,7 +214,7 @@ class z {
       o,
       r
     );
-    return this.snapshotState = f(s.snapshot), s;
+    return this.snapshotState = p(s.snapshot), s;
   }
   get state() {
     return this.snapshotState.currentState;
@@ -222,10 +223,10 @@ class z {
     return this.snapshotState.allowedTransitions;
   }
   get snapshot() {
-    return f(this.snapshotState);
+    return p(this.snapshotState);
   }
   replaceSnapshot(t) {
-    this.snapshotState = f(t);
+    this.snapshotState = p(t);
   }
 }
 const E = "__FSM__";
@@ -249,7 +250,7 @@ function q(e = globalThis) {
   if (!_(n))
     return null;
   try {
-    return f(n);
+    return p(n);
   } catch {
     return null;
   }
@@ -272,10 +273,11 @@ class U {
   constructor(t = {}) {
     this.options = t, this.fetchImpl = t.fetchImpl ?? F(), this.endpoint = t.endpoint ?? ((n) => `/fsm/${encodeURIComponent(n)}/apply-event`);
   }
+  options;
   fetchImpl;
   endpoint;
   async applyEvent(t, n, o, r, s, d = {}) {
-    const c = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, l = this.options.baseUrl ? new URL(c, this.options.baseUrl).toString() : c, p = T({
+    const c = typeof this.endpoint == "function" ? this.endpoint(t) : this.endpoint, l = this.options.baseUrl ? new URL(c, this.options.baseUrl).toString() : c, f = T({
       entityId: n,
       event: o,
       payload: r,
@@ -288,7 +290,7 @@ class U {
         "content-type": "application/json",
         ...this.options.headers ?? {}
       },
-      body: JSON.stringify(p)
+      body: JSON.stringify(f)
     });
     if (!m.ok) {
       const I = await m.text().catch(() => "");
@@ -307,7 +309,7 @@ export {
   k as normalizeApplyEventResponse,
   N as normalizeExecutionContext,
   j as normalizeExecutionHandle,
-  f as normalizeSnapshot,
+  p as normalizeSnapshot,
   R as normalizeTargetInfo,
   A as normalizeTransitionInfo,
   D as normalizeTransitionResult,

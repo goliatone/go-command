@@ -173,6 +173,7 @@ class T {
   constructor(e, n = {}) {
     this.client = e, this.method = n.method ?? "fsm.apply_event";
   }
+  client;
   method;
   async applyEvent(e, n, o, r, i, c = {}) {
     const d = typeof this.method == "function" ? this.method(e) : this.method, l = h({

@@ -2,6 +2,7 @@ class m {
   constructor(e) {
     this.invoke = e;
   }
+  invoke;
   call(e, t) {
     return this.invoke(e, t);
   }
@@ -49,9 +50,10 @@ class g {
   constructor(e) {
     this.options = e, this.fetchImpl = e.fetchImpl ?? p();
   }
+  options;
   fetchImpl;
   async call(e, t) {
-    const s = JSON.stringify(a(e, t, this.options)), r = await this.fetchImpl(this.options.endpoint, {
+    const s = JSON.stringify(a(e, t, this.options)), o = await this.fetchImpl(this.options.endpoint, {
       ...this.options.requestInit,
       method: "POST",
       headers: {
@@ -59,28 +61,30 @@ class g {
         ...this.options.headers ?? {}
       },
       body: s
-    }), o = await r.json().catch(() => null);
-    if (!r.ok)
-      throw l(o) && o.error ? new c({
+    }), r = await o.json().catch(() => null);
+    if (!o.ok)
+      throw l(r) && r.error ? new c({
         method: e,
-        message: o.error.message || `rpc call failed (${r.status})`,
-        code: o.error.code,
-        data: o.error.data,
-        status: r.status
+        message: r.error.message || `rpc call failed (${o.status})`,
+        code: r.error.code,
+        data: r.error.data,
+        status: o.status
       }) : new c({
         method: e,
-        message: `rpc call failed (${r.status})`,
-        status: r.status,
-        data: o
+        message: `rpc call failed (${o.status})`,
+        status: o.status,
+        data: r
       });
-    return h(e, o);
+    return h(e, r);
   }
 }
 const f = 1;
 class w {
   constructor(e, t = {}) {
-    this.url = e, this.options = t, this.timeoutMs = t.requestTimeoutMs ?? 1e4, this.socketFactory = t.socketFactory ?? ((s, r) => new WebSocket(s, r));
+    this.url = e, this.options = t, this.timeoutMs = t.requestTimeoutMs ?? 1e4, this.socketFactory = t.socketFactory ?? ((s, o) => new WebSocket(s, o));
   }
+  url;
+  options;
   socket = null;
   connectPromise = null;
   pending = /* @__PURE__ */ new Map();
@@ -89,13 +93,13 @@ class w {
   async call(e, t) {
     if (await this.ensureConnected(), !this.socket)
       throw new Error("websocket rpc client is not connected");
-    const s = a(e, t, this.options), r = new Promise((o, i) => {
+    const s = a(e, t, this.options), o = new Promise((r, i) => {
       const d = setTimeout(() => {
         this.pending.delete(s.id), i(new Error(`websocket rpc request timed out (${this.timeoutMs}ms)`));
       }, this.timeoutMs);
-      this.pending.set(s.id, { method: e, resolve: o, reject: i, timeout: d });
+      this.pending.set(s.id, { method: e, resolve: r, reject: i, timeout: d });
     });
-    return this.socket.send(JSON.stringify(s)), r;
+    return this.socket.send(JSON.stringify(s)), o;
   }
   close(e, t) {
     this.socket?.close(e, t), this.socket = null, this.connectPromise = null;
@@ -105,12 +109,12 @@ class w {
       return this.connectPromise ? this.connectPromise : (this.connectPromise = new Promise((e, t) => {
         const s = this.socketFactory(this.url, this.options.protocols);
         this.socket = s;
-        const r = () => {
-          s.removeEventListener("open", r), s.removeEventListener("error", o), this.connectPromise = null, e();
-        }, o = (i) => {
-          s.removeEventListener("open", r), s.removeEventListener("error", o), this.connectPromise = null, t(i instanceof Error ? i : new Error("websocket rpc connection failed"));
+        const o = () => {
+          s.removeEventListener("open", o), s.removeEventListener("error", r), this.connectPromise = null, e();
+        }, r = (i) => {
+          s.removeEventListener("open", o), s.removeEventListener("error", r), this.connectPromise = null, t(i instanceof Error ? i : new Error("websocket rpc connection failed"));
         };
-        s.addEventListener("open", r), s.addEventListener("error", o), s.addEventListener("message", (i) => this.onMessage(i)), s.addEventListener("close", () => this.onClose());
+        s.addEventListener("open", o), s.addEventListener("error", r), s.addEventListener("message", (i) => this.onMessage(i)), s.addEventListener("close", () => this.onClose());
       }), this.connectPromise);
   }
   onClose() {
@@ -133,8 +137,8 @@ class w {
     this.pending.delete(t.id), clearTimeout(s.timeout);
     try {
       s.resolve(h(s.method, t));
-    } catch (r) {
-      s.reject(r);
+    } catch (o) {
+      s.reject(o);
     }
   }
 }
