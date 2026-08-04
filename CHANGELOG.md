@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.24.2](https://github.com/goliatone/go-command/compare/v0.24.1...v0.24.2) - (2026-08-04)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.24.2 ([a86f00c](https://github.com/goliatone/go-command/commit/a86f00c358d87f9a54ce9163986e64a2fd4da7ef))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Error handler to cron ([884f73b](https://github.com/goliatone/go-command/commit/884f73b70046964bedf52cbade6fb262b7039c65))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.24.1 ([e4bba9c](https://github.com/goliatone/go-command/commit/e4bba9c9b8e68a0cf8b515e72f7034561252ede7))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Code quality ([b4b2f3d](https://github.com/goliatone/go-command/commit/b4b2f3d688e2dfcd46bbb797266ce6aca87ac635))  - (goliatone)
+- Update deps ([b062965](https://github.com/goliatone/go-command/commit/b062965eb936a4f215d424a99cce4a18535bddb2))  - (goliatone)
+- Update examples ([2a6a5b2](https://github.com/goliatone/go-command/commit/2a6a5b2fbfd0de03f09749bccd590d156627284f))  - (goliatone)
+
 # [0.24.1](https://github.com/goliatone/go-command/compare/v0.24.0...v0.24.1) - (2026-07-22)
 
 ## <!-- 13 -->📦 Bumps
