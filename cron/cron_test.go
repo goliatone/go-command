@@ -2,11 +2,13 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/goliatone/go-command"
+	gerrors "github.com/goliatone/go-errors"
 )
 
 func TestScheduleAfterCompletesAndReportsStatus(t *testing.T) {
@@ -157,5 +159,55 @@ func TestScheduleCronValidation(t *testing.T) {
 
 	if _, err := scheduler.ScheduleCron(command.HandlerConfig{Expression: "@every 1s"}, struct{}{}); err == nil {
 		t.Fatal("expected unsupported handler error")
+	}
+}
+
+func TestScheduleAtFuncErrorUsesRunnerAndReportsFinalOnce(t *testing.T) {
+	var calls atomic.Int32
+	observed := make(chan error, 4)
+	scheduler := NewScheduler(WithErrorHandler(func(err error) {
+		observed <- err
+	}))
+	leaves := errors.New("provider unavailable")
+	handle, err := scheduler.ScheduleAt(time.Now(), command.HandlerConfig{MaxRetries: 2}, func() error {
+		calls.Add(1)
+		return leaves
+	})
+	if err != nil {
+		t.Fatalf("schedule at: %v", err)
+	}
+
+	select {
+	case <-handle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected failed handle completion")
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("handler calls = %d, want 3", calls.Load())
+	}
+	if handle.Status() != ScheduleStatusFailed {
+		t.Fatalf("handle status = %s, want failed", handle.Status())
+	}
+
+	close(observed)
+	attempts := 0
+	finals := 0
+	for observedErr := range observed {
+		var rich *gerrors.Error
+		if !errors.As(observedErr, &rich) {
+			t.Fatalf("observed error type = %T", observedErr)
+		}
+		switch rich.TextCode {
+		case "HANDLER_RETRY_ATTEMPT":
+			attempts++
+		case "HANDLER_MAX_RETRIES_EXCEEDED":
+			finals++
+			if !errors.Is(observedErr, leaves) {
+				t.Fatal("final error lost original cause")
+			}
+		}
+	}
+	if attempts != 2 || finals != 1 {
+		t.Fatalf("observations attempts=%d finals=%d, want 2/1", attempts, finals)
 	}
 }

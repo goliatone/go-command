@@ -64,6 +64,30 @@ func (cs *Scheduler) SetLogger(logger Logger) {
 	cs.logger = logger
 }
 
+// SetErrorHandler replaces the scheduler error observer for subsequently
+// registered handlers. It allows host registries to attach typed boundary
+// context after constructing or injecting a scheduler.
+func (cs *Scheduler) SetErrorHandler(handler func(error)) {
+	if cs == nil {
+		return
+	}
+	if handler == nil {
+		handler = func(error) {}
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.errorHandler = handler
+}
+
+func (cs *Scheduler) currentErrorHandler() func(error) {
+	if cs == nil {
+		return func(error) {}
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.errorHandler
+}
+
 // ScheduleCron schedules a recurring handler by cron expression.
 func (s *Scheduler) ScheduleCron(opts command.HandlerConfig, handler any) (Handle, error) {
 	if opts.Expression == "" {
@@ -84,7 +108,6 @@ func (s *Scheduler) ScheduleCron(opts command.HandlerConfig, handler any) (Handl
 		sub.setStatus(ScheduleStatusRunning, nil)
 		if err := run(); err != nil {
 			sub.setStatus(ScheduleStatusFailed, err)
-			s.errorHandler(err)
 			return
 		}
 
@@ -138,7 +161,6 @@ func (s *Scheduler) ScheduleAt(at time.Time, opts command.HandlerConfig, handler
 		sub.setStatus(ScheduleStatusRunning, nil)
 		if err := run(); err != nil {
 			sub.setTerminal(ScheduleStatusFailed, err)
-			s.errorHandler(err)
 			s.removeStoredHandle(sub.id)
 			return
 		}
@@ -279,11 +301,17 @@ func (s *Scheduler) buildRunnable(opts command.HandlerConfig, handler any) (func
 	switch r := handler.(type) {
 	case func():
 		return func() error {
-			r()
-			return nil
+			return h.Run(context.Background(), func(context.Context) error {
+				r()
+				return nil
+			})
 		}, nil
 	case func() error:
-		return r, nil
+		return func() error {
+			return h.Run(context.Background(), func(context.Context) error {
+				return r()
+			})
+		}, nil
 	default:
 		cmdRun := tryCommandRunnable(handler, h)
 		if cmdRun == nil {
@@ -298,7 +326,7 @@ func makeRunnerOptions(s *Scheduler, opts command.HandlerConfig) []runner.Option
 		runner.WithMaxRetries(opts.MaxRetries),
 		runner.WithDeadline(opts.Deadline),
 		runner.WithRunOnce(opts.RunOnce),
-		runner.WithErrorHandler(s.errorHandler),
+		runner.WithErrorHandler(s.currentErrorHandler()),
 		runner.WithLogger(s.logger),
 	}
 	if opts.NoTimeout {
