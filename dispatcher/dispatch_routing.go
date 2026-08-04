@@ -265,9 +265,7 @@ func legacyDispatchConfigurationSnapshot() legacyDispatchConfiguration {
 		commandMux = runtime.commandMuxSnapshot()
 	}
 	executors := make(map[command.ExecutionMode]CommandExecutor, len(dispatchExecutors))
-	for mode, executor := range dispatchExecutors {
-		executors[mode] = executor
-	}
+	maps.Copy(executors, dispatchExecutors)
 	configuration := legacyDispatchConfiguration{
 		runtime:    runtime,
 		commandMux: commandMux,

@@ -259,7 +259,7 @@ func TestDualCapabilityRegistrationsSerializeSharedFactory(t *testing.T) {
 	require.Len(t, registrations, 2)
 
 	var wg sync.WaitGroup
-	for index := 0; index < 20; index++ {
+	for range 20 {
 		for _, registration := range registrations {
 			wg.Add(1)
 			go func(reg MessageRegistration) {
