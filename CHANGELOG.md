@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.24.3](https://github.com/goliatone/go-command/compare/v0.24.2...v0.24.3) - (2026-10-15)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Error handler ([e81918c](https://github.com/goliatone/go-command/commit/e81918c25d81b098c38bb251341af3c3b2dbe595))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.24.3 ([8441458](https://github.com/goliatone/go-command/commit/84414585e620b4b5b633b325afbfe6a011d4215e))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.24.2 ([8dd8388](https://github.com/goliatone/go-command/commit/8dd8388ff6fddfb0a9351846b924cb11bc1125b2))  - (goliatone)
+
 # [0.24.2](https://github.com/goliatone/go-command/compare/v0.24.1...v0.24.2) - (2026-08-04)
 
 ## <!-- 13 -->📦 Bumps
