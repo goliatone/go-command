@@ -11,6 +11,8 @@ type TransitionPhase string
 
 const (
 	TransitionPhaseAttempted TransitionPhase = "attempted"
+	// TransitionPhaseCommitted follows the state callback and receipt attempt.
+	// With a caller-owned transaction it can precede the outer SQL commit.
 	TransitionPhaseCommitted TransitionPhase = "committed"
 	TransitionPhaseRejected  TransitionPhase = "rejected"
 )

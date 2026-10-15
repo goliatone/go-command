@@ -8,7 +8,9 @@ The Flow package provides execution patterns for the go-command framework, offer
 - **Parallel Execution**: Run handlers concurrently
 - **Batch Processing**: Process multiple messages in batches
 - **Conditional Execution**: Execute handlers based on predicates
-- **Chain Execution**: Sequential execution with message transformation
+- **Composition**: Combine flows or wrap a typed command to transform messages
+- **FSM and authoring**: Versioned transitions, guard/action registries and schemas
+- **Durable orchestration**: Explicit state/outbox stores and host scheduler ports
 
 ## Installation
 
@@ -25,66 +27,58 @@ The canonical FSM runtime API is envelope-based:
 - `Execute(ctx, msg)` is retained only as a compatibility wrapper.
 
 ```go
-cfg := flow.StateMachineConfig{
-  Entity:          "order",
-  ExecutionPolicy: flow.ExecutionPolicyLightweight, // or flow.ExecutionPolicyOrchestrated
-  States: []flow.StateConfig{
-    {Name: "draft", Initial: true},
-    {Name: "approved"},
-  },
-  Transitions: []flow.TransitionConfig{
-    {Name: "approve", From: "draft", To: "approved", Action: "audit"},
-  },
-}
+package main
 
-req := flow.TransitionRequest[OrderMsg]{
-  StateKey:     func(m OrderMsg) string { return m.ID },
-  Event:        func(m OrderMsg) string { return m.Event },
-}
+import (
+    "context"
+    "fmt"
 
-actions := flow.NewActionRegistry[OrderMsg]()
-_ = actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil })
-
-def := cfg.ToMachineDefinition()
-store := flow.NewInMemoryStateStore()
-_, _ = store.SaveIfVersion(context.Background(), &flow.StateRecord{
-  EntityID:       "order-1",
-  State:          "draft",
-  MachineID:      def.ID,
-  MachineVersion: def.Version,
-}, 0)
-sm, _ := flow.NewStateMachineFromDefinition(
-  def,
-  store,
-  req,
-  flow.NewResolverMap[OrderMsg](),
-  actions,
-  flow.WithExecutionPolicy[OrderMsg](cfg.ExecutionPolicy),
+    "github.com/goliatone/go-command/flow"
 )
 
-res, err := sm.ApplyEvent(context.Background(), flow.ApplyEventRequest[OrderMsg]{
-  MachineID: "order",
-  EntityID: "order-1",
-  Event:    "approve",
-  Msg:      OrderMsg{ID: "order-1", Event: "approve"},
-  ExecCtx:  flow.ExecutionContext{ActorID: "user-1", Roles: []string{"admin"}, Tenant: "acme"},
-  IdempotencyKey: "approve-order-1-v1", // optional
-  Metadata: map[string]any{
-    "request_id": "req-123",
-  },
-  DryRun: false, // optional
-})
-if err != nil {
-  // handle runtime category: ErrInvalidTransition / ErrGuardRejected / ErrVersionConflict /
-  // ErrIdempotencyConflict / ErrOrchestrationDegraded / ...
+type OrderMsg struct { ID, Event, State string; Admin bool }
+func (OrderMsg) Type() string { return "order.event" }
+
+func approveOrder(ctx context.Context) (*flow.ApplyEventResponse[OrderMsg], error) {
+    cfg := flow.StateMachineConfig{
+        Entity: "order",
+        ExecutionPolicy: flow.ExecutionPolicyLightweight,
+        States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
+        Transitions: []flow.TransitionConfig{{Name: "approve", From: "draft", To: "approved", Action: "audit"}},
+    }
+    req := flow.TransitionRequest[OrderMsg]{
+        StateKey: func(m OrderMsg) string { return m.ID },
+        Event: func(m OrderMsg) string { return m.Event },
+    }
+    actions := flow.NewActionRegistry[OrderMsg]()
+    if err := actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil }); err != nil {
+        return nil, err
+    }
+    def := cfg.ToMachineDefinition()
+    store := flow.NewInMemoryStateStore()
+    if _, err := store.SaveIfVersion(ctx, &flow.StateRecord{
+        EntityID: "order-1", State: "draft", MachineID: def.ID, MachineVersion: def.Version,
+    }, 0); err != nil { return nil, err }
+    machine, err := flow.NewStateMachineFromDefinition(def, store, req,
+        flow.NewResolverMap[OrderMsg](), actions,
+        flow.WithExecutionPolicy[OrderMsg](cfg.ExecutionPolicy),
+    )
+    if err != nil { return nil, err }
+    return machine.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
+        MachineID: def.ID, EntityID: "order-1", Event: "approve",
+        Msg: OrderMsg{ID: "order-1", Event: "approve"},
+        ExecCtx: flow.ExecutionContext{ActorID: "user-1", Roles: []string{"admin"}, Tenant: "acme"},
+        IdempotencyKey: "approve-order-1-v1",
+    })
 }
-_ = res.EventID
-_ = res.Version
-_ = res.Transition
-_ = res.Snapshot
-_ = res.Execution // nil for lightweight; set for orchestrated policy
-_ = res.IdempotencyHit
+
+func main() {
+    result, err := approveOrder(context.Background())
+    if err != nil { panic(err) }
+    fmt.Println(result.EventID, result.Version)
+}
 ```
+
 
 When `DryRun` is true, apply remains evaluation-only and skips state/outbox/orchestrator/lifecycle/idempotency-store writes.
 
@@ -167,11 +161,11 @@ _ = ui
 - Execution control/status requests support scope fields: `machineId`, `entityId`, `executionId`, `tenant`.
 
 ```go
-registry := command.NewRegistry()
+commands := command.NewRegistry()
 server := rpc.NewServer(rpc.WithFailureMode(rpc.FailureModeRecover))
-_ = registry.AddResolver("rpc-explicit", rpc.Resolver(server))
-_ = flow.RegisterFSMRPCCommands(registry, sm)
-_ = registry.Initialize()
+_ = commands.AddResolver("rpc-explicit", rpc.Resolver(server))
+_ = flow.RegisterFSMRPCCommands(commands, sm)
+_ = commands.Initialize()
 ```
 
 Transport helpers map runtime categories to protocol status surfaces:
@@ -302,26 +296,17 @@ conditionalExecutor := flow.NewConditionalExecutor(
 conditionalExecutor.Execute(ctx, order)
 ```
 
-### Chain Execution
+### Message transformation
 
-Execute handlers sequentially with message transformation:
+There is no `NewChainExecutor`. Wrap the transformation in a typed command and
+then invoke the downstream handler or composed flow:
 
 ```go
-// Create chain executor
-chainExecutor := flow.NewChainExecutor(
-    // Transform message after first handler
-    func(msg ProcessOrderMessage) ProcessOrderMessage {
-        msg.Status = "INVENTORY_CHECKED"
-        return msg
-    },
-    // Transform message after second handler
-    func(msg ProcessOrderMessage) ProcessOrderMessage {
-        msg.Status = "PAYMENT_PROCESSED"
-        return msg
-    },
-)
-
-chainExecutor.Execute(ctx, order)
+transformed := command.CommandFunc[ProcessOrderMessage](func(ctx context.Context, msg ProcessOrderMessage) error {
+    msg.Status = "INVENTORY_CHECKED"
+    return paymentHandler.Execute(ctx, msg)
+})
+err := transformed.Execute(ctx, order)
 ```
 
 ### Combined Execution
@@ -360,7 +345,9 @@ combinedExecutor.Execute(ctx, order)
 
 ### Runner Options
 
-All executors accept runner options for configuration:
+Serial and parallel executors accept runner options directly. Batch executors
+use `flow.WithRunnerOptions[T](...)`; conditional executors use their own
+`ConditionalOption[T]` values:
 
 ```go
 executor := flow.NewSerialExecutor(
@@ -392,7 +379,7 @@ All executors provide consistent error handling:
 - **Parallel Executor**: Aggregates all errors from concurrent handlers
 - **Batch Executor**: Aggregates errors from batch processing
 - **Conditional Executor**: Returns error from matched handler
-- **Chain Executor**: Returns error from any handler in the chain
+- **Transformation wrapper**: Propagates the downstream handler error
 
 Configure error behavior with `runner.WithExitOnError`:
 
@@ -437,57 +424,114 @@ flows:
 
 Registries (handlers, guards, actions, metrics recorders) resolve the IDs referenced in config. Namespacing helpers avoid ID collisions (`namespace::id`).
 
-## State Machine Usage
+## State stores and execution policy
 
-Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis). State must be explicitly persisted before transition application.
+The [quick start](#fsm-v2-quickstart) persists the initial state explicitly before
+applying an event. In-memory, SQLite and Redis store implementations are in
+[state_store.go](state_store.go). SQLite initializes its configured state/outbox
+tables; hosts own database connections and broader schema migrations.
 
-```go
-smCfg := flow.StateMachineConfig{
-  Entity:          "order",
-  ExecutionPolicy: flow.ExecutionPolicyLightweight,
-  States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
-  Transitions: []flow.TransitionConfig{
-    {Name: "approve", From: "draft", To: "approved", Guard: "is_admin", Action: "audit"},
-  },
-}
-guards := flow.NewGuardRegistry[OrderMsg]()
-guards.Register("is_admin", func(m OrderMsg) bool { return m.Admin })
-actions := flow.NewActionRegistry[OrderMsg]()
-actions.Register("audit", func(ctx context.Context, m OrderMsg) error { return nil })
-store := flow.NewInMemoryStateStore()
-req := flow.TransitionRequest[OrderMsg]{
-  StateKey:     func(m OrderMsg) string { return m.ID },
-  Event:        func(m OrderMsg) string { return m.Event },
-}
-def := smCfg.ToMachineDefinition()
-resolvers := flow.NewResolverMap[OrderMsg]()
-guard, _ := guards.Lookup("is_admin")
-resolvers.RegisterGuard("is_admin", guard)
-sm, _ := flow.NewStateMachineFromDefinition(
-  def,
-  store,
-  req,
-  resolvers,
-  actions,
-  flow.WithExecutionPolicy[OrderMsg](smCfg.ExecutionPolicy),
-)
-_, _ = store.SaveIfVersion(ctx, &flow.StateRecord{
-  EntityID:       order.ID,
-  State:          "draft",
-  MachineID:      def.ID,
-  MachineVersion: def.Version,
-}, 0)
-result, err := sm.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
-  EntityID: order.ID,
-  Event:    "approve",
-  Msg:      order,
-})
-if err != nil {
-  // handle transition error
-}
-_ = result
+`lightweight` creates an inline orchestrator when none is supplied. `orchestrated`
+requires an explicit orchestrator; selecting the policy alone does not install
+workers or a durable scheduler. Supply compatible transactional state/outbox and
+idempotency stores for the deployment's durability requirements. The default
+idempotency store is in memory. A successful scheduler enqueue is not proof that
+a downstream business action completed. See [outbox dispatch](outbox_dispatcher.go)
+and the [migration guide](../docs/FSM_V2_MIGRATION.md).
+
+## Transaction and receipt contract
+
+`ApplyEvent` uses the following native order: load/replay receipt, load and
+evaluate state, emit `attempted`, persist state and any native outbox entries in
+`StateStore.RunInTransaction`, build snapshot, start orchestration, save the
+receipt, emit `committed`, return. An idempotent replay returns before state
+evaluation, orchestration and lifecycle emission.
+
+The stock SQLite store commits its own state/outbox transaction before receipt
+insertion. Host payload and authoritative event/provenance writes are outside
+that boundary. A real SQL receipt failure can leave accepted state at revision 2,
+zero receipts, and a nil error with `Execution.Status == "degraded"` and
+`Execution.Metadata["idempotency_degraded"] == true`. The error code is in
+`idempotency_error_code` (`FSM_IDEMPOTENCY_DEGRADED`). This legacy behavior remains
+compatible; a nil error does not establish durable replay or effect completion.
+
+| Outcome after a lost response | Same-key retry |
+| --- | --- |
+| Receipt persisted with the same payload fingerprint | Returns the saved event/version with `IdempotencyHit`; skips orchestration and hooks |
+| Receipt persisted with a different fingerprint | `FSM_IDEMPOTENCY_CONFLICT` |
+| State advanced, receipt insertion failed | Re-evaluates current state; may return `FSM_INVALID_TRANSITION`, fail an expected-version precondition, or perform another valid transition |
+| Default in-memory receipt store lost on restart | No durable replay guarantee; state persistence does not restore the receipt |
+
+The fingerprint covers message, execution context, expected state/version and
+metadata, as well as machine/entity/event. Preserve those fields on retry.
+Receipts capture the orchestration handle at insertion time; replay does not
+refresh execution status or retry failed effects. A degraded orchestration
+response can itself have a durable receipt. Committed hook errors are logged
+after the receipt attempt and do not undo state or the returned response, even
+with fail-closed hook configuration. Authorize each request before receipt lookup;
+an idempotency key does not replace authorization. Key scope, retention and
+mandatory version preconditions remain host policy.
+
+### Bounded caller-owned transaction
+
+Existing public interfaces suffice for an opt-in host adapter. No new strict
+runtime option or Bun dependency is installed by selecting an execution policy.
+
+1. Begin one caller-owned SQL transaction. Bind both `StateStore`/`TxStore` and
+   `IdempotencyStore[T]` to that exact transaction. Every state load, CAS update,
+   receipt read/insert and host write must use it. `RunInTransaction` invokes its
+   callback using the same transaction; it must not commit or open another DB
+   transaction. Propagate callback errors to the owner and abandon the transaction.
+2. Perform host payload writes and call `ApplyEvent`. Use a non-empty idempotency
+   key and explicit host preconditions. On replay, skip duplicate host writes;
+   enforce receipt uniqueness and compare-and-set through SQL constraints, not
+   only the runtime's per-machine in-process key lock.
+3. Treat the response as provisional. Reject errors, missing responses and
+   degraded/unacceptable execution outcomes before committing. Native receipt
+   failures can return nil error, so checking only `err` is insufficient. The
+   bounded fixture requires completed execution and zero effects.
+4. Persist authoritative host event/provenance using the same transaction, once
+   per accepted event. Commit once. Roll back on SQL error, callback error, panic,
+   receipt failure or commit failure, and discard any provisional response. A
+   connection loss during commit can leave an unknown outcome: recover through
+   an authoritative receipt lookup in a fresh transaction, preserving the same
+   request and key.
+5. Buffer lifecycle projections locally until the outer commit succeeds. The
+   native `committed` hook, logs and snapshot can occur before that commit and
+   must not publish authoritative success. A postcommit best-effort projection
+   can still be lost; reliable delivery needs a separately designed transactional
+   intent/outbox mechanism.
+
+This bounded contract excludes workflow actions, external effects, scheduler
+enqueues, external hook writes and outbox dispatch. Guards and target resolvers
+must avoid external writes. The fixture definition has no workflow nodes and
+its `AppendOutbox` explicitly returns an error. Native orchestration can run
+effects before the outer commit; rolling SQL back cannot undo them. Any future
+outbox support must insert intents through the same transaction and dispatch
+only committed rows, with separately verified retry/delivery semantics.
+
+A reusable Bun adapter belongs in an optional `go-persistence-bun` flow adapter
+subpackage, where SQL dialect, transaction ownership, schema and serialization
+can be maintained together. Core flow remains storage-neutral. Host payload,
+event and provenance schemas stay host-owned. The test adapter is a bounded
+example, not a supported general store or a completed persistence-package change.
+
+The independent [SQL contract fixture](transactiontest/contract_test.go) uses
+disposable SQLite files and caller-owned Bun transactions. Its nested module
+keeps SQL-driver/Bun dependencies out of the root module. Run both suites:
+
+```sh
+go test ./...
+cd flow/transactiontest
+go test -mod=readonly -count=1 ./...
+go test -mod=readonly -race -count=1 ./...
+# Optional audit probe: expected FAIL, preserves the unmet native guarantee.
+go test -mod=readonly -tags=native_atomicity_probe -run '^TestG4NativeReceiptFailureAtomicity$' ./...
 ```
-`StateMachine` also implements `Execute(ctx, msg) error` for `command.Commander[T]` compatibility.
+
+SQLite immediate-transaction contention and normal fresh-process restart are
+covered. This does not establish PostgreSQL behavior, abrupt crash/power-loss
+recovery, unknown network-commit outcomes or external effect delivery.
 
 ## Metrics/Tracing Decorators
 
@@ -503,71 +547,3 @@ The mux resolver relies on go-command registry metadata. If your command uses an
 interface message parameter, implement `command.MessageFactory` to provide a concrete,
 non-nil message value, otherwise resolver based registration treats the command as
 unsupported and skips metadata driven integrations.
-
-## Legacy Dispatcher Helpers
-
-`chain_dispatcher.go` and `parallel_dispatcher.go` are legacy wrappers over the global dispatcher; the recommended approach is to use the flow executors with handler/mux resolvers.
-
-## Configuration (JSON/YAML)
-
-Flows can be defined in config files and built via `flow/config_loader.go`. Example:
-
-```yaml
-version: 1
-flows:
-  - id: order_pipeline
-    type: serial
-    serial:
-      steps: ["inventory", "payment", "notify"]
-    options:
-      timeout: 5s
-      max_retries: 2
-      exit_on_error: true
-```
-
-Registries (handlers, guards, actions, metrics recorders) are used to resolve the IDs referenced in config.
-
-## State Machine Usage
-
-Define states, transitions, guards, and actions, with pluggable state stores (in-memory, sqlite, redis):
-
-```go
-smCfg := flow.StateMachineConfig{
-  Entity:          "order",
-  ExecutionPolicy: flow.ExecutionPolicyLightweight,
-  States: []flow.StateConfig{{Name: "draft", Initial: true}, {Name: "approved"}},
-  Transitions: []flow.TransitionConfig{{Name: "approve", From: "draft", To: "approved", Guard: "is_admin"}},
-}
-guards := flow.NewGuardRegistry[OrderMsg]()
-guards.Register("is_admin", func(m OrderMsg) bool { return m.Admin })
-store := flow.NewInMemoryStateStore()
-req := flow.TransitionRequest[OrderMsg]{StateKey: func(m OrderMsg) string { return m.ID }, Event: func(m OrderMsg) string { return m.Event }}
-def := smCfg.ToMachineDefinition()
-resolvers := flow.NewResolverMap[OrderMsg]()
-guard, _ := guards.Lookup("is_admin")
-resolvers.RegisterGuard("is_admin", guard)
-sm, _ := flow.NewStateMachineFromDefinition(def, store, req, resolvers, nil, flow.WithExecutionPolicy[OrderMsg](smCfg.ExecutionPolicy))
-_, _ = store.SaveIfVersion(ctx, &flow.StateRecord{
-  EntityID:       order.ID,
-  State:          "draft",
-  MachineID:      def.ID,
-  MachineVersion: def.Version,
-}, 0)
-result, err := sm.ApplyEvent(ctx, flow.ApplyEventRequest[OrderMsg]{
-  EntityID: order.ID,
-  Event:    "approve",
-  Msg:      order,
-})
-if err != nil {
-  // handle transition error
-}
-_ = result
-```
-
-## Metrics/Tracing Decorators
-
-Use `MetricsDecorator` to wrap any `Flow[T]` with metrics, provide a recorder implementation and optionally register it in `MetricsRecorderRegistry` for config-driven wiring.
-
-## Hybrid Handler/Mux Usage
-
-Flows accept explicit handlers; a mux resolver adapter is available for registry driven dispatch. Compose nested flows by converting them to `command.Commander[T]` via `flow.AsCommander`. Namespacing helpers avoid ID conflicts when registering handlers/guards/actions/recorders.

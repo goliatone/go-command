@@ -16,7 +16,7 @@ import (
 var (
 	commandRunObserversMu     sync.RWMutex
 	commandRunObservers       = map[uint64]command.CommandRunObserver{}
-	commandRunObserverNextID  uint64
+	commandRunObserverNextID  atomic.Uint64
 	commandRunObserverEmitted atomic.Uint64
 	commandRunIDSeq           atomic.Uint64
 )
@@ -48,7 +48,7 @@ func AddCommandRunObserver(observer command.CommandRunObserver) Subscription {
 		return noopSubscription{}
 	}
 
-	id := atomic.AddUint64(&commandRunObserverNextID, 1)
+	id := commandRunObserverNextID.Add(1)
 
 	commandRunObserversMu.Lock()
 	defer commandRunObserversMu.Unlock()
@@ -66,7 +66,7 @@ func SetCommandRunObservers(observers ...command.CommandRunObserver) {
 		if observer == nil {
 			continue
 		}
-		id := atomic.AddUint64(&commandRunObserverNextID, 1)
+		id := commandRunObserverNextID.Add(1)
 		commandRunObservers[id] = observer
 	}
 }

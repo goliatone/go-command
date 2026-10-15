@@ -13,6 +13,30 @@ A Go package for implementing command and query patterns with support for multip
 - **Registry system** for automatic command/query discovery
 - **Integration with popular frameworks** (Kong for CLI, cron for scheduling)
 
+## Package and documentation map
+
+Use Go 1.23.4 or newer for the root module; nested examples declare their own
+toolchain requirements. All packages below share the root Go module.
+
+| Package | Responsibility | Guide |
+| --- | --- | --- |
+| Root `command` | Typed handlers, metadata/catalog/input/result contracts, exposure, immutable registrations, placement and provenance ports | Sections below; [catalog](catalog.go) |
+| `dispatcher` | Isolated/local and optional routed command/query execution, execution modes and run observers | [Routed dispatch](docs/ROUTED_DISPATCH.md) |
+| `registry` | Global helpers and explicit runtime-container composition, subscription/lifecycle ownership | [Resolvers](docs/GUIDE_RESOLVERS.md) |
+| `router` | Message-type mux and optional rich route matching | [Matcher](router/route_matcher.go) |
+| `runner`, `cron` | Handler retry/timeout controls and in-process cron scheduling | Sections below |
+| `rpc` | Endpoint definitions, discovery, envelopes and invocation; no HTTP listener | [RPC implementation](rpc/rpc.go), [TS scaffold CLI](cmd/rpc-tsgen/README.md) |
+| `flow` | Serial/parallel/batch/conditional/saga composition, FSM authoring/runtime and optional durable outbox orchestration | [Flow guide](flow/README.md), [FSM migration](docs/FSM_V2_MIGRATION.md) |
+| `data` | Embedded RPC/FSM core browser assets | [Client guide](client/README.md) |
+| `data/builder`, `data/client-builder` | Optional UI-builder asset composition | [Builder contract](docs/FSM_UI_BUILDER_CONTRACT_FREEZE.md) |
+
+The TypeScript client workspace has four npm packages, separate from Go package
+imports. Examples with `go.mod` are separate modules and are not covered by root
+`go test ./...`. Hosts mount HTTP/WebSocket/static routes, enforce authorization
+and supply remote transport/job-scheduler adapters. The optional SQLite FSM
+store initializes its own configured state/outbox tables; there is no embedded
+application migration bundle.
+
 ## Installation
 
 ```bash
@@ -21,7 +45,7 @@ go get github.com/goliatone/go-command
 
 ## Embedded Client Assets
 
-The TypeScript runtime is split into three client libraries:
+The TypeScript runtime is split into four client libraries:
 
 - RPC: `@goliatone/go-command-rpc`
 - FSM core: `@goliatone/go-command-fsm`
@@ -127,6 +151,47 @@ type QueryFunc[T any, R any] func(ctx context.Context, msg T) (R, error)
 ```
 
 ## Execution Strategies
+
+### Instance-first local execution
+
+Use an isolated runtime for explicit dependency injection and tests:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    command "github.com/goliatone/go-command"
+    "github.com/goliatone/go-command/dispatcher"
+)
+
+type CreateUser struct { Email string }
+func (CreateUser) Type() string { return "user.create" }
+
+func main() {
+    runtime := dispatcher.NewRuntime()
+    subscription := dispatcher.SubscribeCommandTo(runtime,
+        command.CommandFunc[CreateUser](func(ctx context.Context, msg CreateUser) error {
+            fmt.Println(msg.Email)
+            return nil
+        }),
+    )
+    defer subscription.Unsubscribe()
+    if err := dispatcher.DispatchTo(context.Background(), runtime, CreateUser{Email: "user@example.com"}); err != nil {
+        panic(err)
+    }
+}
+```
+
+A bare `command.Registry` collects metadata and runs configured resolvers;
+registering there alone does not subscribe a handler to a dispatcher. Use
+`registry.RuntimeContainer` with explicit typed subscription hooks for combined
+assembly, or use the compatibility package-level registry helpers. Initialize
+registrations before attaching providers, installing placement policies and
+checking `RoutedReady()`. See [routed assembly](docs/ROUTED_DISPATCH.md#assembly-and-readiness).
+
 
 ### 1. Dispatcher Pattern
 
@@ -513,7 +578,7 @@ func (c *ApplyEventEndpoint) RPCEndpoints() []rpc.EndpointDefinition {
         rpc.NewEndpoint[ApplyEventData, map[string]any](
             rpc.EndpointSpec{
                 Method:      "fsm.apply_event",
-                Kind:        rpc.MethodKindQuery,
+                Kind:        rpc.MethodKindCommand,
                 Timeout:     5 * time.Second,
                 Permissions: []string{"fsm:write"},
                 Roles:       []string{"admin"},
@@ -532,10 +597,15 @@ func (c *ApplyEventEndpoint) RPCEndpoints() []rpc.EndpointDefinition {
 }
 ```
 
-Wire the RPC server before registry initialization:
+Wire the RPC server before registry initialization. Endpoint-only providers use
+the instance registry (`RegisterCommand(any)`); the global typed helper requires
+a `Commander[T]`. Hosts enforce endpoint permissions in invoke middleware:
 
 ```go
-import "github.com/goliatone/go-command/rpc"
+import (
+    command "github.com/goliatone/go-command"
+    "github.com/goliatone/go-command/rpc"
+)
 
 rpcServer := rpc.NewServer(
     rpc.WithFailureMode(rpc.FailureModeRecover),
@@ -544,9 +614,10 @@ rpcServer := rpc.NewServer(
     }),
 )
 
-_ = registry.AddResolver("rpc-explicit", rpc.Resolver(rpcServer))
-_, _ = registry.RegisterCommand(&ApplyEventEndpoint{})
-_ = registry.Start(context.Background())
+commands := command.NewRegistry()
+if err := commands.AddResolver("rpc-explicit", rpc.Resolver(rpcServer)); err != nil { return err }
+if err := commands.RegisterCommand(&ApplyEventEndpoint{}); err != nil { return err }
+if err := commands.Initialize(); err != nil { return err }
 ```
 
 Canonical RPC method payloads should use:
@@ -579,116 +650,46 @@ rpcServer := rpc.NewServer(
 )
 ```
 
-## Complete Example
+## Composing a Workflow
 
-Here's a comprehensive example showing multiple features:
+Keep domain behavior behind a service and expose the composed handler through
+the same typed dispatcher. The host supplies the service and notification handlers:
 
 ```go
-package main
-
 import (
     "context"
-    "log"
-    "time"
 
-    "github.com/goliatone/go-command"
+    command "github.com/goliatone/go-command"
     "github.com/goliatone/go-command/dispatcher"
     "github.com/goliatone/go-command/flow"
-    "github.com/goliatone/go-command/registry"
 )
 
-// Define messages
-type ProcessOrderCommand struct {
-    OrderID string
-    UserID  string
+type ProcessOrder struct { OrderID, UserID string }
+func (ProcessOrder) Type() string { return "order.process" }
+
+type OrderService interface {
+    Validate(context.Context, ProcessOrder) error
+    Process(context.Context, ProcessOrder) error
 }
 
-func (c ProcessOrderCommand) Type() string { return "order.process" }
-
-type NotifyUserCommand struct {
-    UserID  string
-    Message string
-}
-
-func (c NotifyUserCommand) Type() string { return "user.notify" }
-
-// Command handlers
-type OrderProcessor struct {
-    orderService OrderService
-    logger       Logger
-}
-
-func (p *OrderProcessor) Execute(ctx context.Context, cmd ProcessOrderCommand) error {
-    log.Printf("Processing order %s for user %s", cmd.OrderID, cmd.UserID)
-
-    // Process the order
-    if err := p.orderService.Process(cmd.OrderID); err != nil {
-        return err
-    }
-
-    // Dispatch notification
-    return dispatcher.Dispatch(ctx, NotifyUserCommand{
-        UserID:  cmd.UserID,
-        Message: "Your order has been processed",
+func processOrder(ctx context.Context, service OrderService, msg ProcessOrder,
+    notifications []command.Commander[ProcessOrder],
+) error {
+    workflow := flow.NewSerialExecutor([]command.Commander[ProcessOrder]{
+        command.CommandFunc[ProcessOrder](service.Validate),
+        command.CommandFunc[ProcessOrder](service.Process),
+        flow.NewParallelExecutor(notifications),
     })
-}
-
-// Batch processing example
-func processDailyOrders(ctx context.Context) error {
-    orders := []ProcessOrderCommand{
-        {OrderID: "1", UserID: "user1"},
-        {OrderID: "2", UserID: "user2"},
-        // ... more orders
-    }
-
-    return flow.ExecuteBatch(
-        ctx,
-        orders,
-        func(ctx context.Context, cmd ProcessOrderCommand) error {
-            return dispatcher.Dispatch(ctx, cmd)
-        },
-        50,  // batch size
-        10,  // concurrency
-    )
-}
-
-// Parallel notification example
-func notifyAllChannels(ctx context.Context, userID, message string) error {
-    cmd := NotifyUserCommand{UserID: userID, Message: message}
-
-    return flow.ParallelExecute(
-        ctx,
-        cmd,
-        []command.CommandFunc[NotifyUserCommand]{
-            sendEmail,
-            sendSMS,
-            sendPushNotification,
-        },
-    )
-}
-
-func main() {
-    // Register handlers
-    dispatcher.SubscribeCommand(&OrderProcessor{
-        orderService: &orderService{},
-        logger:       &logger{},
-    })
-
-    dispatcher.SubscribeCommandFunc(func(ctx context.Context, cmd NotifyUserCommand) error {
-        return notifyAllChannels(ctx, cmd.UserID, cmd.Message)
-    })
-
-    // Process an order
-    err := dispatcher.Dispatch(context.Background(), ProcessOrderCommand{
-        OrderID: "12345",
-        UserID:  "user-789",
-    })
-
-    if err != nil {
-        log.Fatal("Failed to process order:", err)
-    }
+    runtime := dispatcher.NewRuntime()
+    sub := dispatcher.SubscribeCommandTo(runtime, workflow)
+    defer sub.Unsubscribe()
+    return dispatcher.DispatchTo(ctx, runtime, msg)
 }
 ```
+
+Workflow sequencing alone does not provide a database transaction or durable
+notification delivery. Put transactional behavior in the domain service and
+choose a durable outbox/job adapter when delivery must survive process failure.
 
 ## Error Handling
 
@@ -714,6 +715,20 @@ func (e RetryableError) RetryDelay(attempt int) time.Duration {
     return e.delay * time.Duration(attempt)
 }
 ```
+
+## Catalog and exposure contracts
+
+`CommandDescriptor`, input/result schemas and option-source contracts let hosts
+build discovery/UI adapters. `ExposableCommand.Exposure()` opts into admin/REPL
+visibility; its zero value is hidden. Metadata does not execute commands or
+authorize callers. Consumers must enforce permissions and preserve the trusted
+actor/scope boundary. `MessageFactory.MessageValue()` supplies a concrete,
+assignable message for interface-typed handlers and metadata extraction.
+
+Run events are observation hooks. Stats/store observer adapters are best effort
+and do not turn an observer failure into command failure. Use
+`SanitizingCommandRunObserver` with a host disclosure policy before forwarding
+metadata. [Observer implementation](progress_observers.go).
 
 ## FSM
 
@@ -790,7 +805,11 @@ All operations support context for:
 
 ### Thread Safety
 
-All components are designed to be thread safe and can be used concurrently.
+Runtime dispatch and its installed-default generation support concurrent use.
+Assemble registries, resolvers, options and flow definitions before execution;
+thread safety does not imply arbitrary mutation is safe. Application handlers,
+shared message pointers, callbacks, stores and transport adapters own their
+concurrency guarantees. Prefer isolated runtimes when tests run in parallel.
 
 ## Contributing
 

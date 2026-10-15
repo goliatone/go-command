@@ -3,6 +3,15 @@
 This guide explains how to wire custom registry resolvers, how metadata is computed, and
 what to do when your command message is an interface type.
 
+## Metadata and execution ownership
+
+A local `command.Registry` does not implicitly subscribe typed handlers to a
+dispatcher. Resolvers register only their configured integrations. For explicit
+application assembly, use `registry.RuntimeContainer` with a
+`dispatcher.Runtime` and typed subscription hooks, then initialize and check
+routed readiness. See [runtime assembly](ROUTED_DISPATCH.md#assembly-and-readiness).
+Exposure/catalog metadata also does not enforce application authorization.
+
 ## Resolver Lifecycle
 
 Resolvers run during `Registry.Initialize()` for every registered command.

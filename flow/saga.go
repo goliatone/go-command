@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/goliatone/go-command"
 	"github.com/goliatone/go-errors"
@@ -61,8 +62,8 @@ func (s *Saga[T]) Execute(ctx context.Context, msg T) error {
 
 func (s *Saga[T]) rollback(ctx context.Context, msg T, executedSteps []int) error {
 	var errs error
-	for i := len(executedSteps) - 1; i >= 0; i-- {
-		step := s.steps[executedSteps[i]]
+	for i, executedStep := range slices.Backward(executedSteps) {
+		step := s.steps[executedStep]
 		if step.Compensate != nil {
 			if err := step.Compensate(ctx, msg); err != nil {
 				errs = errors.Join(errs, errors.Wrap(err, errors.CategoryHandler, fmt.Sprintf("compensation failed at step %d (%s)", i, step.Name)).

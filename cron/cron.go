@@ -41,13 +41,11 @@ type Scheduler struct {
 // NewScheduler creates a new scheduler instance with the provided options.
 func NewScheduler(opts ...Option) *Scheduler {
 	cs := &Scheduler{
-		location: time.Local,
-		parser:   DefaultParser,
-		logLevel: LogLevelError,
-		errorHandler: func(err error) {
-			log.Printf("error: %v\n", err)
-		},
-		handles: make(map[int64]*cronSubscription),
+		location:     time.Local,
+		parser:       DefaultParser,
+		logLevel:     LogLevelError,
+		errorHandler: runner.DefaultErrorHandler,
+		handles:      make(map[int64]*cronSubscription),
 	}
 
 	for _, opt := range opts {

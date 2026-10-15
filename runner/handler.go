@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -79,9 +80,7 @@ func WithRunStartHook(fn func(context.Context) context.Context) RunExecutionOpti
 // NewHandler constructs a Runner from various options, applying defaults if unset.
 func NewHandler(opts ...Option) *Handler {
 	r := &Handler{
-		errorHandler: func(err error) {
-			log.Printf("error: %v\n", err)
-		},
+		errorHandler: DefaultErrorHandler,
 		doneHandler: func(r *Handler) {
 			log.Printf("runner done: %d\n", r.EntryID)
 		},
@@ -166,11 +165,12 @@ func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) e
 	defer cancel()
 
 	wrapped := fn
-	for i := len(middleware) - 1; i >= 0; i-- {
-		wrapped = middleware[i](wrapped)
+	for _, m := range slices.Backward(middleware) {
+		wrapped = m(wrapped)
 	}
 
 	var finalErr error
+	attempts := 0
 	interruptedByControl := false
 	executionStart := time.Now()
 	outcome := RunOutcome{}
@@ -186,8 +186,9 @@ func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) e
 			return outcome, errors.Wrap(err, errors.CategoryExternal, "execution paused/canceled").
 				WithTextCode("HANDLER_EXECUTION_CONTROLLED").
 				WithMetadata(map[string]any{
-					"attempt":     attempt + 1,
-					"max_retries": maxRetries,
+					"attempt":        attempt + 1,
+					"max_retries":    maxRetries,
+					"total_attempts": attempts,
 				})
 		}
 
@@ -197,6 +198,7 @@ func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) e
 				WithMetadata(map[string]any{
 					"attempt":         attempt + 1,
 					"max_retries":     maxRetries,
+					"total_attempts":  attempts,
 					"elapsed_time":    time.Since(executionStart),
 					"run_once":        h.runOnce,
 					"max_runs":        h.maxRuns,
@@ -214,6 +216,7 @@ func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) e
 				}
 			}
 		}
+		attempts++
 		err := h.execute(attemptCtx, wrapped)
 		attemptDuration := time.Since(attemptStart)
 
@@ -270,14 +273,26 @@ func (h *Handler) RunWithOutcome(ctx context.Context, fn func(context.Context) e
 			return outcome, finalErr
 		}
 
+		code := "HANDLER_EXECUTION_FAILED"
+		category := errors.CategoryInternal
+		if errors.Is(finalErr, context.Canceled) {
+			code = "HANDLER_CONTEXT_CANCELLED"
+			category = errors.CategoryExternal
+		} else if errors.Is(finalErr, context.DeadlineExceeded) {
+			code = "HANDLER_DEADLINE_EXCEEDED"
+			category = errors.CategoryExternal
+		} else if maxRetries > 0 && attempts == maxRetries+1 {
+			code = "HANDLER_MAX_RETRIES_EXCEEDED"
+		}
 		finalErr = errors.Wrap(
 			finalErr,
-			errors.CategoryInternal,
-			fmt.Sprintf("handler failed after %d attempts", maxRetries+1),
+			category,
+			fmt.Sprintf("handler failed after %d attempts", attempts),
 		).
-			WithTextCode("HANDLER_MAX_RETRIES_EXCEEDED").
+			WithTextCode(code).
 			WithMetadata(map[string]any{
-				"total_attempts":  maxRetries + 1,
+				"total_attempts":  attempts,
+				"max_attempts":    maxRetries + 1,
 				"total_duration":  totalDuration,
 				"successful_runs": h.successfulRuns,
 				"total_runs":      h.runs,

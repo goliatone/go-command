@@ -58,6 +58,10 @@ type ClaimedOutboxEntry struct {
 }
 
 // StateStore persists state records with optimistic locking and transactional outbox writes.
+// ApplyEvent saves its IdempotencyStore receipt after RunInTransaction returns;
+// this interface alone does not make receipts or host records atomic with state.
+// A caller-owned transaction adapter must keep that outer transaction open and
+// leave commit/rollback to its owner. See README.md, "Transaction and receipt contract".
 type StateStore interface {
 	Load(ctx context.Context, id string) (*StateRecord, error)
 	SaveIfVersion(ctx context.Context, rec *StateRecord, expectedVersion int) (newVersion int, err error)

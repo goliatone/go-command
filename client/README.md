@@ -17,11 +17,14 @@ npm test
 npm run build
 ```
 
-Versioning and embedded release artifacts are managed from repo root:
+Versioning and embedded release artifacts are managed from repo root (run
+`cd ..` first if the current directory is `client/`):
 
 ```bash
 ./taskfile client:release    # sync all client package versions to .version
-./taskfile client:build      # build all packages and copy into data/client
+./taskfile client:build      # build core RPC/FSM/FSM-RPC packages into data/client
+./taskfile client:build:builder # build optional UI builder into data/client-builder
+./taskfile client:build:all   # build both asset groups
 ```
 
 ## Package overview
@@ -76,6 +79,7 @@ mountFSMUIBuilder(document.getElementById("app")!, {
 Demo host (workspace):
 
 ```bash
+# From the repository root:
 cd client/packages/fsm-ui-builder
 npm run demo
 ```

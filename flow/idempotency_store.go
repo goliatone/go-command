@@ -50,6 +50,9 @@ type IdempotencyRecord[T any] struct {
 }
 
 // IdempotencyStore persists idempotency records keyed by machine+entity+event+idempotency-key.
+// ApplyEvent invokes Save after its state transaction callback has completed.
+// Persistence alone does not join state and receipts into one atomic commit;
+// both stores must share a caller-owned transaction for that bounded contract.
 type IdempotencyStore[T any] interface {
 	Load(ctx context.Context, scope IdempotencyScope) (*IdempotencyRecord[T], error)
 	Save(ctx context.Context, rec *IdempotencyRecord[T]) error

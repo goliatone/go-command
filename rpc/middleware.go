@@ -1,5 +1,7 @@
 package rpc
 
+import "slices"
+
 import "context"
 
 // InvokeRequest carries method metadata and payload through middleware.
@@ -20,8 +22,8 @@ func applyMiddleware(middleware []Middleware, invoke func(context.Context, any) 
 		return invoke(ctx, req.Payload)
 	}
 
-	for i := len(middleware) - 1; i >= 0; i-- {
-		current := middleware[i]
+	for _, current := range slices.Backward(middleware) {
+
 		if current == nil {
 			continue
 		}

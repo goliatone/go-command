@@ -225,6 +225,10 @@ func (s *StateMachine[T]) Execute(ctx context.Context, msg T) error {
 }
 
 // ApplyEvent applies the provided event to current state and returns transition envelope.
+// Native state persistence precedes orchestration, receipt persistence and the
+// committed lifecycle hook. Post-state orchestration/receipt failures retain a
+// nil error and mark Execution degraded for compatibility. With a caller-owned
+// transaction adapter, the response is provisional until the owner commits.
 func (s *StateMachine[T]) ApplyEvent(ctx context.Context, req ApplyEventRequest[T]) (*ApplyEventResponse[T], error) {
 	entityID := strings.TrimSpace(req.EntityID)
 	event := normalizeEvent(req.Event)
