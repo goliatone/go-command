@@ -3,7 +3,7 @@ module github.com/goliatone/go-command/examples/flow/state_store_sqlite
 go 1.23.4
 
 require (
-	github.com/goliatone/go-command v0.24.2
+	github.com/goliatone/go-command v0.24.3
 	github.com/mattn/go-sqlite3 v1.14.28
 )
 

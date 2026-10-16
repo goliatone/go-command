@@ -517,21 +517,33 @@ event and provenance schemas stay host-owned. The test adapter is a bounded
 example, not a supported general store or a completed persistence-package change.
 
 The independent [SQL contract fixture](transactiontest/contract_test.go) uses
-disposable SQLite files and caller-owned Bun transactions. Its nested module
-keeps SQL-driver/Bun dependencies out of the root module. Run both suites:
+disposable SQLite files or a caller-designated disposable PostgreSQL database.
+Its nested module keeps SQL-driver/Bun dependencies out of the root module.
+The [PostgreSQL fixture](transactiontest/postgres_test.go) isolates test schemas,
+uses transaction advisory locks per entity before host writes/receipt lookup,
+and verifies CAS independently of those locks. Receipt inserts use `ON CONFLICT
+DO NOTHING` so a duplicate does not abort PostgreSQL transactions before replay.
+The native ordering checks use the stock SQLite store or a test-owned committing
+PostgreSQL state store; there is no stock PostgreSQL store added here. Run:
 
 ```sh
 go test ./...
 cd flow/transactiontest
 go test -mod=readonly -count=1 ./...
 go test -mod=readonly -race -count=1 ./...
+# PostgreSQL: PG_DSN must name a disposable database owned by this test run.
+FLOW_TEST_POSTGRES_DSN="$PG_DSN" FLOW_TEST_POSTGRES_DISPOSABLE=1 go test -mod=readonly -count=1 ./...
+FLOW_TEST_POSTGRES_DSN="$PG_DSN" FLOW_TEST_POSTGRES_DISPOSABLE=1 go test -mod=readonly -race -count=1 ./...
 # Optional audit probe: expected FAIL, preserves the unmet native guarantee.
 go test -mod=readonly -tags=native_atomicity_probe -run '^TestG4NativeReceiptFailureAtomicity$' ./...
 ```
 
-SQLite immediate-transaction contention and normal fresh-process restart are
-covered. This does not establish PostgreSQL behavior, abrupt crash/power-loss
-recovery, unknown network-commit outcomes or external effect delivery.
+SQLite immediate-transaction contention, PostgreSQL transaction/advisory-lock
+contention, stale CAS races and normal fresh-process restart are covered.
+PostgreSQL SQL/receipt errors abort the provisional transaction; the host must
+roll it back even if native ApplyEvent returns a degraded response. These tests
+do not establish abrupt crash/power-loss recovery, unknown network-commit
+outcomes, arbitrary production adapter behavior or external effect delivery.
 
 ## Metrics/Tracing Decorators
 

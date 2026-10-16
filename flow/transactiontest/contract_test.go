@@ -16,8 +16,9 @@ import (
 	"testing"
 
 	"github.com/goliatone/go-command/flow"
-	"github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 )
 
@@ -55,6 +56,9 @@ func must(t *testing.T, err error) {
 
 func openDB(t *testing.T, path string) *bun.DB {
 	t.Helper()
+	if os.Getenv("FLOW_TEST_POSTGRES_DSN") != "" {
+		return openPostgres(t, path)
+	}
 	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(path)+"?_busy_timeout=5000&_txlock=immediate&_foreign_keys=on")
 	must(t, err)
 	// Multiple independent connections/writers; SQLite serializes immediate txs.
@@ -66,6 +70,9 @@ func openDB(t *testing.T, path string) *bun.DB {
 
 func schema(t *testing.T, b *bun.DB) {
 	t.Helper()
+	if b.Dialect().Name() == dialect.PG {
+		cleanupPostgresSchema(t, b)
+	}
 	for _, query := range []string{
 		`CREATE TABLE states(entity_id TEXT PRIMARY KEY, state TEXT NOT NULL, version INTEGER NOT NULL, metadata TEXT NOT NULL)`,
 		`CREATE TABLE receipts(machine_id TEXT, entity_id TEXT, event TEXT, operation_key TEXT, record TEXT NOT NULL, PRIMARY KEY(machine_id, entity_id, event, operation_key))`,
@@ -149,9 +156,14 @@ func (s receipts) Save(c context.Context, r *flow.IdempotencyRecord[message]) er
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(c, "INSERT INTO receipts VALUES(?,?,?,?,?)", r.Scope.MachineID, r.Scope.EntityID, r.Scope.Event, r.Scope.IdempotencyKey, string(raw))
-	var sqliteErr sqlite3.Error
-	if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey {
+	// PostgreSQL aborts the transaction on a unique violation. Avoid raising one:
+	// the runtime must still be able to load the winning receipt for replay.
+	result, err := s.db.ExecContext(c, "INSERT INTO receipts VALUES(?,?,?,?,?) ON CONFLICT(machine_id,entity_id,event,operation_key) DO NOTHING", r.Scope.MachineID, r.Scope.EntityID, r.Scope.Event, r.Scope.IdempotencyKey, string(raw))
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
 		return flow.ErrIdempotencyRecordExists
 	}
 	return err
@@ -175,6 +187,14 @@ func apply(b *bun.DB, r flow.ApplyEventRequest[message], fault string, observe f
 		return nil, err
 	}
 	defer tx.Rollback() // also runs during panic unwinding; owner preserves panic
+	if b.Dialect().Name() == dialect.PG {
+		// Host operation serialization precedes receipt lookup and host writes.
+		// This SQL lock spans independent machine instances and connections;
+		// SQLite's immediate transaction provides its equivalent bounded ordering.
+		if _, err = tx.ExecContext(c, "SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "generic::"+r.EntityID); err != nil {
+			return nil, err
+		}
+	}
 	store := txState{tx}
 	q := receipts{tx}
 	prior, err := q.Load(c, flow.IdempotencyScope{MachineID: "generic", EntityID: r.EntityID, Event: r.Event, IdempotencyKey: r.IdempotencyKey})
@@ -270,13 +290,11 @@ func TestG4AtomicAdapter(t *testing.T) {
 				must(t, err)
 				_, err = b.Exec("CREATE TABLE deferred_child(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")
 				must(t, err)
-				_, err = b.Exec("CREATE TRIGGER fail_commit AFTER INSERT ON receipts BEGIN INSERT INTO deferred_child VALUES(1); END")
-				must(t, err)
+				deferCommitFailure(t, b)
 			}
 			for _, table := range []string{"receipts", "states", "events"} {
 				if fault == map[string]string{"receipts": "receipt_sql", "states": "state_sql", "events": "event_sql"}[table] {
-					_, err := b.Exec("CREATE TRIGGER fail_write BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT,'injected SQL failure'); END")
-					must(t, err)
+					rejectInsert(t, b, table, "fail_write")
 				}
 			}
 			var trace []string
@@ -516,8 +534,7 @@ func TestG4ExistingStateRollbackAndRetry(t *testing.T) {
 	schema(t, b)
 	_, err := b.Exec("INSERT INTO states VALUES('Workflow A','draft',1,'{}')")
 	must(t, err)
-	_, err = b.Exec("CREATE TRIGGER reject_receipt BEFORE INSERT ON receipts BEGIN SELECT RAISE(ABORT,'receipt failure'); END")
-	must(t, err)
+	rejectInsert(t, b, "receipts", "reject_receipt")
 	out, err := apply(b, request(), "", nil)
 	if err == nil || out != nil {
 		t.Fatal("receipt failure escaped outer rollback")
@@ -533,8 +550,7 @@ func TestG4ExistingStateRollbackAndRetry(t *testing.T) {
 			t.Fatalf("rollback leaked %s", table)
 		}
 	}
-	_, err = b.Exec("DROP TRIGGER reject_receipt")
-	must(t, err)
+	dropReceiptTrigger(t, b)
 	out, err = apply(b, request(), "", nil)
 	must(t, err)
 	if out.IdempotencyHit || out.Version != 2 {
@@ -557,7 +573,7 @@ func TestG4NativeDegradedReceiptReplay(t *testing.T) {
 	c := context.Background()
 	b := openDB(t, filepath.Join(t.TempDir(), "native.db"))
 	schema(t, b)
-	s := flow.NewSQLiteStateStore(b.DB, "native_states")
+	s := nativeState(b)
 	_, err := s.SaveIfVersion(c, &flow.StateRecord{EntityID: "Workflow A", State: "draft", MachineID: "generic", MachineVersion: "1"}, 0)
 	must(t, err)
 	o := &failingStart{}
@@ -576,19 +592,19 @@ func TestG4NativeDegradedReceiptReplay(t *testing.T) {
 	}
 }
 
-// nativeOutcome deliberately uses the stock store and a separately committed
-// SQL receipt store; no mock failures or outer transaction are involved.
+// nativeOutcome uses the stock SQLite store or a test-owned committing PG store
+// with a separately committed SQL receipt store. ApplyEvent itself is native;
+// there are no mock failures or caller-owned outer transactions in this case.
 func nativeOutcome(t *testing.T, failReceipt bool) (*flow.StateRecord, *flow.ApplyEventResponse[message], int, error) {
 	t.Helper()
 	c := context.Background()
 	b := openDB(t, filepath.Join(t.TempDir(), "native.db"))
 	schema(t, b)
-	s := flow.NewSQLiteStateStore(b.DB, "native_states")
+	s := nativeState(b)
 	_, err := s.SaveIfVersion(c, &flow.StateRecord{EntityID: "Workflow A", State: "draft", MachineID: "generic", MachineVersion: "1"}, 0)
 	must(t, err)
 	if failReceipt {
-		_, err = b.Exec("CREATE TRIGGER reject_receipt BEFORE INSERT ON receipts BEGIN SELECT RAISE(ABORT,'receipt failure'); END")
-		must(t, err)
+		rejectInsert(t, b, "receipts", "reject_receipt")
 	}
 	m, err := machine(s, receipts{b})
 	must(t, err)
