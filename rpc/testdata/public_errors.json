@@ -1,0 +1,136 @@
+[
+  {
+    "name": "INVALID_ARGUMENT",
+    "response": {
+      "error": {
+        "code": "INVALID_ARGUMENT",
+        "message": "Invalid argument.",
+        "category": "validation"
+      }
+    }
+  },
+  {
+    "name": "UNAUTHENTICATED",
+    "response": {
+      "error": {
+        "code": "UNAUTHENTICATED",
+        "message": "Authentication required.",
+        "category": "authentication"
+      }
+    }
+  },
+  {
+    "name": "FORBIDDEN",
+    "response": {
+      "error": {
+        "code": "FORBIDDEN",
+        "message": "Permission denied.",
+        "category": "authorization"
+      }
+    }
+  },
+  {
+    "name": "NOT_FOUND",
+    "response": {
+      "error": {
+        "code": "NOT_FOUND",
+        "message": "Resource not found.",
+        "category": "not_found"
+      }
+    }
+  },
+  {
+    "name": "CONFLICT",
+    "response": {
+      "error": {
+        "code": "CONFLICT",
+        "message": "Request conflicts with current state.",
+        "category": "conflict"
+      }
+    }
+  },
+  {
+    "name": "FAILED_PRECONDITION",
+    "response": {
+      "error": {
+        "code": "FAILED_PRECONDITION",
+        "message": "Precondition failed.",
+        "category": "operation"
+      }
+    }
+  },
+  {
+    "name": "RATE_LIMITED",
+    "response": {
+      "error": {
+        "code": "RATE_LIMITED",
+        "message": "Rate limit exceeded.",
+        "category": "rate_limit"
+      }
+    }
+  },
+  {
+    "name": "UNAVAILABLE",
+    "response": {
+      "error": {
+        "code": "UNAVAILABLE",
+        "message": "Service unavailable.",
+        "category": "external"
+      }
+    }
+  },
+  {
+    "name": "DEADLINE_EXCEEDED",
+    "response": {
+      "error": {
+        "code": "DEADLINE_EXCEEDED",
+        "message": "Deadline exceeded.",
+        "category": "external"
+      }
+    }
+  },
+  {
+    "name": "CANCELED",
+    "response": {
+      "error": {
+        "code": "CANCELED",
+        "message": "Request canceled.",
+        "category": "external"
+      }
+    }
+  },
+  {
+    "name": "INTERNAL",
+    "response": {
+      "error": {
+        "code": "INTERNAL",
+        "message": "An unexpected error occurred.",
+        "category": "internal"
+      }
+    }
+  },
+  {
+    "name": "OUTCOME_UNKNOWN",
+    "response": {
+      "error": {
+        "code": "OUTCOME_UNKNOWN",
+        "message": "Operation outcome is unknown.",
+        "category": "external"
+      }
+    }
+  },
+  {
+    "name": "APP_BUSY",
+    "response": {
+      "error": {
+        "code": "APP_BUSY",
+        "message": "Try later.",
+        "category": "external",
+        "retryable": true,
+        "details": {
+          "field": "name"
+        }
+      }
+    }
+  }
+]
