@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/goliatone/go-generators/rpccontract"
 )
 
 type endpointTypeRef struct {
@@ -34,36 +36,86 @@ type endpointMeta struct {
 }
 
 func main() {
-	var (
-		manifestPath string
-		outPath      string
-		exportName   string
-	)
-	flag.StringVar(&manifestPath, "manifest", "", "path to RPC endpoint manifest JSON (optional scaffold input)")
-	flag.StringVar(&outPath, "out", "client/src/gen/rpc-contract.ts", "output TypeScript file path")
-	flag.StringVar(&exportName, "export", "rpcEndpointMeta", "export const name for endpoint metadata array")
-	flag.Parse()
-
-	endpoints, err := loadEndpoints(manifestPath)
-	if err != nil {
+	if err := run(os.Args[1:]); err != nil && err != flag.ErrHelp {
 		die(err)
 	}
+}
 
-	sort.Slice(endpoints, func(i, j int) bool {
-		return endpoints[i].Method < endpoints[j].Method
-	})
-
-	content, err := renderTypeScript(endpoints, exportName)
+func run(args []string) error {
+	flags := flag.NewFlagSet("rpc-tsgen", flag.ContinueOnError)
+	manifestPath := flags.String("manifest", "", "path to endpoint metadata or full-contract manifest JSON")
+	outPath := flags.String("out", "client/src/gen/rpc-contract.ts", "output TypeScript file path")
+	exportName := flags.String("export", "rpcEndpointMeta", "scaffold endpoint metadata export name")
+	mode := flags.String("mode", "scaffold", "generation mode: scaffold or full")
+	check := flags.Bool("check", false, "check output drift without writing any files")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	// flag.Parse stops at positional arguments; do not silently ignore later flags.
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %q", flags.Args())
+	}
+	if strings.TrimSpace(*manifestPath) != "" {
+		input, err := os.Stat(*manifestPath)
+		if err != nil {
+			return fmt.Errorf("read manifest: %w", err)
+		}
+		if output, err := os.Stat(*outPath); err == nil && os.SameFile(input, output) {
+			return fmt.Errorf("manifest and output must be distinct files")
+		}
+	}
+	var content []byte
+	var err error
+	switch *mode {
+	case "scaffold":
+		var endpoints []endpointMeta
+		endpoints, err = loadEndpoints(*manifestPath)
+		if err != nil {
+			return err
+		}
+		sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].Method < endpoints[j].Method })
+		content, err = renderTypeScript(endpoints, *exportName)
+	case "full":
+		if strings.TrimSpace(*manifestPath) == "" {
+			return fmt.Errorf("full mode requires -manifest")
+		}
+		var scaffoldFlag bool
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "export" {
+				scaffoldFlag = true
+			}
+		})
+		if scaffoldFlag {
+			return fmt.Errorf("-export is only supported in scaffold mode")
+		}
+		var raw []byte
+		raw, err = os.ReadFile(*manifestPath)
+		if err == nil {
+			content, err = rpccontract.Generate(raw)
+		}
+	default:
+		return fmt.Errorf("unsupported mode %q: use scaffold or full", *mode)
+	}
 	if err != nil {
-		die(err)
+		return err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-		die(fmt.Errorf("create output directory: %w", err))
+	if *check {
+		existing, err := os.ReadFile(*outPath)
+		if err != nil {
+			return fmt.Errorf("output drift: %s: %w", *outPath, err)
+		}
+		if !bytes.Equal(existing, content) {
+			return fmt.Errorf("output drift: %s differs from generated contract", *outPath)
+		}
+		return nil
 	}
-	if err := os.WriteFile(outPath, content, 0o644); err != nil {
-		die(fmt.Errorf("write output file: %w", err))
+	if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
 	}
+	if err := os.WriteFile(*outPath, content, 0o644); err != nil {
+		return fmt.Errorf("write output file: %w", err)
+	}
+	return nil
 }
 
 func loadEndpoints(path string) ([]endpointMeta, error) {
