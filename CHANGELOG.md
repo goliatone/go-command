@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.25.0](https://github.com/goliatone/go-command/compare/v0.24.3...v0.25.0) - (2026-11-10)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.25.0 ([ba6da76](https://github.com/goliatone/go-command/commit/ba6da76f6a036ca03221667243b8eb9c86c944b8))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Rpc error mapping ([301e148](https://github.com/goliatone/go-command/commit/301e148bd7d48763f546d862268a3941f5e5d36f))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.24.3 ([9115e66](https://github.com/goliatone/go-command/commit/9115e6666e968a91220e6a3fc8548ecd58d6a817))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([0ac2f28](https://github.com/goliatone/go-command/commit/0ac2f28329732ce376141845407829df76c9a476))  - (goliatone)
+
 # [0.24.3](https://github.com/goliatone/go-command/compare/v0.24.2...v0.24.3) - (2026-10-15)
 
 ## <!-- 1 -->🐛 Bug Fixes
