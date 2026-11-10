@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.26.0](https://github.com/goliatone/go-command/compare/v0.25.0...v0.26.0) - (2026-11-10)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.26.0 ([5f58f15](https://github.com/goliatone/go-command/commit/5f58f15b875925c96fea479ce5a77ef5e6631444))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Rpc contract gen ([d13d224](https://github.com/goliatone/go-command/commit/d13d2241f8ad9ee389feaf2101ade9993eaab064))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.25.0 ([652a2f9](https://github.com/goliatone/go-command/commit/652a2f91879226a4dd9acff8785eaf4565e6268b))  - (goliatone)
+
 # [0.25.0](https://github.com/goliatone/go-command/compare/v0.24.3...v0.25.0) - (2026-11-10)
 
 ## <!-- 13 -->📦 Bumps
