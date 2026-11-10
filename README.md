@@ -625,6 +625,74 @@ Canonical RPC method payloads should use:
 - Request: `rpc.RequestEnvelope[T]` (`data` + `meta`)
 - Response: `rpc.ResponseEnvelope[T]`
 
+#### Public error mapping
+
+Transports can opt into `rpc.MapError(ctx, err, mapper)` for returned Go errors.
+A nil mapper, or one returning nil, uses `rpc.DefaultErrorMapper`. A nil error
+returns nil. `Server.Invoke` still returns the original Go error; recovered panic
+errors and original panic values remain available to existing failure hooks.
+Never serialize those diagnostic values directly.
+
+The default mapper uses controlled messages and the following bounded contract:
+
+| Code | Category | Default source |
+| --- | --- | --- |
+| `INVALID_ARGUMENT` | `validation` | validation or bad-input category |
+| `UNAUTHENTICATED` | `authentication` | authentication category |
+| `FORBIDDEN` | `authorization` | authorization category |
+| `NOT_FOUND` | `not_found` | not-found category |
+| `CONFLICT` | `conflict` | conflict category |
+| `FAILED_PRECONDITION` | `operation` | explicit canonical text code |
+| `RATE_LIMITED` | `rate_limit` | rate-limit category |
+| `UNAVAILABLE` | `external` | external category |
+| `DEADLINE_EXCEEDED` | `external` | wrapped context deadline |
+| `CANCELED` | `external` | wrapped context cancellation |
+| `INTERNAL` | `internal` | unknown error, recovered panic, unmapped category |
+| `OUTCOME_UNKNOWN` | `external` | explicit canonical text code |
+
+Canonical text codes are also recognized on structured errors. Context causes
+win (cancellation before deadline), then classification uses the nearest
+structured error after skipping known runner wrapper codes. Other structured
+outer classifications remain authoritative. An unrelated expired request context
+does not reclassify the returned error. Messages, arbitrary text codes, metadata,
+validation values, stacks and retry hints are never copied from the diagnostic
+error. If inspecting a malformed error chain panics (including a wrapped typed
+nil), mapping falls back to `INTERNAL` without exposing panic details. Default
+retryability is false and is omitted from JSON.
+
+An `rpc.ErrorMapper` is an explicit public projection:
+
+```go
+mapper := rpc.ErrorMapper(func(ctx context.Context, err error) *rpc.Error {
+    if errors.Is(err, ErrNameTaken) { // application-owned sentinel
+        return &rpc.Error{
+            Code: "NAME_TAKEN", Category: "conflict",
+            Message: "Choose another name.",
+            Details: map[string]any{"field": "name"},
+        }
+    }
+    return nil
+})
+public := rpc.MapError(ctx, err, mapper)
+```
+
+Allowlist public details and use bounded, JSON-safe values. Do not project an
+entire error or metadata map. MapError copies the envelope and top-level details;
+nested host details must be immutable or allocated per call. Hosts may explicitly
+set retryability, which is informational and never authorizes mutation replay.
+Cancellation, deadlines and lost replies do not prove rollback; reconcile receipts
+or status before deciding whether another attempt is safe. Unknown outcome is
+separate from retryability and must be selected explicitly.
+
+Handler-created `ResponseEnvelope.Error` values are already public contracts;
+handlers own their safety. Mapping does not rewrite successful result objects,
+operational failures returned as data, or receipts. Existing `omitempty` behavior
+(including omitted zero-valued data and false retryability) is unchanged. HTTP
+statuses and legacy transport code modes remain owned by transport adapters.
+`flow.RPCErrorForError` retains its existing flow-specific behavior and is not the
+default mapper. [Wire fixtures](rpc/testdata/public_errors.json) are verified
+against Go serialization and shared with client tests.
+
 Failure handling modes:
 
 - `FailureModeReject` (default): registration errors return, invoke panics.

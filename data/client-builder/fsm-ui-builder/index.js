@@ -423,8 +423,11 @@ class cu extends Error {
   code;
   data;
   status;
+  category;
+  retryable;
+  details;
   constructor(i) {
-    super(i.message), this.name = "RPCClientError", this.method = i.method, this.code = i.code, this.data = i.data, this.status = i.status;
+    super(i.message), this.name = "RPCClientError", this.method = i.method, this.code = i.code, this.data = i.data, this.status = i.status, this.category = i.category, this.retryable = i.retryable, this.details = i.details;
   }
 }
 function rw() {
@@ -448,7 +451,10 @@ function sw(t, i) {
       method: t,
       message: i.error.message || `rpc call failed: ${t}`,
       code: i.error.code,
-      data: i.error.data
+      data: i.error.data,
+      category: i.error.category,
+      retryable: i.error.retryable,
+      details: i.error.details
     });
   return "result" in i ? i.result : i;
 }
@@ -479,6 +485,9 @@ class cw {
         message: u.error.message || `rpc call failed (${s.status})`,
         code: u.error.code,
         data: u.error.data,
+        category: u.error.category,
+        retryable: u.error.retryable,
+        details: u.error.details,
         status: s.status
       }) : new cu({
         method: i,

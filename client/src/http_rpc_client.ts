@@ -50,6 +50,9 @@ export class HTTPRPCClient implements RPCClient {
           message: payload.error.message || `rpc call failed (${response.status})`,
           code: payload.error.code,
           data: payload.error.data,
+          category: payload.error.category,
+          retryable: payload.error.retryable,
+          details: payload.error.details,
           status: response.status
         });
       }

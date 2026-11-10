@@ -1,10 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  extractRPCResult,
   FunctionRPCClient,
   HTTPRPCClient,
   RPCClientError,
   WebSocketRPCClient,
+  type RPCErrorObject,
   type WebSocketLike
 } from "../src";
 
@@ -19,7 +23,7 @@ class FakeRPCWebSocket implements WebSocketLike {
     error: []
   };
 
-  constructor(private readonly result: unknown) {
+  constructor(private readonly result: unknown, private readonly error?: RPCErrorObject) {
     setTimeout(() => {
       this.readyState = 1;
       this.emit("open", {});
@@ -42,7 +46,7 @@ class FakeRPCWebSocket implements WebSocketLike {
         data: JSON.stringify({
           id: request.id,
           jsonrpc: request.jsonrpc,
-          result: this.result
+          ...(this.error ? { error: this.error } : { result: this.result })
         })
       });
     }, 0);
@@ -184,5 +188,70 @@ describe("generic rpc clients", () => {
     expect(sent.method).toBe("system.health");
     expect(sent.params).toEqual({ detail: true });
     expect(sent.jsonrpc).toBe("2.0");
+  });
+});
+
+// Go tests compare these fixtures with actual ResponseEnvelope serialization.
+const publicErrorFixtures = JSON.parse(readFileSync(
+  new URL("../../rpc/testdata/public_errors.json", import.meta.url), "utf8"
+)) as Array<{ name: string; response: { error: RPCErrorObject } }>;
+
+describe("canonical public error compatibility", () => {
+  for (const status of [200, 409]) {
+    it.each(publicErrorFixtures)(`HTTP ${status} preserves $name without replay`, async ({ response }) => {
+      const fetchImpl = vi.fn(async () => ({
+        ok: status === 200, status, json: async () => response
+      }) as Response);
+      const client = new HTTPRPCClient({ endpoint: "/rpc", fetchImpl });
+      const failure = await client.call("mutation").catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(RPCClientError);
+      expect(failure).toMatchObject({ method: "mutation", ...response.error });
+      expect((failure as RPCClientError).status).toBe(status === 200 ? undefined : status);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it.each(publicErrorFixtures)("WebSocket preserves $name without replay", async ({ response }) => {
+    let socket: FakeRPCWebSocket | undefined;
+    const client = new WebSocketRPCClient("wss://example.com/rpc", {
+      socketFactory: () => (socket = new FakeRPCWebSocket(undefined, response.error))
+    });
+    try {
+      const failure = await client.call("mutation").catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(RPCClientError);
+      expect(failure).toMatchObject({ method: "mutation", ...response.error });
+      expect(socket?.sent).toHaveLength(1);
+    } finally {
+      client.close();
+    }
+  });
+
+  it.each([200, 400])("preserves legacy JSON-RPC data and explicit false at HTTP %i", async (status) => {
+    const error = { code: -32602, message: "invalid params", data: { legacy: true }, category: "validation", retryable: false, details: { field: "name" } };
+    const client = new HTTPRPCClient({ endpoint: "/rpc", fetchImpl: vi.fn(async () => ({
+      ok: status === 200, status, json: async () => ({ jsonrpc: "2.0", id: "1", error })
+    }) as Response) });
+    await expect(client.call("legacy")).rejects.toMatchObject(error);
+  });
+
+  it("leaves absent error fields undefined", () => {
+    let failure: unknown;
+    try { extractRPCResult("legacy", { error: { code: -32603, message: "failure", data: "legacy" } }); }
+    catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(RPCClientError);
+    expect(failure).toMatchObject({ code: -32603, data: "legacy" });
+    expect((failure as RPCClientError).category).toBeUndefined();
+    expect((failure as RPCClientError).retryable).toBeUndefined();
+    expect((failure as RPCClientError).details).toBeUndefined();
+  });
+
+  it("preserves result unwrapping and canonical envelope return semantics", () => {
+    for (const result of [false, 0, "", null, [], {}]) {
+      expect(extractRPCResult("legacy", { result })).toBe(result);
+    }
+    for (const envelope of [{}, { data: false }, { data: { receipt: { accepted: true }, result: { failed: true } } }]) {
+      expect(extractRPCResult("canonical", envelope)).toBe(envelope);
+    }
+    expect(extractRPCResult("raw", null)).toBeNull();
   });
 });

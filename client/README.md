@@ -39,6 +39,19 @@ Use these when you need RPC calls outside FSM from `@goliatone/go-command-rpc`:
 - `WebSocketRPCClient`
 - `RPCClientError`
 
+`RPCClientError` preserves canonical `category`, `retryable` and `details`
+alongside `code`, `message`, `method`, HTTP failure `status`, and legacy JSON-RPC
+`data`. Missing fields remain undefined; explicit false retryability is retained.
+HTTP error envelopes are recognized on both successful and failed HTTP responses;
+WebSocket responses use the same extraction. Retryability is informational: the
+clients do not replay calls. Cancellation, timeout or a lost reply does not prove
+that a mutation was rolled back; reconcile the receipt or status first.
+
+Success behavior is unchanged: a JSON-RPC `result` is unwrapped, while a canonical
+`{data: ...}` envelope is returned intact (data may be omitted). Handler-reported
+operational failures inside successful data remain data. See the
+[public mapping contract](../README.md#public-error-mapping).
+
 ### FSM projection runtime
 
 Use these for server-authoritative FSM state projection from `@goliatone/go-command-fsm`:

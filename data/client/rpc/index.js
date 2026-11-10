@@ -12,24 +12,27 @@ class c extends Error {
   code;
   data;
   status;
+  category;
+  retryable;
+  details;
   constructor(e) {
-    super(e.message), this.name = "RPCClientError", this.method = e.method, this.code = e.code, this.data = e.data, this.status = e.status;
+    super(e.message), this.name = "RPCClientError", this.method = e.method, this.code = e.code, this.data = e.data, this.status = e.status, this.category = e.category, this.retryable = e.retryable, this.details = e.details;
   }
 }
 function u() {
   return Math.random().toString(36).slice(2);
 }
 function a(n, e, t) {
-  const s = {
+  const r = {
     id: (t.idGenerator ?? u)(),
     method: n
   };
-  return e !== void 0 && (s.params = e), t.rpcVersion === "2.0" && (s.jsonrpc = "2.0"), s;
+  return e !== void 0 && (r.params = e), t.rpcVersion === "2.0" && (r.jsonrpc = "2.0"), r;
 }
 function l(n) {
   return !!n && typeof n == "object" && !Array.isArray(n);
 }
-function h(n, e) {
+function d(n, e) {
   if (!l(e))
     return e;
   if (e.error)
@@ -37,7 +40,10 @@ function h(n, e) {
       method: n,
       message: e.error.message || `rpc call failed: ${n}`,
       code: e.error.code,
-      data: e.error.data
+      data: e.error.data,
+      category: e.error.category,
+      retryable: e.error.retryable,
+      details: e.error.details
     });
   return "result" in e ? e.result : e;
 }
@@ -53,35 +59,38 @@ class g {
   options;
   fetchImpl;
   async call(e, t) {
-    const s = JSON.stringify(a(e, t, this.options)), o = await this.fetchImpl(this.options.endpoint, {
+    const r = JSON.stringify(a(e, t, this.options)), s = await this.fetchImpl(this.options.endpoint, {
       ...this.options.requestInit,
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...this.options.headers ?? {}
       },
-      body: s
-    }), r = await o.json().catch(() => null);
-    if (!o.ok)
-      throw l(r) && r.error ? new c({
+      body: r
+    }), o = await s.json().catch(() => null);
+    if (!s.ok)
+      throw l(o) && o.error ? new c({
         method: e,
-        message: r.error.message || `rpc call failed (${o.status})`,
-        code: r.error.code,
-        data: r.error.data,
-        status: o.status
+        message: o.error.message || `rpc call failed (${s.status})`,
+        code: o.error.code,
+        data: o.error.data,
+        category: o.error.category,
+        retryable: o.error.retryable,
+        details: o.error.details,
+        status: s.status
       }) : new c({
         method: e,
-        message: `rpc call failed (${o.status})`,
-        status: o.status,
-        data: r
+        message: `rpc call failed (${s.status})`,
+        status: s.status,
+        data: o
       });
-    return h(e, r);
+    return d(e, o);
   }
 }
 const f = 1;
-class w {
+class y {
   constructor(e, t = {}) {
-    this.url = e, this.options = t, this.timeoutMs = t.requestTimeoutMs ?? 1e4, this.socketFactory = t.socketFactory ?? ((s, o) => new WebSocket(s, o));
+    this.url = e, this.options = t, this.timeoutMs = t.requestTimeoutMs ?? 1e4, this.socketFactory = t.socketFactory ?? ((r, s) => new WebSocket(r, s));
   }
   url;
   options;
@@ -93,13 +102,13 @@ class w {
   async call(e, t) {
     if (await this.ensureConnected(), !this.socket)
       throw new Error("websocket rpc client is not connected");
-    const s = a(e, t, this.options), o = new Promise((r, i) => {
-      const d = setTimeout(() => {
-        this.pending.delete(s.id), i(new Error(`websocket rpc request timed out (${this.timeoutMs}ms)`));
+    const r = a(e, t, this.options), s = new Promise((o, i) => {
+      const h = setTimeout(() => {
+        this.pending.delete(r.id), i(new Error(`websocket rpc request timed out (${this.timeoutMs}ms)`));
       }, this.timeoutMs);
-      this.pending.set(s.id, { method: e, resolve: r, reject: i, timeout: d });
+      this.pending.set(r.id, { method: e, resolve: o, reject: i, timeout: h });
     });
-    return this.socket.send(JSON.stringify(s)), o;
+    return this.socket.send(JSON.stringify(r)), s;
   }
   close(e, t) {
     this.socket?.close(e, t), this.socket = null, this.connectPromise = null;
@@ -107,14 +116,14 @@ class w {
   async ensureConnected() {
     if (!(this.socket && this.socket.readyState === f))
       return this.connectPromise ? this.connectPromise : (this.connectPromise = new Promise((e, t) => {
-        const s = this.socketFactory(this.url, this.options.protocols);
-        this.socket = s;
-        const o = () => {
-          s.removeEventListener("open", o), s.removeEventListener("error", r), this.connectPromise = null, e();
-        }, r = (i) => {
-          s.removeEventListener("open", o), s.removeEventListener("error", r), this.connectPromise = null, t(i instanceof Error ? i : new Error("websocket rpc connection failed"));
+        const r = this.socketFactory(this.url, this.options.protocols);
+        this.socket = r;
+        const s = () => {
+          r.removeEventListener("open", s), r.removeEventListener("error", o), this.connectPromise = null, e();
+        }, o = (i) => {
+          r.removeEventListener("open", s), r.removeEventListener("error", o), this.connectPromise = null, t(i instanceof Error ? i : new Error("websocket rpc connection failed"));
         };
-        s.addEventListener("open", o), s.addEventListener("error", r), s.addEventListener("message", (i) => this.onMessage(i)), s.addEventListener("close", () => this.onClose());
+        r.addEventListener("open", s), r.addEventListener("error", o), r.addEventListener("message", (i) => this.onMessage(i)), r.addEventListener("close", () => this.onClose());
       }), this.connectPromise);
   }
   onClose() {
@@ -133,12 +142,12 @@ class w {
     }
     if (!t.id || !this.pending.has(t.id))
       return;
-    const s = this.pending.get(t.id);
-    this.pending.delete(t.id), clearTimeout(s.timeout);
+    const r = this.pending.get(t.id);
+    this.pending.delete(t.id), clearTimeout(r.timeout);
     try {
-      s.resolve(h(s.method, t));
-    } catch (o) {
-      s.reject(o);
+      r.resolve(d(r.method, t));
+    } catch (s) {
+      r.reject(s);
     }
   }
 }
@@ -146,8 +155,8 @@ export {
   m as FunctionRPCClient,
   g as HTTPRPCClient,
   c as RPCClientError,
-  w as WebSocketRPCClient,
+  y as WebSocketRPCClient,
   u as defaultRPCID,
-  h as extractRPCResult,
+  d as extractRPCResult,
   a as toRPCRequestEnvelope
 };

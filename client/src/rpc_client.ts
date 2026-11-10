@@ -2,6 +2,9 @@ export interface RPCErrorObject {
   code?: string | number;
   message: string;
   data?: unknown;
+  category?: string;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
 }
 
 export interface RPCRequestEnvelope<TParams = unknown> {
@@ -27,6 +30,9 @@ export class RPCClientError extends Error {
   readonly code?: string | number;
   readonly data?: unknown;
   readonly status?: number;
+  readonly category?: string;
+  readonly retryable?: boolean;
+  readonly details?: Record<string, unknown>;
 
   constructor(input: {
     method: string;
@@ -34,6 +40,9 @@ export class RPCClientError extends Error {
     code?: string | number;
     data?: unknown;
     status?: number;
+    category?: string;
+    retryable?: boolean;
+    details?: Record<string, unknown>;
   }) {
     super(input.message);
     this.name = "RPCClientError";
@@ -41,6 +50,9 @@ export class RPCClientError extends Error {
     this.code = input.code;
     this.data = input.data;
     this.status = input.status;
+    this.category = input.category;
+    this.retryable = input.retryable;
+    this.details = input.details;
   }
 }
 
@@ -87,7 +99,10 @@ export function extractRPCResult<TResult>(method: string, value: unknown): TResu
       method,
       message: value.error.message || `rpc call failed: ${method}`,
       code: value.error.code,
-      data: value.error.data
+      data: value.error.data,
+      category: value.error.category,
+      retryable: value.error.retryable,
+      details: value.error.details
     });
   }
 
