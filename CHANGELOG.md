@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.26.1](https://github.com/goliatone/go-command/compare/v0.26.0...v0.26.1) - (2026-11-11)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Rpc validation ([c521853](https://github.com/goliatone/go-command/commit/c5218530c7fbe482b0334ff0adb61c983d188a31))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.26.1 ([9f73ae8](https://github.com/goliatone/go-command/commit/9f73ae8f2e72f7ffe36f3dbebe964c66541135cd))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Comand types and endpoint validatio ([072f68f](https://github.com/goliatone/go-command/commit/072f68f8b0808037cb2a50ac976b9ad25f8060dd))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.26.0 ([61283bd](https://github.com/goliatone/go-command/commit/61283bd476161bcea8d6cff9543798a7549b0979))  - (goliatone)
+
 # [0.26.0](https://github.com/goliatone/go-command/compare/v0.25.0...v0.26.0) - (2026-11-10)
 
 ## <!-- 13 -->📦 Bumps
