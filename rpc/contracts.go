@@ -82,10 +82,11 @@ type EndpointsProvider interface {
 }
 
 type endpointDefinition struct {
-	spec    EndpointSpec
-	reqType reflect.Type
-	resType reflect.Type
-	invoke  func(context.Context, any) (any, error)
+	handlerPresent bool
+	spec           EndpointSpec
+	reqType        reflect.Type
+	resType        reflect.Type
+	invoke         func(context.Context, any) (any, error)
 }
 
 func (d *endpointDefinition) Spec() EndpointSpec {
@@ -140,9 +141,10 @@ func NewEndpoint[Req any, Res any](
 	resEnvelopeType := reflect.TypeFor[ResponseEnvelope[Res]]()
 
 	return &endpointDefinition{
-		spec:    spec,
-		reqType: reqPtrType,
-		resType: resEnvelopeType,
+		handlerPresent: handler != nil,
+		spec:           spec,
+		reqType:        reqPtrType,
+		resType:        resEnvelopeType,
 		invoke: func(ctx context.Context, payload any) (any, error) {
 			reqValue, err := payloadValue(reqPtrType, payload)
 			if err != nil {

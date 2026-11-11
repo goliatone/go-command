@@ -701,6 +701,58 @@ Failure handling modes:
 
 Endpoint metadata returned by `Endpoint()` and `Endpoints()` is defensively copied, so caller mutations do not affect server state.
 
+#### Optional structural readiness
+
+Default registration remains compatible, including opaque custom definitions.
+For fail-closed startup checks, opt in before registering endpoints:
+
+```go
+server := rpc.NewServer(
+    rpc.WithStrictValidation(),
+    rpc.WithFailureMode(rpc.FailureModeRecover),
+)
+if err := server.RegisterEndpoints(endpoints...); err != nil {
+    return err
+}
+report := server.ValidateEndpoints()
+if !report.Ready {
+    return fmt.Errorf("RPC structural readiness failed: %+v", report)
+}
+```
+
+`rpc.ValidateEndpoint(def)` checks one definition without registering it.
+Built-in `NewEndpoint` definitions expose the optional `EndpointValidator`
+capability, which detects nil handlers and invalid request/response/factory
+shapes without calling `Invoke` or `NewRequest`. Issues have stable `Method`,
+`Code`, `Status` and safe `Message` fields; endpoint status is `valid`, `invalid`
+or `unverifiable`. Reports sort methods/issues deterministically and return
+independent slices. An empty server is structurally ready unless registration
+failures were recorded; this does not prove that any intended endpoint exists.
+
+Custom definitions keep the existing `EndpointDefinition` interface. Without an
+optional `ValidateEndpoint() []rpc.ValidationIssue` implementation, their handler
+and factory are unverifiable and strict registration rejects them. Custom
+validators must be side-effect free; returning no issues attests their own handler,
+type and factory invariants. The framework does not execute factories or prove
+arbitrary application behavior. Metadata/validator panics become safe unverifiable
+issues. Wrappers must explicitly implement or forward the optional capability if
+they can substantiate it; embedding only `EndpointDefinition` does not forward it.
+
+Strict registration preserves failure strategies and skips invalid/unverifiable
+endpoints. With `FailureModeLogAndContinue`, a nil registration error does **not**
+establish readiness: inspect the report. Strict failed attempts (including
+already-registered methods) remain deduplicated startup evidence even after a
+successful retry. Correct the configuration and construct a new server to clear
+that history. Batch registration remains sequential, not atomic. Reports invoke
+custom metadata/validation outside registry locks; definitions and their metadata
+must remain immutable after registration.
+
+Readiness covers registration structure only. Permissions and roles remain
+metadata; host authorization, allowlists, route mounting and expected endpoint
+coverage need their own checks. Existing admin wrappers remain supported in
+default mode; adopt strict mode only after addressing their unverifiable reports.
+
+
 Invoke middleware can be registered for auth/logging/metrics concerns:
 
 ```go

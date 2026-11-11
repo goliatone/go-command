@@ -32,11 +32,12 @@ type Endpoint struct {
 }
 
 type endpointEntry struct {
-	endpoint Endpoint
-	msgType  reflect.Type
-	resType  reflect.Type
-	newReq   func() any
-	invoke   func(context.Context, any) (any, error)
+	definition EndpointDefinition
+	endpoint   Endpoint
+	msgType    reflect.Type
+	resType    reflect.Type
+	newReq     func() any
+	invoke     func(context.Context, any) (any, error)
 }
 
 // TypeRef describes a Go type in endpoint metadata for codegen/doc discovery.
@@ -131,11 +132,13 @@ func WithMiddleware(mw ...Middleware) Option {
 // Server provides a lightweight in memory RPC method registry and invoker.
 // Transport adapters can use this server to register and invoke command/query handlers.
 type Server struct {
-	mu              sync.RWMutex
-	endpoints       map[string]endpointEntry
-	middleware      []Middleware
-	failureStrategy FailureStrategy
-	failureLogger   FailureLogger
+	strictValidation   bool
+	registrationIssues map[ValidationIssue]struct{}
+	mu                 sync.RWMutex
+	endpoints          map[string]endpointEntry
+	middleware         []Middleware
+	failureStrategy    FailureStrategy
+	failureLogger      FailureLogger
 }
 
 // Resolver returns a command.Resolver that registers endpoint providers into this server.
@@ -172,17 +175,26 @@ func (s *Server) RegisterEndpoint(def EndpointDefinition) error {
 	if s == nil {
 		return fmt.Errorf("rpc server not configured")
 	}
-	if def == nil {
-		return s.handleRegisterFailure("", fmt.Errorf("rpc endpoint definition required"))
+	var spec EndpointSpec
+	var reqType, resType reflect.Type
+	if s.strictValidation {
+		var result EndpointValidation
+		spec, reqType, resType, result = inspectEndpoint(def)
+		if result.Status != ValidationValid {
+			s.recordRegistrationIssues(result.Issues)
+			return s.handleRegisterFailure(result.Method, &EndpointValidationError{Validation: result})
+		}
+	} else {
+		if def == nil {
+			return s.handleRegisterFailure("", fmt.Errorf("rpc endpoint definition required"))
+		}
+		spec = def.Spec()
+		if spec.Method == "" {
+			return s.handleRegisterFailure(spec.Method, fmt.Errorf("rpc method required"))
+		}
+		reqType, resType = def.RequestType(), def.ResponseType()
 	}
 
-	spec := def.Spec()
-	if spec.Method == "" {
-		return s.handleRegisterFailure(spec.Method, fmt.Errorf("rpc method required"))
-	}
-
-	reqType := def.RequestType()
-	resType := def.ResponseType()
 	handlerKind := string(spec.Kind)
 	if handlerKind == "" {
 		handlerKind = HandlerKindQuery
@@ -194,6 +206,7 @@ func (s *Server) RegisterEndpoint(def EndpointDefinition) error {
 	}
 
 	entry := endpointEntry{
+		definition: def,
 		endpoint: Endpoint{
 			Method:       spec.Method,
 			MessageType:  msgName,
@@ -220,6 +233,9 @@ func (s *Server) RegisterEndpoint(def EndpointDefinition) error {
 	}
 
 	if err := s.registerEndpointEntry(spec.Method, entry); err != nil {
+		if s.strictValidation {
+			s.recordRegistrationIssues([]ValidationIssue{validationIssue(spec.Method, IssueDuplicateMethod, ValidationInvalid, "method already registered")})
+		}
 		return s.handleRegisterFailure(spec.Method, err)
 	}
 	return nil

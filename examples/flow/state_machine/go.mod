@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/gofiber/fiber/v2 v2.52.13
-	github.com/goliatone/go-command v0.24.3
-	github.com/goliatone/go-router v0.63.3
+	github.com/goliatone/go-command v0.26.0
+	github.com/goliatone/go-router v0.64.0
 	github.com/google/uuid v1.6.0
 )
 
