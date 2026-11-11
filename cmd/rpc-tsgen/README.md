@@ -56,3 +56,42 @@ Exporting declarations does not register commands, authorize requests or enforce
 Typed server adapters decode original public payload bytes with `rpc.DecodeContractJSON[T]`,
 validate typed results with `rpc.ValidateContractValue`, and derive trusted context separately.
 Use Go string serialization for integers that cannot obey declared safe-number bounds.
+
+## Structural comparison
+
+```sh
+go run ./cmd/rpc-tsgen -mode compare -baseline before.json -manifest after.json -fail-on-breaking
+```
+
+This delegates to `rpccontract.Compare` and writes the shared versioned JSON report
+to stdout. It validates both manifests/fingerprints, compares old-client requests
+and new-server responses directionally, and reports unchanged, compatible, additive
+or potentially breaking changes. It does not establish semantic compatibility.
+See the [generator comparison contract](https://github.com/goliatone/go-generators#structural-rpc-comparison)
+for rules, limitations and report fields. `-out`, `--check` and `-export` are rejected
+in compare mode. Never redirect stdout over either input file.
+
+Without `-fail-on-breaking`, a valid comparison exits 0. With it, potentially
+breaking changes exit 1 after printing the complete report. Invalid input/flags
+also exit 1, with diagnostics on stderr. Generation/scaffold --check behavior is
+unchanged. The coordinated support boundary is documented in the
+[admin RPC guide](https://github.com/goliatone/go-admin/blob/main/docs/GUIDE_RPC.md#compatibility-and-support-boundary).
+
+### Unreleased provider development
+
+The comparison API is not in the currently published provider pin. The local,
+ignored `go.work` selects this checkout and the sibling `go-generators` source.
+Recreate it explicitly with `go work init . ../go-generators` if needed; do not
+commit a production module replacement. Use:
+
+```sh
+python3 examples/rpc/tsgen/full/verify.py --allow-local-generator
+```
+
+That flag requires the exact sibling provider and labels evidence as local. It
+verifies fresh Go exports, comparison parity and CI failure behavior, generation,
+strict TypeScript and the existing client. The default verifier requires a
+published provider and uses GOWORK=off. Before command publication, release the
+generator, update its module pin/checksum, remove this workspace and repeat the
+proof without the flag. GOWORK=off builds of this candidate CLI require that new
+provider; the old published pin cannot compile the new API call.

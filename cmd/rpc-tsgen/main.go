@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,12 +42,16 @@ func main() {
 	}
 }
 
-func run(args []string) error {
+func run(args []string) error { return runWithOutput(args, os.Stdout) }
+
+func runWithOutput(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("rpc-tsgen", flag.ContinueOnError)
 	manifestPath := flags.String("manifest", "", "path to endpoint metadata or full-contract manifest JSON")
 	outPath := flags.String("out", "client/src/gen/rpc-contract.ts", "output TypeScript file path")
 	exportName := flags.String("export", "rpcEndpointMeta", "scaffold endpoint metadata export name")
-	mode := flags.String("mode", "scaffold", "generation mode: scaffold or full")
+	mode := flags.String("mode", "scaffold", "mode: scaffold, full or compare")
+	baseline := flags.String("baseline", "", "baseline manifest for compare mode")
+	fail := flags.Bool("fail-on-breaking", false, "fail comparison when changes are potentially breaking")
 	check := flags.Bool("check", false, "check output drift without writing any files")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -54,6 +59,40 @@ func run(args []string) error {
 	// flag.Parse stops at positional arguments; do not silently ignore later flags.
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments: %q", flags.Args())
+	}
+	explicit := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if *mode == "compare" {
+		if *baseline == "" || *manifestPath == "" {
+			return fmt.Errorf("compare mode requires -baseline and -manifest")
+		}
+		if explicit["out"] || explicit["check"] || explicit["export"] {
+			return fmt.Errorf("compare mode rejects -out, --check and -export; report is stdout only")
+		}
+		before, err := os.ReadFile(*baseline)
+		if err != nil {
+			return err
+		}
+		after, err := os.ReadFile(*manifestPath)
+		if err != nil {
+			return err
+		}
+		report, err := rpccontract.Compare(before, after)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(output)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return err
+		}
+		if *fail && report.Classification == rpccontract.PotentiallyBreaking {
+			return fmt.Errorf("potentially breaking contract changes")
+		}
+		return nil
+	}
+	if explicit["baseline"] || explicit["fail-on-breaking"] {
+		return fmt.Errorf("-baseline and -fail-on-breaking require -mode compare")
 	}
 	if strings.TrimSpace(*manifestPath) != "" {
 		input, err := os.Stat(*manifestPath)
@@ -94,7 +133,7 @@ func run(args []string) error {
 			content, err = rpccontract.Generate(raw)
 		}
 	default:
-		return fmt.Errorf("unsupported mode %q: use scaffold or full", *mode)
+		return fmt.Errorf("unsupported mode %q: use scaffold, full or compare", *mode)
 	}
 	if err != nil {
 		return err
