@@ -735,7 +735,13 @@ and factory are unverifiable and strict registration rejects them. Custom
 validators must be side-effect free; returning no issues attests their own handler,
 type and factory invariants. The framework does not execute factories or prove
 arbitrary application behavior. Metadata/validator panics become safe unverifiable
-issues. Wrappers must explicitly implement or forward the optional capability if
+issues. Validation rejects leading/trailing whitespace in method identities;
+strict registration does not silently rename methods. Message-type inference is
+also guarded: when `EndpointSpec.MessageType` is empty, a custom request's `Type()`
+method must be safe on its zero value and side-effect free. Otherwise supply an
+explicit static `MessageType`. Inference panics produce unverifiable issues and
+follow the configured registration failure strategy without publishing the method.
+Wrappers must explicitly implement or forward the optional capability if
 they can substantiate it; embedding only `EndpointDefinition` does not forward it.
 
 Strict registration preserves failure strategies and skips invalid/unverifiable

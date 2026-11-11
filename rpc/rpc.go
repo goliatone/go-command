@@ -201,7 +201,7 @@ func (s *Server) RegisterEndpoint(def EndpointDefinition) error {
 	}
 
 	msgName := spec.MessageType
-	if msgName == "" {
+	if msgName == "" && !s.strictValidation {
 		msgName = messageTypeName(reqType)
 	}
 

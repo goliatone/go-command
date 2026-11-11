@@ -20,6 +20,7 @@ const (
 const (
 	IssueDefinitionRequired    = "definition_required"
 	IssueMethodRequired        = "method_required"
+	IssueMethodInvalid         = "method_invalid"
 	IssueRequestTypeRequired   = "request_type_required"
 	IssueResponseTypeRequired  = "response_type_required"
 	IssueRequestFactoryInvalid = "request_factory_invalid"
@@ -97,8 +98,10 @@ func inspectEndpoint(def EndpointDefinition) (spec EndpointSpec, req, res reflec
 	}
 	spec = def.Spec()
 	result.Method = spec.Method
-	if strings.TrimSpace(spec.Method) == "" {
+	if trimmed := strings.TrimSpace(spec.Method); trimmed == "" {
 		result.Issues = append(result.Issues, validationIssue(spec.Method, IssueMethodRequired, ValidationInvalid, "method identity required"))
+	} else if trimmed != spec.Method {
+		result.Issues = append(result.Issues, validationIssue(spec.Method, IssueMethodInvalid, ValidationInvalid, "method identity must not contain leading or trailing whitespace"))
 	}
 	req, res = def.RequestType(), def.ResponseType()
 	if req == nil {
@@ -113,6 +116,12 @@ func inspectEndpoint(def EndpointDefinition) (spec EndpointSpec, req, res reflec
 		result.Issues = append(result.Issues, validationIssue(spec.Method, IssueEndpointUnverifiable, ValidationUnverifiable, "custom handler and request factory are unverifiable"))
 	}
 	result = normalizeValidation(spec.Method, result.Issues)
+	if result.Status == ValidationValid && spec.MessageType == "" {
+		// Inference can call a custom request's Type method on its zero value.
+		// Keep it inside this guard and return the prepared metadata so strict
+		// registration never repeats it outside the validation failure path.
+		spec.MessageType = messageTypeName(req)
+	}
 	return
 }
 
