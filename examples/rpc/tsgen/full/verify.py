@@ -2,6 +2,8 @@
 """Prove actual Go export, comparison, TS generation and existing RPC client offline."""
 import argparse
 import hashlib
+import copy
+import time
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,16 @@ PROVIDER = 'github.com/goliatone/go-generators'
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def write_manifest(path, manifest):
+    manifest = copy.deepcopy(manifest)
+    manifest.pop('fingerprint', None)
+    canonical = json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    for a,b in [('&', r'\u0026'), ('<', r'\u003c'), ('>', r'\u003e'), ('\u2028', r'\u2028'), ('\u2029', r'\u2029')]:
+        canonical = canonical.replace(a,b)
+    manifest['fingerprint'] = 'sha256:' + hashlib.sha256(canonical.encode()).hexdigest()
+    path.write_text(json.dumps(manifest))
+    return path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -80,14 +92,7 @@ def main():
         before_files = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in [out/'manifest.json', second/'manifest.json', out/'contracts.ts']}
         changed = json.loads((second/'manifest.json').read_text())
         del changed['commands'][sorted(changed['commands'])[0]]
-        changed.pop('fingerprint')
-        canonical = json.dumps(changed, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-        # encoding/json escapes HTML and the two Unicode line separators.
-        for a,b in [('&', r'\u0026'), ('<', r'\u003c'), ('>', r'\u003e'), ('\u2028', r'\u2028'), ('\u2029', r'\u2029')]:
-            canonical = canonical.replace(a,b)
-        changed['fingerprint'] = 'sha256:' + hashlib.sha256(canonical.encode()).hexdigest()
-        candidate = work/'removed-command.json'
-        candidate.write_text(json.dumps(changed))
+        candidate = write_manifest(work/'removed-command.json', changed)
         comparison[-1] = candidate
         provider_comparison[-1] = candidate
         comparison_b = run(comparison)
@@ -112,6 +117,66 @@ def main():
                 raise RuntimeError('actual Go directional comparison failed: '+name)
             directional[name] = json.loads(wrapper_report)
         print('PASS: fresh Go comparison parity, breaking-change CI gate and nonmutation')
+        # Exercise the release-review regressions through the real CLI binaries.
+        # Building first keeps the runtime bound independent of Go compile time.
+        binaries = [work/'wrapper-compare', work/'provider-compare']
+        run(['go','build','-o',binaries[0],'./cmd/rpc-tsgen'])
+        run(['go','build','-o',binaries[1],PROVIDER+'/cmd/rpc-contract-ts'])
+        blocker_regressions = {}
+        def compare_pair(label, left, right, expected):
+            snapshots = {p:(p.read_bytes(),p.stat().st_mtime_ns) for p in [left,right]}
+            reports = []
+            for i,binary in enumerate(binaries):
+                argv = [binary] + (['-mode','compare'] if i == 0 else []) + ['-baseline',left,'-manifest',right,'-fail-on-breaking']
+                start = time.monotonic()
+                result = subprocess.run([str(x) for x in argv], cwd=ROOT, env=env, text=True, capture_output=True, timeout=5)
+                commands.append({'argv':[str(x) for x in argv], 'exitCode':result.returncode, 'expectedFailure':expected=='potentially_breaking', 'seconds':round(time.monotonic()-start,4)})
+                if result.returncode != (1 if expected=='potentially_breaking' else 0):
+                    raise RuntimeError('comparison regression exit: '+label+' '+result.stderr)
+                report = json.loads(result.stdout)
+                if report['classification'] != expected:
+                    raise RuntimeError('comparison regression classification: '+label)
+                reports.append(result.stdout)
+            if reports[0] != reports[1]:
+                raise RuntimeError('comparison regression CLI mismatch: '+label)
+            for p,state in snapshots.items():
+                if state != (p.read_bytes(),p.stat().st_mtime_ns):
+                    raise RuntimeError('comparison regression mutated input: '+label)
+            blocker_regressions[label] = json.loads(reports[0])
+            return blocker_regressions[label]
+
+        fresh = json.loads((out/'manifest.json').read_text())
+        custom = copy.deepcopy(fresh)
+        custom['definitions']['reviewLeaf'] = {'kind':'string'}
+        custom['definitions']['reviewAlias'] = {'kind':'ref','ref':'reviewLeaf'}
+        custom['canonical']['CustomContract'] = {'kind':'ref','ref':'reviewAlias'}
+        left = write_manifest(work/'custom-before.json',custom)
+        custom['definitions']['reviewLeaf'] = {'kind':'integer','minimum':0,'maximum':10}
+        right = write_manifest(work/'custom-after.json',custom)
+        report = compare_pair('unknownCanonicalReference',left,right,'potentially_breaking')
+        if not any(c['code']=='canonical_changed' and c['direction']=='unknown' for c in report['changes']):
+            raise RuntimeError('unknown canonical change was not identified')
+
+        dag = copy.deepcopy(fresh)
+        dag['definitions']['reviewLeaf'] = {'kind':'integer','minimum':0,'maximum':10}
+        ref = {'kind':'ref','ref':'reviewLeaf'}
+        for i in range(28):
+            name = 'reviewNode'+str(i)
+            dag['definitions'][name] = {'kind':'object','properties':{k:{'schema':ref,'required':True} for k in ['left','right']}}
+            ref = {'kind':'ref','ref':name}
+        dag['commands']['review.shared'] = {'input':ref,'result':ref,'resultMode':'optional'}
+        left = write_manifest(work/'dag-before.json',dag)
+        compare_pair('sharedGraphUnchanged',left,left,'unchanged')
+        dag['commands']['review.shared']['summary'] = 'Documentation change only'
+        right = write_manifest(work/'dag-meta.json',dag)
+        compare_pair('sharedGraphMetadata',left,right,'compatible')
+        del dag['commands']['review.shared']['summary']
+        dag['definitions']['reviewLeaf']['maximum'] = 20
+        right = write_manifest(work/'dag-changed.json',dag)
+        report = compare_pair('sharedGraphChanged',left,right,'potentially_breaking')
+        if len(report['changes']) != 2 or {c['direction']:c['classification'] for c in report['changes']} != {'request':'compatible','response':'potentially_breaking'}:
+            raise RuntimeError('shared graph findings are unbounded or conflate directions')
+        print('PASS: both blocker regressions through both CLIs; bounded shared graphs and nonmutation')
         wire = json.loads((out/'wire.json').read_text())
         bindings = {'wireEdgesInput':'CommandInputs["example.wire_edges"]', 'wireEdgesRequest':'MethodRequests["example.wire_edges"]', 'wireEdgesResponse':'SuccessEnvelope<MethodOutputs["example.wire_edges"]>', 'input':'CommandInputs["example.echo"]', 'inputMin':'CommandInputs["example.echo"]', 'request':'MethodRequests["example.echo"]', 'dispatchRequest':'DispatchRequest<"example.echo">', 'dispatchInline':'SuccessEnvelope<DispatchResponse<"example.echo">>', 'dispatchQueued':'SuccessEnvelope<DispatchResponse<"example.echo">>', 'dispatchFailure':'SuccessEnvelope<DispatchResponse<"example.echo">>', 'object':'SuccessEnvelope<MethodOutputs["example.echo"]>', 'presentNull':'SuccessEnvelope<MethodOutputs["example.nullable"]>'}
         for name, method in {'presentFalse':'boolean', 'presentZero':'number', 'presentEmpty':'string', 'presentSlice':'slice', 'presentMap':'map', 'omittedFalse':'boolean', 'omittedZero':'number', 'omittedEmpty':'string', 'omittedNil':'slice', 'omittedSlice':'slice', 'omittedMap':'map'}.items():
@@ -128,7 +193,7 @@ def main():
         shutil.copyfile(HERE/'runtime.cjs', work/'js/runtime.cjs')
         print(run(['node', work/'js/runtime.cjs', out/'wire.json', client]).strip())
         files = [ROOT/'go.mod', ROOT/'go.sum', *ROOT.glob('*.go'), *ROOT.glob('runner/*.go'), *ROOT.glob('rpc/*.go'), *ROOT.glob('cmd/rpc-tsgen/*.go'), *ROOT.glob('examples/rpc/tsgen/fixture/*.go'), *ROOT.glob('examples/rpc/tsgen/export/*.go'), *ROOT.glob('examples/rpc/tsgen/compare-export/*.go'), *HERE.glob('*'), ROOT/'client/src/rpc_client.ts', ROOT/'client/src/http_rpc_client.ts']
-        record = {'status':'PASS', 'publishedProvider':published, 'selectedProvider':module, 'providerSourceSHA256':{str(p.relative_to(Path(module['Dir']))):digest(p) for pattern in ['rpccontract/*.go','cmd/rpc-contract-ts/*.go'] for p in sorted(Path(module['Dir']).glob(pattern))}, 'localProvider':args.allow_local_generator, 'developmentWorkspaceSHA256':digest(ROOT/'go.work') if args.allow_local_generator else None, 'producerChecks':checks, 'comparisons':{'unchanged':json.loads(comparison_a),'removedCommand':json.loads(comparison_b), 'actualGoVariants':directional}, 'artifacts':{name:digest(out/name) for name in ['manifest.json','wire.json','checks.json','contracts.ts','wire.ts']}, 'sourceSHA256':{str(p.relative_to(ROOT)):digest(p) for p in sorted(files) if p.is_file()}, 'commands':commands, 'environment':{k:env[k] for k in ['GOWORK','GOPROXY','GOSUMDB','GOFLAGS']}, 'typescript':ts_version, 'go':run(['go','version']).strip(), 'node':run(['node','--version']).strip(), 'scope':('Local provider candidate' if args.allow_local_generator else 'Published provider') + '; current command exporter/CLI, strict TS and existing HTTPRPCClient. No published command or protected live HTTP claim.'}
+        record = {'status':'PASS', 'publishedProvider':published, 'selectedProvider':module, 'providerSourceSHA256':{str(p.relative_to(Path(module['Dir']))):digest(p) for pattern in ['rpccontract/*.go','cmd/rpc-contract-ts/*.go'] for p in sorted(Path(module['Dir']).glob(pattern))}, 'localProvider':args.allow_local_generator, 'developmentWorkspaceSHA256':digest(ROOT/'go.work') if args.allow_local_generator else None, 'producerChecks':checks, 'comparisons':{'unchanged':json.loads(comparison_a),'removedCommand':json.loads(comparison_b), 'actualGoVariants':directional, 'blockerRegressions':blocker_regressions}, 'artifacts':{name:digest(out/name) for name in ['manifest.json','wire.json','checks.json','contracts.ts','wire.ts']}, 'sourceSHA256':{str(p.relative_to(ROOT)):digest(p) for p in sorted(files) if p.is_file()}, 'commands':commands, 'environment':{k:env[k] for k in ['GOWORK','GOPROXY','GOSUMDB','GOFLAGS']}, 'typescript':ts_version, 'go':run(['go','version']).strip(), 'node':run(['node','--version']).strip(), 'scope':('Local provider candidate' if args.allow_local_generator else 'Published provider') + '; current command exporter/CLI, strict TS and existing HTTPRPCClient. No published command or protected live HTTP claim.'}
         if args.record:
             args.record.write_text(json.dumps(record, indent=2)+'\n')
         print('PASS: selected emitter parity, non-writing wrapper check, strict positive/negative TS and existing-client integration')

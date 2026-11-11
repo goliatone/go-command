@@ -17,8 +17,8 @@ github.com/go-ozzo/ozzo-validation/v4 v4.3.0 h1:byhDUpfEwjsVQb1vBunvIjh2BHQ9ead5
 github.com/go-ozzo/ozzo-validation/v4 v4.3.0/go.mod h1:2NKgrcHl3z6cJs+3Oo940FPRiTzuqKbvfrL2RxCj6Ew=
 github.com/goliatone/go-errors v0.12.0 h1:FI3FHJe+sogfD+MZJqx8OVGDJqav5PNq1xi1UAXjBwk=
 github.com/goliatone/go-errors v0.12.0/go.mod h1:LvR8nteHvrUTbS6N7Gm/2of9yRyyLoxIB4VFPk+wkVU=
-github.com/goliatone/go-generators v0.19.0 h1:jC0YtAUcQtnz5d9K09waKBsCOktZZg6x+1Um8Fu1Jmg=
-github.com/goliatone/go-generators v0.19.0/go.mod h1:4NC8CE0pGDpq2uOeteXC73rsoPKvqUjsXySedxlgaO8=
+github.com/goliatone/go-generators v0.19.1 h1:XcNU+InaQVi8kA+KimY1qZBcwo5wyHPt4c1B0bYMIec=
+github.com/goliatone/go-generators v0.19.1/go.mod h1:4NC8CE0pGDpq2uOeteXC73rsoPKvqUjsXySedxlgaO8=
 github.com/goliatone/go-logger v0.10.1 h1:Ir8j/d5nttxRVkjfqYWhPzRSwLpKWhps/l59QGMdQFQ=
 github.com/goliatone/go-logger v0.10.1/go.mod h1:hWv7Tj+af3E0vjJIHR52JmmK3jKk6rCKFtvhCC/3jXE=
 github.com/goliatone/go-masker v0.2.0 h1:M+Xx+AVJqTpNCQNPrPgVL6ft7oao5oT+/jQ+G8XCYVg=
