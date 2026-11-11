@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.27.1](https://github.com/goliatone/go-command/compare/v0.27.0...v0.27.1) - (2026-11-11)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.27.1 ([8f11f5a](https://github.com/goliatone/go-command/commit/8f11f5a4b518e3e5cc57ed80e8b14f6d4c1e28a0))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.27.0 ([7855159](https://github.com/goliatone/go-command/commit/7855159d446bf222c3f35e035dd1dc5bfe916694))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Udpate deps ([e4b01ee](https://github.com/goliatone/go-command/commit/e4b01ee1fa5e6e141b3d056587ea7a8739248f17))  - (goliatone)
+
 # [0.27.0](https://github.com/goliatone/go-command/compare/v0.26.1...v0.27.0) - (2026-11-11)
 
 ## <!-- 13 -->📦 Bumps
